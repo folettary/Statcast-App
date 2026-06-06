@@ -1,0 +1,11 @@
+Text you can send once you have the APK:
+
+Hey Dad — I made you a little MLB Statcast app.
+
+1. Tap the APK file I sent you.
+2. Android may ask if you want to allow installs from this app/source. Tap allow.
+3. Install it.
+4. Open “Statcast Compare.”
+5. Type a player name, select the player, then tap Compare.
+
+It needs internet, but it runs directly on the phone. It is not in the Play Store, so Android may show a warning because I built it myself.
