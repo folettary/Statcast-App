@@ -12,6 +12,24 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v4
 
+      - name: Apply v3 phone update ZIP if present
+        run: |
+          set -e
+          if [ -f statcast-v3-phone-fix.zip ]; then
+            echo "Found statcast-v3-phone-fix.zip. Applying v3 files before build..."
+            rm -rf /tmp/statcast-v3-phone-fix
+            mkdir -p /tmp/statcast-v3-phone-fix
+            unzip -o statcast-v3-phone-fix.zip -d /tmp/statcast-v3-phone-fix
+            cp /tmp/statcast-v3-phone-fix/MainActivity.java app/src/main/java/com/folettary/statcastcompare/MainActivity.java
+            cp /tmp/statcast-v3-phone-fix/build.gradle app/build.gradle
+            echo "Checking v3 markers..."
+            grep -n "Luck" app/src/main/java/com/folettary/statcastcompare/MainActivity.java
+            grep -n "ComparisonBarView" app/src/main/java/com/folettary/statcastcompare/MainActivity.java
+            grep -n "versionName '3.0.0'" app/build.gradle
+          else
+            echo "No statcast-v3-phone-fix.zip found. Building files already in repo."
+          fi
+
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
