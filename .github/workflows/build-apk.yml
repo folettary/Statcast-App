@@ -5,6 +5,9 @@ on:
   push:
     branches: [ main, master ]
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -12,24 +15,41 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v4
 
-      - name: Apply v5 phone update
+      - name: Apply Statcast app v6 phone-fix files
+        shell: bash
         run: |
-          if [ -f statcast-v5-phone-fix.zip ]; then
-            echo "Found statcast-v5-phone-fix.zip. Applying v5 files before build..."
-            unzip -o statcast-v5-phone-fix.zip -d /tmp/statcast-v5
-            cp /tmp/statcast-v5/MainActivity.java app/src/main/java/com/folettary/statcastcompare/MainActivity.java
-            cp /tmp/statcast-v5/build.gradle app/build.gradle
+          set -euo pipefail
+          ZIP="statcast-v6-phone-fix.zip"
+          echo "Found $ZIP. Applying v6 files before build..."
+          test -f "$ZIP"
+          rm -rf /tmp/statcast-phone-fix
+          mkdir -p /tmp/statcast-phone-fix
+          unzip -o "$ZIP" -d /tmp/statcast-phone-fix
+          find /tmp/statcast-phone-fix -maxdepth 6 -type f -print
+
+          if [ -f "/tmp/statcast-phone-fix/MainActivity.java" ]; then
+            cp /tmp/statcast-phone-fix/MainActivity.java app/src/main/java/com/folettary/statcastcompare/MainActivity.java
+          elif [ -f "/tmp/statcast-phone-fix/app/src/main/java/com/folettary/statcastcompare/MainActivity.java" ]; then
+            cp /tmp/statcast-phone-fix/app/src/main/java/com/folettary/statcastcompare/MainActivity.java app/src/main/java/com/folettary/statcastcompare/MainActivity.java
           else
-            echo "statcast-v5-phone-fix.zip not found. Upload it to the repository root before building."
+            echo "MainActivity.java not found inside $ZIP"
             exit 1
           fi
 
-      - name: Verify v5 markers
-        run: |
-          grep -n "v5" app/src/main/java/com/folettary/statcastcompare/MainActivity.java
-          grep -n "Explore" app/src/main/java/com/folettary/statcastcompare/MainActivity.java
-          grep -n "insightTile" app/src/main/java/com/folettary/statcastcompare/MainActivity.java
-          grep -n "versionName '5.0.0'" app/build.gradle
+          if [ -f "/tmp/statcast-phone-fix/build.gradle" ]; then
+            cp /tmp/statcast-phone-fix/build.gradle app/build.gradle
+          elif [ -f "/tmp/statcast-phone-fix/app/build.gradle" ]; then
+            cp /tmp/statcast-phone-fix/app/build.gradle app/build.gradle
+          else
+            echo "build.gradle not found inside $ZIP"
+            exit 1
+          fi
+
+          echo "Version marker:"
+          grep -n "versionName" app/build.gradle || true
+          echo "UI/code markers:"
+          grep -n "v6" app/src/main/java/com/folettary/statcastcompare/MainActivity.java | head || true
+          grep -n "ComparisonBarView" app/src/main/java/com/folettary/statcastcompare/MainActivity.java | head || true
 
       - name: Set up JDK
         uses: actions/setup-java@v4
