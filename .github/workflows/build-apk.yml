@@ -12,23 +12,24 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v4
 
-      - name: Apply v4 phone update ZIP if present
+      - name: Apply v5 phone update
         run: |
-          set -e
-          if [ -f statcast-v4-phone-fix.zip ]; then
-            echo "Found statcast-v4-phone-fix.zip. Applying v4 files before build..."
-            rm -rf /tmp/statcast-v4-phone-fix
-            mkdir -p /tmp/statcast-v4-phone-fix
-            unzip -o statcast-v4-phone-fix.zip -d /tmp/statcast-v4-phone-fix
-            cp /tmp/statcast-v4-phone-fix/MainActivity.java app/src/main/java/com/folettary/statcastcompare/MainActivity.java
-            cp /tmp/statcast-v4-phone-fix/build.gradle app/build.gradle
-            echo "Checking v4 markers..."
-            grep -n "Stats shown:" app/src/main/java/com/folettary/statcastcompare/MainActivity.java
-            grep -n "showMetricPicker" app/src/main/java/com/folettary/statcastcompare/MainActivity.java
-            grep -n "versionName '4.0.0'" app/build.gradle
+          if [ -f statcast-v5-phone-fix.zip ]; then
+            echo "Found statcast-v5-phone-fix.zip. Applying v5 files before build..."
+            unzip -o statcast-v5-phone-fix.zip -d /tmp/statcast-v5
+            cp /tmp/statcast-v5/MainActivity.java app/src/main/java/com/folettary/statcastcompare/MainActivity.java
+            cp /tmp/statcast-v5/build.gradle app/build.gradle
           else
-            echo "No statcast-v4-phone-fix.zip found. Building files already in repo."
+            echo "statcast-v5-phone-fix.zip not found. Upload it to the repository root before building."
+            exit 1
           fi
+
+      - name: Verify v5 markers
+        run: |
+          grep -n "v5" app/src/main/java/com/folettary/statcastcompare/MainActivity.java
+          grep -n "Explore" app/src/main/java/com/folettary/statcastcompare/MainActivity.java
+          grep -n "insightTile" app/src/main/java/com/folettary/statcastcompare/MainActivity.java
+          grep -n "versionName '5.0.0'" app/build.gradle
 
       - name: Set up JDK
         uses: actions/setup-java@v4
