@@ -8,15 +8,17 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.res.ColorStateList;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.*;
-import android.text.Editable;
-import android.text.TextWatcher;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -35,54 +37,78 @@ import java.util.concurrent.Executors;
 
 public class MainActivity extends Activity {
     private static final int STATCAST_START_YEAR = 2015;
-    private static final int NAVY = Color.rgb(11, 21, 52);
-    private static final int TEAL = Color.rgb(17, 181, 164);
+    private static final int NAVY = Color.rgb(10, 23, 55);
+    private static final int NAVY_2 = Color.rgb(21, 53, 97);
+    private static final int TEAL = Color.rgb(13, 178, 163);
+    private static final int TEAL_DARK = Color.rgb(0, 125, 115);
     private static final int SALMON = Color.rgb(255, 122, 107);
-    private static final int BG = Color.rgb(244, 247, 251);
-    private static final int INK = Color.rgb(25, 31, 44);
-    private static final int MUTED = Color.rgb(97, 106, 122);
+    private static final int AMBER = Color.rgb(255, 190, 89);
+    private static final int BG = Color.rgb(242, 246, 251);
+    private static final int INK = Color.rgb(22, 29, 43);
+    private static final int MUTED = Color.rgb(94, 105, 124);
+    private static final int LINE = Color.rgb(221, 229, 241);
     private static final int CARD = Color.WHITE;
 
-    private final ExecutorService io = Executors.newFixedThreadPool(6);
+    private final ExecutorService io = Executors.newFixedThreadPool(8);
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Map<String, String> textCache = Collections.synchronizedMap(new HashMap<>());
+    private final Map<String, Bitmap> imageCache = Collections.synchronizedMap(new HashMap<>());
+    private final Map<Integer, ArrayList<LeaderboardEntry>> leaderboardCache = Collections.synchronizedMap(new HashMap<>());
 
     private LinearLayout root;
+    private LinearLayout form;
+    private Button playerModeButton;
+    private Button teamModeButton;
     private EditText searchInput;
     private ListView suggestionsList;
-    private TextView selectedLabel;
+    private Spinner teamSpinner;
     private Spinner seasonSpinner;
+    private Spinner rankMetricSpinner;
     private Button compareButton;
+    private Button standingsButton;
     private ProgressBar loading;
+    private TextView statusView;
     private TextView errorView;
+    private LinearLayout filterBox;
     private LinearLayout resultsBox;
-    private TextView resultTitle;
-    private TextView resultMeta;
+    private LinearLayout headerBox;
     private LinearLayout metricBox;
+    private LinearLayout standingsBox;
     private Button copyButton;
 
     private final ArrayList<Player> allPlayers = new ArrayList<>();
     private final ArrayList<Player> filteredPlayers = new ArrayList<>();
+    private final ArrayList<Team> allTeams = new ArrayList<>();
     private ArrayAdapter<String> suggestionsAdapter;
+    private ArrayAdapter<String> teamAdapter;
     private Player selectedPlayer;
+    private Team selectedTeam;
+    private boolean teamMode = false;
     private Comparison lastComparison;
+    private String lastStandingsText = "";
+
+    private final LinkedHashSet<String> selectedMetricKeys = new LinkedHashSet<>();
+    private final Map<String, CheckBox> metricChecks = new LinkedHashMap<>();
 
     private final Metric[] metrics = new Metric[] {
-            new Metric("avgEV", "Avg Exit Velocity", "mph", 1, true, "contact"),
-            new Metric("avgLA", "Avg Launch Angle", "°", 1, null, "contact"),
-            new Metric("hardHitPct", "Hard-Hit Rate", "%", 1, true, "rate"),
-            new Metric("barrelPct", "Barrel Rate", "%", 1, true, "rate"),
-            new Metric("sweetSpotPct", "Sweet-Spot Rate", "%", 1, true, "rate"),
-            new Metric("xBA", "xBA", "", 3, true, "expected"),
-            new Metric("xSLG", "xSLG", "", 3, true, "expected"),
-            new Metric("xwOBA", "xwOBA", "", 3, true, "expected")
+            new Metric("xwOBA", "xwOBA", "", 3, true, "expected", "Expected"),
+            new Metric("xBA", "xBA", "", 3, true, "expected", "Expected"),
+            new Metric("xSLG", "xSLG", "", 3, true, "expected", "Expected"),
+            new Metric("avgEV", "Avg EV", " mph", 1, true, "contact", "Contact"),
+            new Metric("avgLA", "Launch Angle", "°", 1, null, "contact", "Contact"),
+            new Metric("hardHitPct", "Hard-Hit %", "%", 1, true, "rate", "Contact"),
+            new Metric("barrelPct", "Barrel %", "%", 1, true, "rate", "Contact"),
+            new Metric("sweetSpotPct", "Sweet-Spot %", "%", 1, true, "rate", "Contact"),
+            new Metric("kPct", "K %", "%", 1, false, "rate", "Discipline"),
+            new Metric("bbPct", "BB %", "%", 1, true, "rate", "Discipline")
     };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        for (Metric m : metrics) selectedMetricKeys.add(m.key);
         buildUi();
-        loadPlayers();
+        loadTeamsAndPlayers();
     }
 
     private void buildUi() {
@@ -92,33 +118,50 @@ public class MainActivity extends Activity {
 
         root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(16), dp(18), dp(16), dp(28));
+        root.setPadding(dp(14), dp(16), dp(14), dp(28));
         scroll.addView(root, new ScrollView.LayoutParams(-1, -2));
         setContentView(scroll);
 
-        LinearLayout hero = verticalCard(22, new int[] { NAVY, Color.rgb(21, 51, 89) });
-        hero.setPadding(dp(18), dp(18), dp(18), dp(18));
+        LinearLayout hero = verticalCard(26, new int[] { NAVY, NAVY_2, Color.rgb(12, 88, 98) });
+        hero.setPadding(dp(18), dp(18), dp(18), dp(16));
         root.addView(hero, matchWrap());
 
-        TextView eyebrow = text("LIVE STATCAST", 12, Color.rgb(173, 241, 234), true);
+        TextView eyebrow = text("LIVE MLB + STATCAST", 12, Color.rgb(181, 247, 239), true);
         eyebrow.setLetterSpacing(0.12f);
         hero.addView(eyebrow);
 
-        TextView title = text("MLB Statcast Compare", 30, Color.WHITE, true);
-        title.setPadding(0, dp(7), 0, dp(4));
+        TextView title = text("Statcast Compare", 31, Color.WHITE, true);
+        title.setPadding(0, dp(6), 0, dp(4));
         hero.addView(title);
 
-        TextView subtitle = text("Pick a hitter and compare this season against league average and his Statcast-era career.", 15, Color.rgb(219, 228, 246), false);
+        TextView subtitle = text("Compact player and team comparisons, visual standings, and faster season-level loading.", 15, Color.rgb(220, 230, 247), false);
         subtitle.setLineSpacing(dp(2), 1.0f);
         hero.addView(subtitle);
 
-        LinearLayout form = verticalCard(22, null);
+        LinearLayout heroPills = new LinearLayout(this);
+        heroPills.setOrientation(LinearLayout.HORIZONTAL);
+        heroPills.setPadding(0, dp(14), 0, 0);
+        heroPills.addView(heroPill("Players"), weightLp());
+        heroPills.addView(heroPill("Teams"), weightLp());
+        heroPills.addView(heroPill("Standings"), weightLp());
+        hero.addView(heroPills);
+
+        form = verticalCard(24, null);
         form.setPadding(dp(14), dp(14), dp(14), dp(14));
         LinearLayout.LayoutParams formLp = matchWrap();
         formLp.setMargins(0, dp(14), 0, 0);
         root.addView(form, formLp);
 
-        TextView searchLabel = text("Player", 13, MUTED, true);
+        LinearLayout modeRow = new LinearLayout(this);
+        modeRow.setOrientation(LinearLayout.HORIZONTAL);
+        playerModeButton = pillButton("Player", true);
+        teamModeButton = pillButton("Team", false);
+        modeRow.addView(playerModeButton, weightLp());
+        modeRow.addView(teamModeButton, weightLp());
+        form.addView(modeRow, matchWrap());
+
+        TextView searchLabel = text("Search", 13, MUTED, true);
+        searchLabel.setPadding(0, dp(12), 0, 0);
         form.addView(searchLabel);
 
         searchInput = new EditText(this);
@@ -126,7 +169,7 @@ public class MainActivity extends Activity {
         searchInput.setSingleLine(true);
         searchInput.setTextSize(17);
         searchInput.setPadding(dp(12), dp(10), dp(12), dp(10));
-        searchInput.setBackground(roundedStroke(Color.WHITE, Color.rgb(207, 217, 231), 14, 1));
+        searchInput.setBackground(roundedStroke(Color.WHITE, Color.rgb(207, 217, 231), 15, 1));
         LinearLayout.LayoutParams inputLp = matchWrap();
         inputLp.setMargins(0, dp(6), 0, dp(8));
         form.addView(searchInput, inputLp);
@@ -137,33 +180,76 @@ public class MainActivity extends Activity {
         suggestionsList.setVisibility(View.GONE);
         suggestionsList.setDividerHeight(1);
         suggestionsList.setBackground(roundedStroke(Color.WHITE, Color.rgb(230, 235, 244), 14, 1));
-        form.addView(suggestionsList, new LinearLayout.LayoutParams(-1, dp(190)));
+        form.addView(suggestionsList, new LinearLayout.LayoutParams(-1, dp(180)));
 
-        selectedLabel = text("Loading active MLB players…", 13, MUTED, false);
-        selectedLabel.setPadding(0, dp(8), 0, dp(10));
-        form.addView(selectedLabel);
+        teamSpinner = new Spinner(this);
+        teamAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, new ArrayList<>());
+        teamSpinner.setAdapter(teamAdapter);
+        teamSpinner.setVisibility(View.GONE);
+        form.addView(teamSpinner, matchWrap());
 
-        TextView seasonLabel = text("Season", 13, MUTED, true);
-        form.addView(seasonLabel);
+        statusView = text("Loading MLB teams and active players…", 13, MUTED, false);
+        statusView.setPadding(0, dp(8), 0, dp(10));
+        form.addView(statusView);
 
+        LinearLayout seasonRankRow = new LinearLayout(this);
+        seasonRankRow.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout seasonCol = new LinearLayout(this);
+        seasonCol.setOrientation(LinearLayout.VERTICAL);
+        seasonCol.addView(text("Season", 13, MUTED, true));
         seasonSpinner = new Spinner(this);
         ArrayList<String> years = new ArrayList<>();
         int currentYear = Calendar.getInstance().get(Calendar.YEAR);
         for (int y = currentYear; y >= STATCAST_START_YEAR; y--) years.add(String.valueOf(y));
         ArrayAdapter<String> yearAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, years);
         seasonSpinner.setAdapter(yearAdapter);
-        form.addView(seasonSpinner, matchWrap());
+        seasonCol.addView(seasonSpinner, matchWrap());
 
+        LinearLayout rankCol = new LinearLayout(this);
+        rankCol.setOrientation(LinearLayout.VERTICAL);
+        rankCol.addView(text("Rank by", 13, MUTED, true));
+        rankMetricSpinner = new Spinner(this);
+        ArrayList<String> metricLabels = new ArrayList<>();
+        for (Metric m : metrics) metricLabels.add(m.label);
+        ArrayAdapter<String> rankAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, metricLabels);
+        rankMetricSpinner.setAdapter(rankAdapter);
+        rankCol.addView(rankMetricSpinner, matchWrap());
+
+        seasonRankRow.addView(seasonCol, weightLp());
+        seasonRankRow.addView(rankCol, weightLp());
+        form.addView(seasonRankRow, matchWrap());
+
+        filterBox = new LinearLayout(this);
+        filterBox.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams filterLp = matchWrap();
+        filterLp.setMargins(0, dp(8), 0, 0);
+        form.addView(filterBox, filterLp);
+        buildMetricFilters();
+
+        LinearLayout actionRow = new LinearLayout(this);
+        actionRow.setOrientation(LinearLayout.VERTICAL);
         compareButton = new Button(this);
-        compareButton.setText("Compare Statcast numbers");
+        compareButton.setText("Compare player");
         compareButton.setTextColor(Color.WHITE);
         compareButton.setTextSize(16);
         compareButton.setAllCaps(false);
         compareButton.setTypeface(Typeface.DEFAULT_BOLD);
         compareButton.setBackground(rounded(TEAL, 16));
         LinearLayout.LayoutParams btnLp = matchWrap();
-        btnLp.setMargins(0, dp(14), 0, 0);
-        form.addView(compareButton, btnLp);
+        btnLp.setMargins(0, dp(12), 0, 0);
+        actionRow.addView(compareButton, btnLp);
+
+        standingsButton = new Button(this);
+        standingsButton.setText("Show player standings");
+        standingsButton.setTextColor(NAVY);
+        standingsButton.setTextSize(15);
+        standingsButton.setAllCaps(false);
+        standingsButton.setTypeface(Typeface.DEFAULT_BOLD);
+        standingsButton.setBackground(roundedStroke(Color.WHITE, Color.rgb(199, 213, 229), 16, 1));
+        LinearLayout.LayoutParams stLp = matchWrap();
+        stLp.setMargins(0, dp(8), 0, 0);
+        actionRow.addView(standingsButton, stLp);
+        form.addView(actionRow, matchWrap());
 
         loading = new ProgressBar(this);
         loading.setVisibility(View.GONE);
@@ -172,7 +258,7 @@ public class MainActivity extends Activity {
         loadLp.setMargins(0, dp(14), 0, 0);
         form.addView(loading, loadLp);
 
-        errorView = text("", 14, Color.rgb(174, 55, 70), false);
+        errorView = text("", 14, Color.rgb(180, 54, 70), false);
         errorView.setPadding(0, dp(12), 0, 0);
         errorView.setVisibility(View.GONE);
         form.addView(errorView);
@@ -184,34 +270,115 @@ public class MainActivity extends Activity {
         resultsLp.setMargins(0, dp(16), 0, 0);
         root.addView(resultsBox, resultsLp);
 
-        resultTitle = text("", 24, INK, true);
-        resultsBox.addView(resultTitle);
-        resultMeta = text("", 13, MUTED, false);
-        resultMeta.setPadding(0, dp(4), 0, dp(12));
-        resultsBox.addView(resultMeta);
+        headerBox = new LinearLayout(this);
+        headerBox.setOrientation(LinearLayout.VERTICAL);
+        resultsBox.addView(headerBox, matchWrap());
 
         copyButton = new Button(this);
-        copyButton.setText("Copy comparison table");
+        copyButton.setText("Copy current table");
         copyButton.setAllCaps(false);
         copyButton.setTextColor(NAVY);
         copyButton.setBackground(roundedStroke(Color.WHITE, Color.rgb(203, 214, 228), 14, 1));
-        resultsBox.addView(copyButton, matchWrap());
+        LinearLayout.LayoutParams copyLp = matchWrap();
+        copyLp.setMargins(0, dp(8), 0, dp(8));
+        resultsBox.addView(copyButton, copyLp);
 
         metricBox = new LinearLayout(this);
         metricBox.setOrientation(LinearLayout.VERTICAL);
-        LinearLayout.LayoutParams metricsLp = matchWrap();
-        metricsLp.setMargins(0, dp(10), 0, 0);
-        resultsBox.addView(metricBox, metricsLp);
+        resultsBox.addView(metricBox, matchWrap());
 
-        TextView notes = text("Notes: career means Statcast-era career, 2015–present. Player values are computed from Statcast Search rows; league average uses the Baseball Savant custom leaderboard when available.", 12, MUTED, false);
+        standingsBox = new LinearLayout(this);
+        standingsBox.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams standingsLp = matchWrap();
+        standingsLp.setMargins(0, dp(14), 0, 0);
+        root.addView(standingsBox, standingsLp);
+
+        TextView notes = text("Notes: leaderboard values come from season-level Baseball Savant CSV data. Career/team history is Statcast-era, 2015 through the selected season. Standings use a practical minimum PA/BBE filter so the list is not dominated by tiny samples.", 12, MUTED, false);
         notes.setLineSpacing(dp(2), 1.0f);
-        notes.setPadding(0, dp(14), 0, 0);
-        resultsBox.addView(notes);
+        notes.setPadding(0, dp(16), 0, 0);
+        root.addView(notes);
 
         wireEvents();
     }
 
+    private TextView heroPill(String label) {
+        TextView tv = text(label, 12, Color.WHITE, true);
+        tv.setGravity(Gravity.CENTER);
+        tv.setPadding(dp(8), dp(9), dp(8), dp(9));
+        tv.setBackground(roundedStroke(Color.argb(38, 255, 255, 255), Color.argb(80, 255, 255, 255), 16, 1));
+        return tv;
+    }
+
+    private Button pillButton(String label, boolean active) {
+        Button b = new Button(this);
+        b.setText(label);
+        b.setAllCaps(false);
+        b.setTypeface(Typeface.DEFAULT_BOLD);
+        b.setTextColor(active ? Color.WHITE : NAVY);
+        b.setBackground(active ? rounded(NAVY, 16) : roundedStroke(Color.WHITE, LINE, 16, 1));
+        return b;
+    }
+
+    private void buildMetricFilters() {
+        filterBox.removeAllViews();
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        top.addView(text("Stats shown", 13, MUTED, true), new LinearLayout.LayoutParams(0, -2, 1));
+        TextView all = text("All", 13, TEAL_DARK, true);
+        all.setGravity(Gravity.CENTER);
+        all.setPadding(dp(12), dp(6), dp(12), dp(6));
+        all.setBackground(roundedStroke(Color.WHITE, LINE, 14, 1));
+        all.setOnClickListener(v -> {
+            selectedMetricKeys.clear();
+            for (Metric m : metrics) selectedMetricKeys.add(m.key);
+            for (CheckBox cb : metricChecks.values()) cb.setChecked(true);
+            refreshCurrentResults();
+        });
+        TextView none = text("Clear", 13, MUTED, true);
+        none.setGravity(Gravity.CENTER);
+        none.setPadding(dp(12), dp(6), dp(12), dp(6));
+        none.setBackground(roundedStroke(Color.WHITE, LINE, 14, 1));
+        none.setOnClickListener(v -> {
+            selectedMetricKeys.clear();
+            for (CheckBox cb : metricChecks.values()) cb.setChecked(false);
+            refreshCurrentResults();
+        });
+        top.addView(all);
+        LinearLayout.LayoutParams noneLp = new LinearLayout.LayoutParams(-2, -2);
+        noneLp.setMargins(dp(6), 0, 0, 0);
+        top.addView(none, noneLp);
+        filterBox.addView(top, matchWrap());
+
+        HorizontalScrollView hsv = new HorizontalScrollView(this);
+        hsv.setHorizontalScrollBarEnabled(false);
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setPadding(0, dp(6), 0, 0);
+        metricChecks.clear();
+        for (Metric m : metrics) {
+            CheckBox cb = new CheckBox(this);
+            cb.setText(m.label);
+            cb.setTextColor(INK);
+            cb.setTextSize(13);
+            cb.setChecked(true);
+            cb.setButtonTintList(ColorStateList.valueOf(TEAL));
+            cb.setPadding(dp(2), 0, dp(10), 0);
+            cb.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                if (isChecked) selectedMetricKeys.add(m.key); else selectedMetricKeys.remove(m.key);
+                refreshCurrentResults();
+            });
+            metricChecks.put(m.key, cb);
+            row.addView(cb);
+        }
+        hsv.addView(row);
+        filterBox.addView(hsv, matchWrap());
+    }
+
     private void wireEvents() {
+        playerModeButton.setOnClickListener(v -> setMode(false));
+        teamModeButton.setOnClickListener(v -> setMode(true));
+
         searchInput.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) { filterPlayers(s.toString()); }
@@ -224,37 +391,66 @@ public class MainActivity extends Activity {
                 searchInput.setText(selectedPlayer.fullName);
                 searchInput.setSelection(searchInput.getText().length());
                 suggestionsList.setVisibility(View.GONE);
-                selectedLabel.setText(selectedPlayer.fullName + " · " + selectedPlayer.team + " · " + selectedPlayer.position + " · ID " + selectedPlayer.id);
+                statusView.setText(selectedPlayer.fullName + " · " + selectedPlayer.teamAbbr + " · " + selectedPlayer.position + " · MLB ID " + selectedPlayer.id);
                 hideKeyboard();
             }
         });
 
+        teamSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                if (position >= 0 && position < allTeams.size()) selectedTeam = allTeams.get(position);
+            }
+            @Override public void onNothingSelected(AdapterView<?> parent) {}
+        });
+
         compareButton.setOnClickListener(v -> compareSelected());
-        copyButton.setOnClickListener(v -> copyLastComparison());
+        standingsButton.setOnClickListener(v -> showStandings());
+        copyButton.setOnClickListener(v -> copyCurrentTable());
     }
 
-    private void loadPlayers() {
-        setBusy(true, "Loading active MLB players…");
+    private void setMode(boolean useTeamMode) {
+        teamMode = useTeamMode;
+        playerModeButton.setTextColor(teamMode ? NAVY : Color.WHITE);
+        playerModeButton.setBackground(teamMode ? roundedStroke(Color.WHITE, LINE, 16, 1) : rounded(NAVY, 16));
+        teamModeButton.setTextColor(teamMode ? Color.WHITE : NAVY);
+        teamModeButton.setBackground(teamMode ? rounded(NAVY, 16) : roundedStroke(Color.WHITE, LINE, 16, 1));
+        searchInput.setVisibility(teamMode ? View.GONE : View.VISIBLE);
+        suggestionsList.setVisibility(View.GONE);
+        teamSpinner.setVisibility(teamMode ? View.VISIBLE : View.GONE);
+        compareButton.setText(teamMode ? "Compare team" : "Compare player");
+        standingsButton.setText(teamMode ? "Show team standings" : "Show player standings");
+        statusView.setText(teamMode ? "Choose a team, season, and ranking stat." : (selectedPlayer == null ? "Start typing a player name." : selectedPlayer.fullName + " · " + selectedPlayer.teamAbbr));
+        resultsBox.setVisibility(View.GONE);
+        standingsBox.removeAllViews();
+    }
+
+    private void loadTeamsAndPlayers() {
+        setBusy(true, "Loading MLB teams and active players…");
         io.execute(() -> {
             try {
-                ArrayList<Player> players = fetchActivePlayers();
+                LoadedData loaded = fetchTeamsAndActivePlayers();
                 main.post(() -> {
-                    allPlayers.clear();
-                    allPlayers.addAll(players);
-                    selectedLabel.setText("Loaded " + players.size() + " active players. Start typing a name.");
+                    allTeams.clear(); allTeams.addAll(loaded.teams);
+                    allPlayers.clear(); allPlayers.addAll(loaded.players);
+                    teamAdapter.clear();
+                    for (Team t : allTeams) teamAdapter.add(t.name);
+                    teamAdapter.notifyDataSetChanged();
+                    if (!allTeams.isEmpty()) selectedTeam = allTeams.get(0);
+                    statusView.setText("Loaded " + allPlayers.size() + " active players and " + allTeams.size() + " teams.");
                     setBusy(false, null);
                 });
             } catch (Exception e) {
                 main.post(() -> {
                     setBusy(false, null);
-                    showError("Could not load MLB player list. Check your connection and reopen the app. " + e.getMessage());
-                    selectedLabel.setText("Player list unavailable.");
+                    showError("Could not load MLB team/player list. Check your connection and reopen the app. " + e.getMessage());
+                    statusView.setText("Roster list unavailable.");
                 });
             }
         });
     }
 
     private void filterPlayers(String raw) {
+        if (teamMode) return;
         suggestionsAdapter.clear();
         filteredPlayers.clear();
         String q = raw.trim().toLowerCase(Locale.US);
@@ -265,8 +461,8 @@ public class MainActivity extends Activity {
         for (Player p : allPlayers) {
             if (p.fullName.toLowerCase(Locale.US).contains(q)) {
                 filteredPlayers.add(p);
-                suggestionsAdapter.add(p.fullName + "  ·  " + p.team + "  ·  " + p.position);
-                if (filteredPlayers.size() >= 20) break;
+                suggestionsAdapter.add(p.fullName + "  ·  " + p.teamAbbr + "  ·  " + p.position);
+                if (filteredPlayers.size() >= 24) break;
             }
         }
         suggestionsAdapter.notifyDataSetChanged();
@@ -274,21 +470,29 @@ public class MainActivity extends Activity {
     }
 
     private void compareSelected() {
-        if (selectedPlayer == null) {
-            showError("Pick a player from the search results first.");
-            return;
-        }
         hideKeyboard();
         showError(null);
-        setBusy(true, "Loading Statcast data… this can take a minute for full career history.");
+        standingsBox.removeAllViews();
         int season = Integer.parseInt((String) seasonSpinner.getSelectedItem());
-        Player player = selectedPlayer;
+        if (teamMode) {
+            if (selectedTeam == null) { showError("Pick a team first."); return; }
+            compareTeam(selectedTeam, season);
+        } else {
+            if (selectedPlayer == null) { showError("Pick a player from the search results first."); return; }
+            comparePlayer(selectedPlayer, season);
+        }
+    }
+
+    private void comparePlayer(Player player, int season) {
+        setBusy(true, "Loading season leaderboard and career summary…");
         io.execute(() -> {
             try {
-                Stats seasonStats = summarizeRawRows(fetchPlayerRowsForSeason(player.id, season));
-                Stats careerStats = summarizeRawRows(fetchPlayerCareerRows(player.id, season));
-                Stats leagueStats = fetchLeagueAverage(season);
-                Comparison comparison = new Comparison(player, season, seasonStats, careerStats, leagueStats, new Date());
+                ArrayList<LeaderboardEntry> entries = fetchLeaderboard(season);
+                LeaderboardEntry seasonEntry = findPlayerEntry(entries, player);
+                Stats seasonStats = seasonEntry == null ? new Stats() : seasonEntry.stats;
+                Stats leagueStats = computeLeagueAverage(entries);
+                Stats careerStats = fetchPlayerCareerStats(player, season);
+                Comparison comparison = new Comparison(false, player.fullName, player.teamAbbr, player.position, player.id, season, seasonStats, careerStats, leagueStats, new Date(), "Career", player);
                 main.post(() -> {
                     lastComparison = comparison;
                     renderComparison(comparison);
@@ -297,114 +501,307 @@ public class MainActivity extends Activity {
             } catch (Exception e) {
                 main.post(() -> {
                     setBusy(false, null);
-                    showError("Could not load Statcast comparison. This can happen if Baseball Savant is slow/rate-limiting or if the player has no current-season batted balls. " + e.getMessage());
+                    showError("Could not load player comparison. Baseball Savant may be slow/rate-limiting, or this player may have no leaderboard row for the selected season. " + e.getMessage());
                 });
             }
         });
     }
 
+    private void compareTeam(Team team, int season) {
+        setBusy(true, "Loading team leaderboard summary…");
+        io.execute(() -> {
+            try {
+                ArrayList<LeaderboardEntry> entries = fetchLeaderboard(season);
+                Stats teamStats = aggregateTeamStats(entries).get(team.key());
+                if (teamStats == null) teamStats = new Stats();
+                Stats leagueStats = computeLeagueAverage(entries);
+                Stats historyStats = fetchTeamHistoryStats(team, season);
+                Comparison comparison = new Comparison(true, team.name, team.abbr, "Team", 0, season, teamStats, historyStats, leagueStats, new Date(), "2015–" + season + " team avg", null);
+                main.post(() -> {
+                    lastComparison = comparison;
+                    renderComparison(comparison);
+                    setBusy(false, null);
+                });
+            } catch (Exception e) {
+                main.post(() -> {
+                    setBusy(false, null);
+                    showError("Could not load team comparison. " + e.getMessage());
+                });
+            }
+        });
+    }
+
+    private void showStandings() {
+        hideKeyboard();
+        showError(null);
+        int season = Integer.parseInt((String) seasonSpinner.getSelectedItem());
+        Metric metric = metrics[rankMetricSpinner.getSelectedItemPosition()];
+        setBusy(true, "Loading " + (teamMode ? "team" : "player") + " standings…");
+        io.execute(() -> {
+            try {
+                ArrayList<LeaderboardEntry> entries = fetchLeaderboard(season);
+                if (teamMode) renderTeamStandingsAsync(entries, season, metric);
+                else renderPlayerStandingsAsync(entries, season, metric);
+            } catch (Exception e) {
+                main.post(() -> {
+                    setBusy(false, null);
+                    showError("Could not load standings. " + e.getMessage());
+                });
+            }
+        });
+    }
+
+    private void renderPlayerStandingsAsync(ArrayList<LeaderboardEntry> entries, int season, Metric metric) {
+        ArrayList<LeaderboardEntry> eligible = new ArrayList<>();
+        for (LeaderboardEntry e : entries) {
+            Double val = e.stats.get(metric.key);
+            if (val == null) continue;
+            int minPa = season == Calendar.getInstance().get(Calendar.YEAR) ? 50 : 100;
+            int minBbe = season == Calendar.getInstance().get(Calendar.YEAR) ? 25 : 50;
+            boolean contactMetric = metric.type.equals("contact") || metric.type.equals("rate");
+            if (e.stats.pa >= minPa && (!contactMetric || e.stats.bbe >= minBbe)) eligible.add(e);
+        }
+        sortEntries(eligible, metric);
+        main.post(() -> {
+            renderPlayerStandings(eligible, season, metric);
+            setBusy(false, null);
+        });
+    }
+
+    private void renderTeamStandingsAsync(ArrayList<LeaderboardEntry> entries, int season, Metric metric) {
+        Map<String, Stats> teamStats = aggregateTeamStats(entries);
+        ArrayList<TeamStanding> teams = new ArrayList<>();
+        for (Team t : allTeams) {
+            Stats s = teamStats.get(t.key());
+            if (s != null && s.get(metric.key) != null) teams.add(new TeamStanding(t, s));
+        }
+        teams.sort((a, b) -> compareMetricValues(a.stats.get(metric.key), b.stats.get(metric.key), metric));
+        main.post(() -> {
+            renderTeamStandings(teams, season, metric);
+            setBusy(false, null);
+        });
+    }
+
     private void renderComparison(Comparison c) {
         resultsBox.setVisibility(View.VISIBLE);
-        resultTitle.setText(c.player.fullName + " · " + c.season);
-        resultMeta.setText("Updated " + c.updated.toString() + " · Season PA " + fmtCount(c.seasonStats.pa) + " · Career PA " + fmtCount(c.careerStats.pa));
+        headerBox.removeAllViews();
         metricBox.removeAllViews();
+
+        LinearLayout card = verticalCard(24, null);
+        card.setPadding(dp(14), dp(14), dp(14), dp(14));
+        headerBox.addView(card, matchWrap());
+
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        card.addView(top, matchWrap());
+
+        if (!c.isTeam) {
+            ImageView img = new ImageView(this);
+            img.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            img.setBackground(roundedStroke(Color.rgb(235, 241, 248), LINE, 28, 1));
+            LinearLayout.LayoutParams imgLp = new LinearLayout.LayoutParams(dp(76), dp(76));
+            imgLp.setMargins(0, 0, dp(12), 0);
+            top.addView(img, imgLp);
+            loadPlayerImage(c.mlbId, img);
+        } else {
+            TextView teamBadge = text(c.meta, 25, Color.WHITE, true);
+            teamBadge.setGravity(Gravity.CENTER);
+            teamBadge.setBackground(roundedGradient(new int[] { NAVY, TEAL_DARK }, 22));
+            LinearLayout.LayoutParams badgeLp = new LinearLayout.LayoutParams(dp(76), dp(76));
+            badgeLp.setMargins(0, 0, dp(12), 0);
+            top.addView(teamBadge, badgeLp);
+        }
+
+        LinearLayout titleCol = new LinearLayout(this);
+        titleCol.setOrientation(LinearLayout.VERTICAL);
+        top.addView(titleCol, new LinearLayout.LayoutParams(0, -2, 1));
+        titleCol.addView(text(c.name, 22, INK, true));
+        TextView meta = text(c.meta + " · " + c.season + " · updated " + c.updated.toString(), 12, MUTED, false);
+        meta.setPadding(0, dp(3), 0, 0);
+        titleCol.addView(meta);
 
         LinearLayout summary = new LinearLayout(this);
         summary.setOrientation(LinearLayout.HORIZONTAL);
-        summary.setGravity(Gravity.CENTER);
+        summary.setPadding(0, dp(12), 0, 0);
         summary.addView(summaryPill("Season", fmtCount(c.seasonStats.pa) + " PA\n" + fmtCount(c.seasonStats.bbe) + " BBE"), weightLp());
         summary.addView(summaryPill("League", c.leagueStats == null ? "Unavailable" : fmtCount(c.leagueStats.pa) + " PA\n" + fmtCount(c.leagueStats.bbe) + " BBE"), weightLp());
-        summary.addView(summaryPill("Career", fmtCount(c.careerStats.pa) + " PA\n" + fmtCount(c.careerStats.bbe) + " BBE"), weightLp());
-        metricBox.addView(summary, matchWrap());
+        summary.addView(summaryPill(c.thirdLabel, fmtCount(c.careerStats.pa) + " PA\n" + fmtCount(c.careerStats.bbe) + " BBE"), weightLp());
+        card.addView(summary);
 
-        for (Metric m : metrics) renderMetricCard(c, m);
+        TextView tableTitle = text("Compact comparison", 18, INK, true);
+        tableTitle.setPadding(0, dp(12), 0, dp(4));
+        metricBox.addView(tableTitle);
+
+        int count = 0;
+        for (Metric m : metrics) {
+            if (!selectedMetricKeys.contains(m.key)) continue;
+            renderMetricRow(c, m);
+            count++;
+        }
+        if (count == 0) {
+            TextView empty = text("No stats selected. Tap All in the Stats shown row.", 14, MUTED, false);
+            empty.setPadding(0, dp(10), 0, dp(10));
+            metricBox.addView(empty);
+        }
+    }
+
+    private void refreshCurrentResults() {
+        if (lastComparison != null && resultsBox.getVisibility() == View.VISIBLE) renderComparison(lastComparison);
     }
 
     private TextView summaryPill(String label, String value) {
-        TextView tv = text(label + "\n" + value, 13, INK, true);
+        TextView tv = text(label + "\n" + value, 12, INK, true);
         tv.setGravity(Gravity.CENTER);
-        tv.setPadding(dp(8), dp(10), dp(8), dp(10));
-        tv.setBackground(roundedStroke(Color.WHITE, Color.rgb(224, 231, 241), 16, 1));
+        tv.setPadding(dp(6), dp(9), dp(6), dp(9));
+        tv.setBackground(roundedStroke(Color.rgb(248, 250, 253), LINE, 16, 1));
         tv.setLineSpacing(dp(2), 1.0f);
         return tv;
     }
 
-    private void renderMetricCard(Comparison c, Metric m) {
+    private void renderMetricRow(Comparison c, Metric m) {
         Double seasonValue = c.seasonStats.get(m.key);
         Double leagueValue = c.leagueStats == null ? null : c.leagueStats.get(m.key);
         Double careerValue = c.careerStats.get(m.key);
         Double vsLeague = diff(seasonValue, leagueValue);
         Double vsCareer = diff(seasonValue, careerValue);
 
-        LinearLayout card = verticalCard(18, null);
-        card.setPadding(dp(14), dp(14), dp(14), dp(14));
-        LinearLayout.LayoutParams lp = matchWrap();
-        lp.setMargins(0, dp(10), 0, 0);
-        metricBox.addView(card, lp);
+        LinearLayout row = verticalCard(17, null);
+        row.setPadding(dp(12), dp(10), dp(12), dp(10));
+        LinearLayout.LayoutParams rowLp = matchWrap();
+        rowLp.setMargins(0, dp(7), 0, 0);
+        metricBox.addView(row, rowLp);
 
-        LinearLayout top = new LinearLayout(this);
-        top.setOrientation(LinearLayout.HORIZONTAL);
-        top.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout labelCol = new LinearLayout(this);
-        labelCol.setOrientation(LinearLayout.VERTICAL);
-        top.addView(labelCol, new LinearLayout.LayoutParams(0, -2, 1));
-        labelCol.addView(text(m.label, 18, INK, true));
-        TextView sub = text("Season vs league vs career", 12, MUTED, false);
-        sub.setPadding(0, dp(3), 0, 0);
-        labelCol.addView(sub);
-        TextView big = text(format(seasonValue, m), 24, NAVY, true);
-        top.addView(big);
-        card.addView(top);
+        LinearLayout line1 = new LinearLayout(this);
+        line1.setOrientation(LinearLayout.HORIZONTAL);
+        line1.setGravity(Gravity.CENTER_VERTICAL);
+        TextView label = text(m.label, 15, INK, true);
+        line1.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView value = text(format(seasonValue, m), 19, NAVY, true);
+        line1.addView(value);
+        row.addView(line1);
 
-        LinearLayout deltas = new LinearLayout(this);
-        deltas.setOrientation(LinearLayout.HORIZONTAL);
-        deltas.setPadding(0, dp(10), 0, dp(6));
-        deltas.addView(deltaPill("vs lg " + signedFormat(vsLeague, m), deltaColor(vsLeague, m)), weightLp());
-        deltas.addView(deltaPill("vs career " + signedFormat(vsCareer, m), deltaColor(vsCareer, m)), weightLp());
-        card.addView(deltas);
+        LinearLayout valueRow = new LinearLayout(this);
+        valueRow.setOrientation(LinearLayout.HORIZONTAL);
+        valueRow.setPadding(0, dp(7), 0, 0);
+        valueRow.addView(valueCell("Lg", format(leagueValue, m)), weightLp());
+        valueRow.addView(valueCell(c.thirdLabelShort(), format(careerValue, m)), weightLp());
+        valueRow.addView(valueCell("vs Lg", signedFormat(vsLeague, m)), weightLp());
+        valueRow.addView(valueCell("vs Hist", signedFormat(vsCareer, m)), weightLp());
+        row.addView(valueRow);
 
         double[] widths = scaleValues(new Double[] { seasonValue, leagueValue, careerValue }, m);
-        card.addView(barRow("Season", seasonValue, widths[0], m, TEAL));
-        card.addView(barRow("League", leagueValue, widths[1], m, Color.rgb(91, 109, 145)));
-        card.addView(barRow("Career", careerValue, widths[2], m, SALMON));
+        LinearLayout bars = new LinearLayout(this);
+        bars.setOrientation(LinearLayout.HORIZONTAL);
+        bars.setPadding(0, dp(8), 0, 0);
+        bars.addView(tinyBar(widths[0], TEAL), weightLp());
+        bars.addView(tinyBar(widths[1], Color.rgb(90, 111, 147)), weightLp());
+        bars.addView(tinyBar(widths[2], SALMON), weightLp());
+        row.addView(bars);
     }
 
-    private TextView deltaPill(String text, int color) {
-        TextView tv = text(text, 12, color, true);
+    private TextView valueCell(String label, String value) {
+        TextView tv = text(label + "\n" + value, 11, MUTED, true);
         tv.setGravity(Gravity.CENTER);
-        tv.setPadding(dp(6), dp(8), dp(6), dp(8));
-        tv.setBackground(roundedStroke(Color.WHITE, Color.rgb(227, 233, 242), 14, 1));
+        tv.setPadding(dp(4), dp(4), dp(4), dp(4));
+        tv.setBackground(rounded(Color.rgb(247, 250, 253), 12));
+        tv.setLineSpacing(dp(1), 1.0f);
         return tv;
     }
 
-    private View barRow(String label, Double value, double width, Metric m, int color) {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.VERTICAL);
-        row.setPadding(0, dp(8), 0, 0);
-        LinearLayout textRow = new LinearLayout(this);
-        textRow.setOrientation(LinearLayout.HORIZONTAL);
-        textRow.addView(text(label, 12, MUTED, true), new LinearLayout.LayoutParams(0, -2, 1));
-        textRow.addView(text(format(value, m), 12, INK, true));
-        row.addView(textRow);
-
+    private ProgressBar tinyBar(double width, int color) {
         ProgressBar pb = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         pb.setMax(1000);
         pb.setProgress((int) Math.round(width * 10));
         pb.setProgressTintList(ColorStateList.valueOf(color));
         pb.setProgressBackgroundTintList(ColorStateList.valueOf(Color.rgb(235, 240, 247)));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(9));
-        lp.setMargins(0, dp(4), 0, 0);
-        row.addView(pb, lp);
+        pb.setPadding(0, 0, 0, 0);
+        return pb;
+    }
+
+    private void renderPlayerStandings(ArrayList<LeaderboardEntry> entries, int season, Metric metric) {
+        standingsBox.removeAllViews();
+        LinearLayout card = verticalCard(22, null);
+        card.setPadding(dp(14), dp(14), dp(14), dp(14));
+        standingsBox.addView(card, matchWrap());
+        card.addView(text(season + " player standings · " + metric.label, 20, INK, true));
+        TextView sub = text("Top " + Math.min(30, entries.size()) + " hitters by selected stat", 12, MUTED, false);
+        sub.setPadding(0, dp(3), 0, dp(8));
+        card.addView(sub);
+
+        lastStandingsText = season + " player standings by " + metric.label + "\nRank\tPlayer\tTeam\t" + metric.label + "\tPA\tBBE\n";
+        int limit = Math.min(30, entries.size());
+        for (int i = 0; i < limit; i++) {
+            LeaderboardEntry e = entries.get(i);
+            boolean highlight = selectedPlayer != null && e.playerId == selectedPlayer.id;
+            card.addView(standingRow(i + 1, e.name, e.teamAbbrOrName(), format(e.stats.get(metric.key), metric), e.stats, highlight));
+            lastStandingsText += (i + 1) + "\t" + e.name + "\t" + e.teamAbbrOrName() + "\t" + format(e.stats.get(metric.key), metric) + "\t" + e.stats.pa + "\t" + e.stats.bbe + "\n";
+        }
+        resultsBox.setVisibility(View.GONE);
+    }
+
+    private void renderTeamStandings(ArrayList<TeamStanding> teams, int season, Metric metric) {
+        standingsBox.removeAllViews();
+        LinearLayout card = verticalCard(22, null);
+        card.setPadding(dp(14), dp(14), dp(14), dp(14));
+        standingsBox.addView(card, matchWrap());
+        card.addView(text(season + " team standings · " + metric.label, 20, INK, true));
+        TextView sub = text("All MLB teams ranked by selected stat", 12, MUTED, false);
+        sub.setPadding(0, dp(3), 0, dp(8));
+        card.addView(sub);
+
+        lastStandingsText = season + " team standings by " + metric.label + "\nRank\tTeam\t" + metric.label + "\tPA\tBBE\n";
+        for (int i = 0; i < teams.size(); i++) {
+            TeamStanding t = teams.get(i);
+            boolean highlight = selectedTeam != null && t.team.key().equals(selectedTeam.key());
+            card.addView(standingRow(i + 1, t.team.name, t.team.abbr, format(t.stats.get(metric.key), metric), t.stats, highlight));
+            lastStandingsText += (i + 1) + "\t" + t.team.name + "\t" + format(t.stats.get(metric.key), metric) + "\t" + t.stats.pa + "\t" + t.stats.bbe + "\n";
+        }
+        resultsBox.setVisibility(View.GONE);
+    }
+
+    private View standingRow(int rank, String name, String meta, String value, Stats stats, boolean highlight) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(8), dp(8), dp(8), dp(8));
+        row.setBackground(rounded(highlight ? Color.rgb(231, 251, 248) : Color.WHITE, 13));
+
+        TextView rankTv = text(String.valueOf(rank), 14, highlight ? TEAL_DARK : MUTED, true);
+        rankTv.setGravity(Gravity.CENTER);
+        row.addView(rankTv, new LinearLayout.LayoutParams(dp(34), -2));
+
+        LinearLayout nameCol = new LinearLayout(this);
+        nameCol.setOrientation(LinearLayout.VERTICAL);
+        nameCol.addView(text(name, 14, INK, true));
+        nameCol.addView(text(meta + " · " + fmtCount(stats.pa) + " PA · " + fmtCount(stats.bbe) + " BBE", 11, MUTED, false));
+        row.addView(nameCol, new LinearLayout.LayoutParams(0, -2, 1));
+
+        TextView val = text(value, 15, NAVY, true);
+        row.addView(val);
+
+        LinearLayout.LayoutParams lp = matchWrap();
+        lp.setMargins(0, dp(3), 0, dp(3));
+        row.setLayoutParams(lp);
         return row;
     }
 
-    private void copyLastComparison() {
-        if (lastComparison == null) return;
+    private void copyCurrentTable() {
+        String text;
+        if (resultsBox.getVisibility() == View.VISIBLE && lastComparison != null) text = comparisonText(lastComparison);
+        else text = lastStandingsText;
+        if (text == null || text.trim().isEmpty()) return;
+        ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        cm.setPrimaryClip(ClipData.newPlainText("Statcast table", text));
+        Toast.makeText(this, "Copied table", Toast.LENGTH_SHORT).show();
+    }
+
+    private String comparisonText(Comparison c) {
         StringBuilder sb = new StringBuilder();
-        Comparison c = lastComparison;
-        sb.append(c.player.fullName).append(" · ").append(c.season).append(" Statcast comparison\n");
-        sb.append("Metric\tSeason\tLeague Avg\tCareer\tVs League\tVs Career\n");
+        sb.append(c.name).append(" · ").append(c.season).append(" Statcast comparison\n");
+        sb.append("Metric\tSeason\tLeague Avg\t").append(c.thirdLabel).append("\tVs League\tVs ").append(c.thirdLabel).append("\n");
         for (Metric m : metrics) {
+            if (!selectedMetricKeys.contains(m.key)) continue;
             Double season = c.seasonStats.get(m.key);
             Double league = c.leagueStats == null ? null : c.leagueStats.get(m.key);
             Double career = c.careerStats.get(m.key);
@@ -415,144 +812,219 @@ public class MainActivity extends Activity {
                     .append(signedFormat(diff(season, league), m)).append('\t')
                     .append(signedFormat(diff(season, career), m)).append('\n');
         }
-        ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-        cm.setPrimaryClip(ClipData.newPlainText("Statcast comparison", sb.toString()));
-        Toast.makeText(this, "Copied comparison table", Toast.LENGTH_SHORT).show();
+        return sb.toString();
     }
 
     // Data loading -----------------------------------------------------------------------------
 
-    private ArrayList<Player> fetchActivePlayers() throws Exception {
+    private LoadedData fetchTeamsAndActivePlayers() throws Exception {
         String teamsText = httpGet("https://statsapi.mlb.com/api/v1/teams?sportId=1&activeStatus=Y");
         JSONArray teams = new JSONObject(teamsText).optJSONArray("teams");
-        LinkedHashMap<Integer, Player> byId = new LinkedHashMap<>();
-        if (teams == null) return new ArrayList<>();
+        ArrayList<Team> teamList = new ArrayList<>();
+        LinkedHashMap<Integer, Player> playersById = new LinkedHashMap<>();
+        if (teams == null) return new LoadedData(teamList, new ArrayList<>());
 
         for (int i = 0; i < teams.length(); i++) {
-            JSONObject team = teams.getJSONObject(i);
-            int teamId = team.optInt("id");
-            String teamName = team.optString("name", "MLB");
-            String[] rosterTypes = new String[] { "active", "40Man" };
-            for (String rosterType : rosterTypes) {
-                try {
-                    String rosterText = httpGet("https://statsapi.mlb.com/api/v1/teams/" + teamId + "/roster/" + rosterType + "?hydrate=person");
-                    JSONArray roster = new JSONObject(rosterText).optJSONArray("roster");
-                    if (roster == null || roster.length() == 0) continue;
-                    for (int j = 0; j < roster.length(); j++) {
-                        JSONObject item = roster.getJSONObject(j);
-                        JSONObject person = item.optJSONObject("person");
-                        JSONObject pos = item.optJSONObject("position");
-                        if (person == null) continue;
-                        int id = person.optInt("id");
-                        String name = person.optString("fullName", "");
-                        if (id > 0 && !name.isEmpty()) {
-                            String position = pos == null ? "" : pos.optString("abbreviation", pos.optString("name", ""));
-                            byId.put(id, new Player(id, name, teamName, position));
-                        }
-                    }
-                    break;
-                } catch (Exception ignored) {}
-            }
+            JSONObject teamJson = teams.getJSONObject(i);
+            int teamId = teamJson.optInt("id");
+            String name = teamJson.optString("name", "MLB");
+            String abbr = teamJson.optString("abbreviation", teamJson.optString("teamCode", name));
+            Team t = new Team(teamId, name, abbr);
+            teamList.add(t);
+            try {
+                String rosterText = httpGet("https://statsapi.mlb.com/api/v1/teams/" + teamId + "/roster/active?hydrate=person");
+                JSONArray roster = new JSONObject(rosterText).optJSONArray("roster");
+                if (roster == null) continue;
+                for (int j = 0; j < roster.length(); j++) {
+                    JSONObject item = roster.getJSONObject(j);
+                    JSONObject person = item.optJSONObject("person");
+                    JSONObject pos = item.optJSONObject("position");
+                    if (person == null) continue;
+                    int id = person.optInt("id");
+                    String fullName = person.optString("fullName", "");
+                    String position = pos == null ? "" : pos.optString("abbreviation", pos.optString("name", ""));
+                    if (id > 0 && !fullName.isEmpty()) playersById.put(id, new Player(id, fullName, name, abbr, position));
+                }
+            } catch (Exception ignored) {}
         }
-        ArrayList<Player> players = new ArrayList<>(byId.values());
+        teamList.sort((a, b) -> a.name.compareToIgnoreCase(b.name));
+        ArrayList<Player> players = new ArrayList<>(playersById.values());
         players.sort((a, b) -> a.fullName.compareToIgnoreCase(b.fullName));
-        return players;
+        return new LoadedData(teamList, players);
     }
 
-    private List<Map<String, String>> fetchPlayerRowsForSeason(int playerId, int season) throws Exception {
-        String startDate = season + "-03-01";
-        String endDate = season == Calendar.getInstance().get(Calendar.YEAR) ? todayIso() : season + "-11-30";
-        String csv = httpGet(statcastSearchUrl(playerId, startDate, endDate, season));
+    private ArrayList<LeaderboardEntry> fetchLeaderboard(int season) throws Exception {
+        ArrayList<LeaderboardEntry> cached = leaderboardCache.get(season);
+        if (cached != null) return cached;
+        String csv = httpGet(customLeaderboardUrl(season));
         List<Map<String, String>> rows = parseCsv(csv);
-        if (!rows.isEmpty() && !rows.get(0).containsKey("game_date")) {
-            throw new Exception("Unexpected Baseball Savant CSV format.");
-        }
-        return rows;
-    }
-
-    private List<Map<String, String>> fetchPlayerCareerRows(int playerId, int throughSeason) {
-        ArrayList<Map<String, String>> all = new ArrayList<>();
-        for (int year = STATCAST_START_YEAR; year <= throughSeason; year++) {
-            try { all.addAll(fetchPlayerRowsForSeason(playerId, year)); }
-            catch (Exception ignored) {}
-        }
-        return all;
-    }
-
-    private Stats fetchLeagueAverage(int season) {
-        try {
-            LinkedHashMap<String, String> params = new LinkedHashMap<>();
-            params.put("year", String.valueOf(season));
-            params.put("type", "batter");
-            params.put("filter", "");
-            params.put("min", "1");
-            params.put("selections", "pa,xba,xslg,woba,xwoba,exit_velocity_avg,launch_angle_avg,sweet_spot_percent,barrel_batted_rate,hard_hit_percent");
-            params.put("sort", "xwoba");
-            params.put("sortDir", "desc");
-            params.put("csv", "true");
-            String csv = httpGet("https://baseballsavant.mlb.com/leaderboard/custom" + toQuery(params));
-            List<Map<String, String>> rows = parseCsv(csv);
-            if (rows.isEmpty()) return null;
-
-            double paTotal = 0, bbeTotal = 0;
-            Map<String, Double> paWeighted = new HashMap<>();
-            Map<String, Double> bbeWeighted = new HashMap<>();
-            for (Map<String, String> row : rows) {
-                double pa = nn(pick(row, "pa", "PA"));
-                double bbe = nn(pick(row, "batted_ball", "batted_balls", "batted balls", "bbe", "Batted Balls"));
-                if (bbe <= 0) bbe = pa;
-                String[] expKeys = { "xBA", "xSLG", "xwOBA" };
-                String[][] expCols = {
-                        { "xba", "xBA" }, { "xslg", "xSLG" }, { "xwoba", "xwOBA" }
-                };
-                for (int i = 0; i < expKeys.length; i++) {
-                    Double val = pick(row, expCols[i]);
-                    if (val != null && pa > 0) paWeighted.put(expKeys[i], paWeighted.getOrDefault(expKeys[i], 0.0) + val * pa);
+        if (rows.isEmpty()) throw new Exception("No Baseball Savant leaderboard rows returned for " + season + ".");
+        ArrayList<LeaderboardEntry> entries = new ArrayList<>();
+        for (Map<String, String> row : rows) {
+            int id = intVal(pick(row, "player_id", "playerid", "player id", "batter", "entity_id"));
+            String name = pickString(row, "player_name", "player name", "last_name, first_name", "name", "last_name first_name");
+            if (name.isEmpty()) name = buildNameFromColumns(row);
+            name = normalizePlayerName(name);
+            String teamName = pickString(row, "team_name", "team name", "team", "team_name_alt");
+            String teamAbbr = pickString(row, "team_abbrev", "team abbr", "team_abbreviation", "team_short", "team");
+            if (id > 0) {
+                Player p = playerById(id);
+                if (p != null) {
+                    if (teamName.isEmpty()) teamName = p.teamName;
+                    if (teamAbbr.isEmpty()) teamAbbr = p.teamAbbr;
+                    if (name.isEmpty()) name = p.fullName;
                 }
-                String[][] contact = {
-                        { "avgEV", "exit_velocity_avg", "Avg EV (MPH)", "avg_ev" },
-                        { "avgLA", "launch_angle_avg", "Avg LA (°)", "avg_la" },
-                        { "hardHitPct", "hard_hit_percent", "Hard Hit %" },
-                        { "barrelPct", "barrel_batted_rate", "Barrel%", "barrel_percent" },
-                        { "sweetSpotPct", "sweet_spot_percent", "LA Sweet-Spot %" }
-                };
-                for (String[] def : contact) {
-                    Double val = pick(row, Arrays.copyOfRange(def, 1, def.length));
-                    if (val != null && bbe > 0) bbeWeighted.put(def[0], bbeWeighted.getOrDefault(def[0], 0.0) + val * bbe);
-                }
-                if (pa > 0) paTotal += pa;
-                if (bbe > 0) bbeTotal += bbe;
             }
-            Stats s = new Stats();
-            s.pa = (int) Math.round(paTotal);
-            s.bbe = (int) Math.round(bbeTotal);
-            for (String key : new String[] { "xBA", "xSLG", "xwOBA" }) s.put(key, paTotal > 0 ? paWeighted.getOrDefault(key, 0.0) / paTotal : null);
-            for (String key : new String[] { "avgEV", "avgLA", "hardHitPct", "barrelPct", "sweetSpotPct" }) s.put(key, bbeTotal > 0 ? bbeWeighted.getOrDefault(key, 0.0) / bbeTotal : null);
-            return s;
-        } catch (Exception e) {
-            return null;
+            Stats stats = statsFromLeaderboardRow(row);
+            if ((!name.isEmpty() || id > 0) && (stats.pa > 0 || stats.bbe > 0 || stats.anyValue())) {
+                entries.add(new LeaderboardEntry(id, name, teamName, teamAbbr, stats));
+            }
         }
+        leaderboardCache.put(season, entries);
+        return entries;
     }
 
-    private String statcastSearchUrl(int playerId, String startDate, String endDate, int season) throws Exception {
-        LinkedHashMap<String, String> p = new LinkedHashMap<>();
-        p.put("all", "true"); p.put("hfPT", ""); p.put("hfAB", ""); p.put("hfGT", "R|"); p.put("hfPR", ""); p.put("hfZ", "");
-        p.put("stadium", ""); p.put("hfBBT", ""); p.put("hfNewZones", ""); p.put("hfPull", ""); p.put("hfC", ""); p.put("hfSea", season + "|");
-        p.put("hfSit", ""); p.put("player_type", "batter"); p.put("hfOuts", ""); p.put("opponent", ""); p.put("pitcher_throws", "");
-        p.put("batter_stands", ""); p.put("hfSA", ""); p.put("game_date_gt", startDate); p.put("game_date_lt", endDate); p.put("team", "");
-        p.put("position", ""); p.put("hfRO", ""); p.put("home_road", ""); p.put("hfFlag", ""); p.put("hfBBL", ""); p.put("metric_1", "");
-        p.put("metric_1_gt", ""); p.put("metric_1_lt", ""); p.put("metric_2", ""); p.put("metric_2_gt", ""); p.put("metric_2_lt", "");
-        p.put("group_by", "name"); p.put("min_pitches", "0"); p.put("min_results", "0"); p.put("min_pas", "0");
-        p.put("sort_col", "pitches"); p.put("player_event_sort", "h_launch_speed"); p.put("sort_order", "desc"); p.put("type", "details");
-        return "https://baseballsavant.mlb.com/statcast_search/csv" + toQuery(p) + "&" + enc("batters_lookup[]") + "=" + playerId;
+    private String customLeaderboardUrl(int season) throws Exception {
+        LinkedHashMap<String, String> params = new LinkedHashMap<>();
+        params.put("year", String.valueOf(season));
+        params.put("type", "batter");
+        params.put("filter", "");
+        params.put("min", "1");
+        params.put("selections", "pa,xba,xslg,woba,xwoba,exit_velocity_avg,launch_angle_avg,sweet_spot_percent,barrel_batted_rate,hard_hit_percent,k_percent,bb_percent");
+        params.put("sort", "xwoba");
+        params.put("sortDir", "desc");
+        params.put("csv", "true");
+        return "https://baseballsavant.mlb.com/leaderboard/custom" + toQuery(params);
+    }
+
+    private Stats statsFromLeaderboardRow(Map<String, String> row) {
+        Stats s = new Stats();
+        s.pa = intVal(pick(row, "pa", "PA"));
+        s.bbe = intVal(pick(row, "batted_ball", "batted_balls", "batted balls", "bbe", "Batted Balls", "batted_ball_events"));
+        if (s.bbe <= 0) s.bbe = intVal(pick(row, "bip", "balls in play"));
+        if (s.bbe <= 0 && s.pa > 0) s.bbe = Math.max(1, (int) Math.round(s.pa * 0.68));
+        s.put("xBA", pick(row, "xba", "xBA"));
+        s.put("xSLG", pick(row, "xslg", "xSLG"));
+        s.put("xwOBA", pick(row, "xwoba", "xwOBA"));
+        s.put("avgEV", pick(row, "exit_velocity_avg", "Avg EV (MPH)", "avg_ev", "avg exit velocity"));
+        s.put("avgLA", pick(row, "launch_angle_avg", "Avg LA (°)", "avg_la", "avg launch angle"));
+        s.put("hardHitPct", pick(row, "hard_hit_percent", "Hard Hit %", "hardhit_percent"));
+        s.put("barrelPct", pick(row, "barrel_batted_rate", "Barrel%", "barrel_percent", "barrel_batted_rate"));
+        s.put("sweetSpotPct", pick(row, "sweet_spot_percent", "LA Sweet-Spot %", "sweet spot %"));
+        s.put("kPct", pick(row, "k_percent", "K%", "strikeout_percent", "k %"));
+        s.put("bbPct", pick(row, "bb_percent", "BB%", "walk_percent", "bb %"));
+        return s;
+    }
+
+    private Stats computeLeagueAverage(ArrayList<LeaderboardEntry> entries) {
+        WeightedStatsBuilder b = new WeightedStatsBuilder(metrics);
+        for (LeaderboardEntry e : entries) b.add(e.stats);
+        return b.build();
+    }
+
+    private Stats fetchPlayerCareerStats(Player player, int throughSeason) {
+        WeightedStatsBuilder b = new WeightedStatsBuilder(metrics);
+        for (int y = STATCAST_START_YEAR; y <= throughSeason; y++) {
+            try {
+                LeaderboardEntry e = findPlayerEntry(fetchLeaderboard(y), player);
+                if (e != null) b.add(e.stats);
+            } catch (Exception ignored) {}
+        }
+        return b.build();
+    }
+
+    private Stats fetchTeamHistoryStats(Team team, int throughSeason) {
+        WeightedStatsBuilder b = new WeightedStatsBuilder(metrics);
+        for (int y = STATCAST_START_YEAR; y <= throughSeason; y++) {
+            try {
+                Stats s = aggregateTeamStats(fetchLeaderboard(y)).get(team.key());
+                if (s != null) b.add(s);
+            } catch (Exception ignored) {}
+        }
+        return b.build();
+    }
+
+    private Map<String, Stats> aggregateTeamStats(ArrayList<LeaderboardEntry> entries) {
+        LinkedHashMap<String, WeightedStatsBuilder> builders = new LinkedHashMap<>();
+        for (LeaderboardEntry e : entries) {
+            String key = teamKeyFromEntry(e);
+            if (key.isEmpty()) continue;
+            WeightedStatsBuilder b = builders.get(key);
+            if (b == null) {
+                b = new WeightedStatsBuilder(metrics);
+                builders.put(key, b);
+            }
+            b.add(e.stats);
+        }
+        LinkedHashMap<String, Stats> out = new LinkedHashMap<>();
+        for (Map.Entry<String, WeightedStatsBuilder> e : builders.entrySet()) out.put(e.getKey(), e.getValue().build());
+        return out;
+    }
+
+    private LeaderboardEntry findPlayerEntry(ArrayList<LeaderboardEntry> entries, Player player) {
+        for (LeaderboardEntry e : entries) if (e.playerId > 0 && e.playerId == player.id) return e;
+        String target = normalizeNameKey(player.fullName);
+        for (LeaderboardEntry e : entries) if (normalizeNameKey(e.name).equals(target)) return e;
+        return null;
+    }
+
+    private Player playerById(int id) {
+        for (Player p : allPlayers) if (p.id == id) return p;
+        return null;
+    }
+
+    private String teamKeyFromEntry(LeaderboardEntry e) {
+        String abbr = safe(e.teamAbbr).toUpperCase(Locale.US).trim();
+        if (!abbr.isEmpty()) {
+            for (Team t : allTeams) if (abbr.equals(t.abbr.toUpperCase(Locale.US))) return t.key();
+        }
+        String name = normalizeNameKey(e.teamName);
+        if (!name.isEmpty()) {
+            for (Team t : allTeams) if (normalizeNameKey(t.name).equals(name)) return t.key();
+        }
+        return abbr;
+    }
+
+    private void sortEntries(ArrayList<LeaderboardEntry> entries, Metric metric) {
+        entries.sort((a, b) -> compareMetricValues(a.stats.get(metric.key), b.stats.get(metric.key), metric));
+    }
+
+    private int compareMetricValues(Double av, Double bv, Metric metric) {
+        if (av == null && bv == null) return 0;
+        if (av == null) return 1;
+        if (bv == null) return -1;
+        int cmp = Double.compare(bv, av); // default: high to low
+        if (metric.higherGood != null && !metric.higherGood) cmp = Double.compare(av, bv);
+        return cmp;
+    }
+
+    private void loadPlayerImage(int playerId, ImageView imageView) {
+        if (playerId <= 0) return;
+        String url = "https://img.mlbstatic.com/mlb-photos/image/upload/w_300,q_100/v1/people/" + playerId + "/headshot/current";
+        Bitmap cached = imageCache.get(url);
+        if (cached != null) { imageView.setImageBitmap(cached); return; }
+        imageView.setImageDrawable(rounded(Color.rgb(235, 241, 248), 24));
+        io.execute(() -> {
+            try {
+                HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+                conn.setConnectTimeout(12000);
+                conn.setReadTimeout(20000);
+                conn.setRequestProperty("User-Agent", "Mozilla/5.0 Statcast Compare Android");
+                Bitmap bitmap = BitmapFactory.decodeStream(conn.getInputStream());
+                if (bitmap != null) {
+                    imageCache.put(url, bitmap);
+                    main.post(() -> imageView.setImageBitmap(bitmap));
+                }
+            } catch (Exception ignored) {}
+        });
     }
 
     private String httpGet(String urlString) throws Exception {
         String cached = textCache.get(urlString);
         if (cached != null) return cached;
         HttpURLConnection conn = (HttpURLConnection) new URL(urlString).openConnection();
-        conn.setConnectTimeout(30000);
-        conn.setReadTimeout(60000);
+        conn.setConnectTimeout(25000);
+        conn.setReadTimeout(50000);
         conn.setRequestMethod("GET");
         conn.setRequestProperty("User-Agent", "Mozilla/5.0 Statcast Compare Android");
         conn.setRequestProperty("Accept", "text/csv,text/plain,application/json,text/html,*/*");
@@ -568,62 +1040,7 @@ public class MainActivity extends Activity {
         return text;
     }
 
-    // Stat calculations -------------------------------------------------------------------------
-
-    private Stats summarizeRawRows(List<Map<String, String>> rows) {
-        ArrayList<Map<String, String>> paRows = new ArrayList<>();
-        for (Map<String, String> r : rows) if (!string(r.get("events")).trim().isEmpty()) paRows.add(r);
-        ArrayList<Map<String, String>> bbeRows = new ArrayList<>();
-        for (Map<String, String> r : paRows) if (num(r.get("launch_speed")) != null && num(r.get("launch_angle")) != null) bbeRows.add(r);
-
-        double evSum = 0, laSum = 0;
-        int hardHit = 0, sweetSpot = 0, barrels = 0;
-        for (Map<String, String> r : bbeRows) {
-            double ev = nn(num(r.get("launch_speed")));
-            double la = nn(num(r.get("launch_angle")));
-            evSum += ev; laSum += la;
-            if (ev >= 95) hardHit++;
-            if (la >= 8 && la <= 32) sweetSpot++;
-            if ("6".equals(string(r.get("launch_speed_angle")).trim())) barrels++;
-        }
-
-        int ab = 0;
-        double xHits = 0, xSlgBases = 0, xwobaNum = 0, xwobaDen = 0;
-        for (Map<String, String> r : paRows) {
-            Double wobaDen = num(r.get("woba_denom"));
-            Double xwoba = firstNumber(r, "estimated_woba_using_speedangle", "estimated_woba_using_speedangle ");
-            Double actualWoba = num(r.get("woba_value"));
-            if (wobaDen != null && wobaDen > 0) {
-                xwobaDen += wobaDen;
-                xwobaNum += (xwoba != null ? xwoba : (actualWoba == null ? 0 : actualWoba)) * wobaDen;
-            }
-            if (isAtBatEvent(r.get("events"))) {
-                ab++;
-                xHits += nn(firstNumber(r, "estimated_ba_using_speedangle"));
-                xSlgBases += nn(firstNumber(r, "estimated_slg_using_speedangle"));
-            }
-        }
-
-        Stats s = new Stats();
-        s.pa = paRows.size();
-        s.bbe = bbeRows.size();
-        s.put("avgEV", s.bbe > 0 ? evSum / s.bbe : null);
-        s.put("avgLA", s.bbe > 0 ? laSum / s.bbe : null);
-        s.put("hardHitPct", s.bbe > 0 ? hardHit * 100.0 / s.bbe : null);
-        s.put("barrelPct", s.bbe > 0 ? barrels * 100.0 / s.bbe : null);
-        s.put("sweetSpotPct", s.bbe > 0 ? sweetSpot * 100.0 / s.bbe : null);
-        s.put("xBA", ab > 0 ? xHits / ab : null);
-        s.put("xSLG", ab > 0 ? xSlgBases / ab : null);
-        s.put("xwOBA", xwobaDen > 0 ? xwobaNum / xwobaDen : null);
-        return s;
-    }
-
-    private boolean isAtBatEvent(String event) {
-        String e = string(event).toLowerCase(Locale.US);
-        return !(e.equals("walk") || e.equals("hit_by_pitch") || e.equals("sac_bunt") || e.equals("sac_fly") || e.equals("catcher_interf") || e.equals("intent_walk") || e.equals("sac_fly_double_play") || e.equals("sac_bunt_double_play"));
-    }
-
-    // CSV/format helpers ------------------------------------------------------------------------
+    // CSV/format helpers -----------------------------------------------------------------------
 
     private List<Map<String, String>> parseCsv(String text) {
         ArrayList<ArrayList<String>> rows = new ArrayList<>();
@@ -674,22 +1091,7 @@ public class MainActivity extends Activity {
     }
 
     private String enc(String s) throws Exception { return URLEncoder.encode(s == null ? "" : s, "UTF-8"); }
-    private String todayIso() {
-        Calendar c = Calendar.getInstance();
-        return String.format(Locale.US, "%04d-%02d-%02d", c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1, c.get(Calendar.DAY_OF_MONTH));
-    }
-    private String string(String s) { return s == null ? "" : s; }
-    private Double num(String value) {
-        if (value == null) return null;
-        String cleaned = value.replace("%", "").trim();
-        if (cleaned.isEmpty()) return null;
-        try { return Double.parseDouble(cleaned); } catch (Exception e) { return null; }
-    }
-    private double nn(Double d) { return d == null || Double.isNaN(d) ? 0 : d; }
-    private Double firstNumber(Map<String, String> row, String... keys) {
-        for (String k : keys) { Double d = num(row.get(k)); if (d != null) return d; }
-        return null;
-    }
+    private String safe(String s) { return s == null ? "" : s; }
     private Double pick(Map<String, String> row, String... names) {
         for (String n : names) if (row.containsKey(n)) return num(row.get(n));
         HashMap<String, String> lowerMap = new HashMap<>();
@@ -700,21 +1102,86 @@ public class MainActivity extends Activity {
         }
         return null;
     }
+    private String pickString(Map<String, String> row, String... names) {
+        for (String n : names) if (row.containsKey(n) && row.get(n) != null && !row.get(n).trim().isEmpty()) return row.get(n).trim();
+        HashMap<String, String> lowerMap = new HashMap<>();
+        for (String k : row.keySet()) lowerMap.put(k.toLowerCase(Locale.US).replaceAll("[^a-z0-9]", ""), k);
+        for (String n : names) {
+            String k = lowerMap.get(n.toLowerCase(Locale.US).replaceAll("[^a-z0-9]", ""));
+            if (k != null && row.get(k) != null && !row.get(k).trim().isEmpty()) return row.get(k).trim();
+        }
+        return "";
+    }
+    private String buildNameFromColumns(Map<String, String> row) {
+        String first = pickString(row, "first_name", "first name");
+        String last = pickString(row, "last_name", "last name");
+        return (first + " " + last).trim();
+    }
+    private String normalizePlayerName(String name) {
+        String n = safe(name).trim();
+        if (n.contains(",")) {
+            String[] parts = n.split(",");
+            if (parts.length >= 2) n = parts[1].trim() + " " + parts[0].trim();
+        }
+        return n.replaceAll("\\s+", " ").trim();
+    }
+    private String normalizeNameKey(String value) {
+        return safe(value).toLowerCase(Locale.US).replaceAll("[^a-z0-9]", "");
+    }
+    private Double num(String value) {
+        if (value == null) return null;
+        String cleaned = value.replace("%", "").replace(",", "").trim();
+        if (cleaned.isEmpty() || cleaned.equals("-")) return null;
+        try { return Double.parseDouble(cleaned); } catch (Exception e) { return null; }
+    }
+    private int intVal(Double d) { return d == null || Double.isNaN(d) ? 0 : (int) Math.round(d); }
+    private Double diff(Double a, Double b) { return a == null || b == null ? null : a - b; }
+    private String fmtCount(int v) { return String.format(Locale.US, "%,d", v); }
 
-    // UI helpers --------------------------------------------------------------------------------
+    private String format(Double v, Metric m) {
+        if (v == null || Double.isNaN(v)) return "—";
+        String pattern = m.decimals == 3 ? "0.000" : "0.0";
+        DecimalFormat df = new DecimalFormat(pattern);
+        return df.format(v) + m.unit;
+    }
+    private String signedFormat(Double v, Metric m) {
+        if (v == null || Double.isNaN(v)) return "—";
+        return (v > 0 ? "+" : "") + format(v, m);
+    }
+    private double[] scaleValues(Double[] values, Metric m) {
+        ArrayList<Double> valid = new ArrayList<>();
+        for (Double v : values) if (v != null && !Double.isNaN(v)) valid.add(v);
+        double[] out = new double[values.length];
+        if (valid.isEmpty()) return out;
+        double min = Collections.min(valid), max = Collections.max(valid);
+        if (max == min) { for (int i = 0; i < out.length; i++) out[i] = values[i] == null ? 0 : 70; return out; }
+        double pad = m.type.equals("expected") ? 0.020 : m.type.equals("rate") ? 2.0 : 0.5;
+        double lo = min - pad, hi = max + pad;
+        for (int i = 0; i < values.length; i++) {
+            Double v = values[i];
+            if (v == null || Double.isNaN(v)) out[i] = 0;
+            else out[i] = Math.max(7, Math.min(100, ((v - lo) / (hi - lo)) * 100));
+        }
+        return out;
+    }
+
+    // UI helpers -------------------------------------------------------------------------------
 
     private void setBusy(boolean busy, String message) {
         loading.setVisibility(busy ? View.VISIBLE : View.GONE);
         compareButton.setEnabled(!busy);
-        if (message != null) selectedLabel.setText(message);
+        standingsButton.setEnabled(!busy);
+        if (message != null) statusView.setText(message);
     }
     private void showError(String message) {
         errorView.setText(message == null ? "" : message);
         errorView.setVisibility(message == null || message.isEmpty() ? View.GONE : View.VISIBLE);
     }
     private void hideKeyboard() {
-        InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
-        imm.hideSoftInputFromWindow(searchInput.getWindowToken(), 0);
+        try {
+            InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+            imm.hideSoftInputFromWindow(searchInput.getWindowToken(), 0);
+        } catch (Exception ignored) {}
     }
     private TextView text(String value, int sp, int color, boolean bold) {
         TextView tv = new TextView(this);
@@ -734,7 +1201,7 @@ public class MainActivity extends Activity {
     private LinearLayout.LayoutParams matchWrap() { return new LinearLayout.LayoutParams(-1, -2); }
     private LinearLayout.LayoutParams weightLp() {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1);
-        lp.setMargins(dp(3), dp(4), dp(3), dp(4));
+        lp.setMargins(dp(3), dp(3), dp(3), dp(3));
         return lp;
     }
     private GradientDrawable rounded(int color, int radius) {
@@ -755,59 +1222,70 @@ public class MainActivity extends Activity {
     }
     private int dp(int v) { return (int) (v * getResources().getDisplayMetrics().density + 0.5f); }
 
-    private String fmtCount(int v) { return String.format(Locale.US, "%,d", v); }
-    private Double diff(Double a, Double b) { return a == null || b == null ? null : a - b; }
-    private int deltaColor(Double delta, Metric m) {
-        if (delta == null || m.higherGood == null || Math.abs(delta) < 0.0005) return MUTED;
-        boolean good = m.higherGood ? delta > 0 : delta < 0;
-        return good ? Color.rgb(22, 132, 91) : Color.rgb(188, 64, 78);
+    static class LoadedData {
+        final ArrayList<Team> teams; final ArrayList<Player> players;
+        LoadedData(ArrayList<Team> teams, ArrayList<Player> players) { this.teams = teams; this.players = players; }
     }
-    private String signedFormat(Double v, Metric m) {
-        if (v == null || Double.isNaN(v)) return "—";
-        return (v > 0 ? "+" : "") + format(v, m);
+    static class Team {
+        final int id; final String name; final String abbr;
+        Team(int id, String name, String abbr) { this.id = id; this.name = name; this.abbr = abbr == null || abbr.isEmpty() ? name : abbr; }
+        String key() { return abbr.toUpperCase(Locale.US); }
     }
-    private String format(Double v, Metric m) {
-        if (v == null || Double.isNaN(v)) return "—";
-        String pattern = m.decimals == 3 ? "0.000" : "0.0";
-        DecimalFormat df = new DecimalFormat(pattern);
-        return df.format(v) + m.unit;
-    }
-    private double[] scaleValues(Double[] values, Metric m) {
-        ArrayList<Double> valid = new ArrayList<>();
-        for (Double v : values) if (v != null && !Double.isNaN(v)) valid.add(v);
-        double[] out = new double[values.length];
-        if (valid.isEmpty()) return out;
-        double min = Collections.min(valid), max = Collections.max(valid);
-        if (max == min) { for (int i = 0; i < out.length; i++) out[i] = values[i] == null ? 0 : 70; return out; }
-        double pad = m.type.equals("expected") ? 0.020 : m.type.equals("rate") ? 2.0 : 0.5;
-        double lo = min - pad, hi = max + pad;
-        for (int i = 0; i < values.length; i++) {
-            Double v = values[i];
-            if (v == null || Double.isNaN(v)) out[i] = 0;
-            else out[i] = Math.max(7, Math.min(100, ((v - lo) / (hi - lo)) * 100));
-        }
-        return out;
-    }
-
     static class Player {
-        final int id; final String fullName; final String team; final String position;
-        Player(int id, String fullName, String team, String position) { this.id = id; this.fullName = fullName; this.team = team; this.position = position; }
+        final int id; final String fullName; final String teamName; final String teamAbbr; final String position;
+        Player(int id, String fullName, String teamName, String teamAbbr, String position) { this.id = id; this.fullName = fullName; this.teamName = teamName; this.teamAbbr = teamAbbr; this.position = position; }
+    }
+    static class LeaderboardEntry {
+        final int playerId; final String name; final String teamName; final String teamAbbr; final Stats stats;
+        LeaderboardEntry(int playerId, String name, String teamName, String teamAbbr, Stats stats) { this.playerId = playerId; this.name = name; this.teamName = teamName; this.teamAbbr = teamAbbr; this.stats = stats; }
+        String teamAbbrOrName() { return teamAbbr == null || teamAbbr.isEmpty() ? teamName : teamAbbr; }
+    }
+    static class TeamStanding {
+        final Team team; final Stats stats;
+        TeamStanding(Team team, Stats stats) { this.team = team; this.stats = stats; }
     }
     static class Stats {
         int pa = 0; int bbe = 0; final Map<String, Double> vals = new HashMap<>();
         void put(String key, Double value) { vals.put(key, value); }
         Double get(String key) { return vals.get(key); }
+        boolean anyValue() { for (Double d : vals.values()) if (d != null && !Double.isNaN(d)) return true; return false; }
     }
     static class Metric {
-        final String key, label, unit, type; final int decimals; final Boolean higherGood;
-        Metric(String key, String label, String unit, int decimals, Boolean higherGood, String type) {
-            this.key = key; this.label = label; this.unit = unit; this.decimals = decimals; this.higherGood = higherGood; this.type = type;
+        final String key, label, unit, type, group; final int decimals; final Boolean higherGood;
+        Metric(String key, String label, String unit, int decimals, Boolean higherGood, String type, String group) {
+            this.key = key; this.label = label; this.unit = unit; this.decimals = decimals; this.higherGood = higherGood; this.type = type; this.group = group;
         }
     }
     static class Comparison {
-        final Player player; final int season; final Stats seasonStats, careerStats, leagueStats; final Date updated;
-        Comparison(Player p, int s, Stats seasonStats, Stats careerStats, Stats leagueStats, Date updated) {
-            this.player = p; this.season = s; this.seasonStats = seasonStats; this.careerStats = careerStats; this.leagueStats = leagueStats; this.updated = updated;
+        final boolean isTeam; final String name, meta; final int mlbId, season; final Stats seasonStats, careerStats, leagueStats; final Date updated; final String thirdLabel; final Player player;
+        Comparison(boolean isTeam, String name, String meta, String role, int mlbId, int season, Stats seasonStats, Stats careerStats, Stats leagueStats, Date updated, String thirdLabel, Player player) {
+            this.isTeam = isTeam; this.name = name; this.meta = meta + (role == null || role.isEmpty() ? "" : " · " + role); this.mlbId = mlbId; this.season = season; this.seasonStats = seasonStats; this.careerStats = careerStats; this.leagueStats = leagueStats; this.updated = updated; this.thirdLabel = thirdLabel; this.player = player;
+        }
+        String thirdLabelShort() { return isTeam ? "Hist" : "Career"; }
+    }
+    static class WeightedStatsBuilder {
+        final Metric[] metrics; int pa = 0; int bbe = 0; final Map<String, Double> sums = new HashMap<>(); final Map<String, Double> weights = new HashMap<>();
+        WeightedStatsBuilder(Metric[] metrics) { this.metrics = metrics; }
+        void add(Stats s) {
+            if (s == null) return;
+            pa += s.pa; bbe += s.bbe;
+            for (Metric m : metrics) {
+                Double val = s.get(m.key);
+                if (val == null || Double.isNaN(val)) continue;
+                double w = (m.type.equals("expected") || m.key.equals("kPct") || m.key.equals("bbPct")) ? s.pa : s.bbe;
+                if (w <= 0) w = s.pa > 0 ? s.pa : s.bbe;
+                if (w <= 0) continue;
+                sums.put(m.key, sums.getOrDefault(m.key, 0.0) + val * w);
+                weights.put(m.key, weights.getOrDefault(m.key, 0.0) + w);
+            }
+        }
+        Stats build() {
+            Stats s = new Stats(); s.pa = pa; s.bbe = bbe;
+            for (Metric m : metrics) {
+                Double w = weights.get(m.key);
+                s.put(m.key, w == null || w <= 0 ? null : sums.get(m.key) / w);
+            }
+            return s;
         }
     }
 }
