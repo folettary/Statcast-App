@@ -15,12 +15,12 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v4
 
-      - name: Apply Statcast app v123 phone-fix files
+      - name: Apply Statcast app v124 phone-fix files
         shell: bash
         run: |
           set -euo pipefail
-          ZIP="statcast-v123-phone-fix.zip"
-          echo "Found $ZIP. Applying v123 files before build..."
+          ZIP="statcast-v124-phone-fix.zip"
+          echo "Found $ZIP. Applying v124 files before build..."
           test -f "$ZIP"
           rm -rf /tmp/statcast-phone-fix
           mkdir -p /tmp/statcast-phone-fix
@@ -48,7 +48,7 @@ jobs:
           echo "Version marker:"
           grep -n "versionName" app/build.gradle || true
           echo "UI/code markers:"
-          grep -n "v123" app/src/main/java/com/folettary/statcastcompare/MainActivity.java | head || true
+          grep -n "v124" app/src/main/java/com/folettary/statcastcompare/MainActivity.java | head || true
           grep -n "ComparisonBarView" app/src/main/java/com/folettary/statcastcompare/MainActivity.java | head || true
 
       - name: Set up JDK
