@@ -9540,7 +9540,7 @@ public class MainActivity extends Activity {
     }
 
     private TextView tinyValue(String label, String value, int color) {
-        TextView tv = text(label + " " + value, 10, color, true);
+        TextView tv = text(label + "\n" + value, 10, color, true);
         tv.setGravity(Gravity.CENTER);
         tv.setPadding(dp(2), dp(1), dp(2), dp(1));
         return tv;
@@ -9556,7 +9556,7 @@ public class MainActivity extends Activity {
     }
 
     private TextView compactValue(String label, String value, int color) {
-        TextView tv = text(label + " " + value, 11, color, true);
+        TextView tv = text(label + "\n" + value, 11, color, true);
         tv.setGravity(Gravity.CENTER);
         tv.setPadding(dp(3), dp(1), dp(3), dp(1));
         return tv;
