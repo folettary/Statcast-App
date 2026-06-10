@@ -535,7 +535,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v153", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v154", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -5230,29 +5230,18 @@ public class MainActivity extends Activity {
         TextView meta = text(c.meta, 13, Color.rgb(214, 223, 236), true);
         meta.setPadding(0, dp(3), 0, dp(8));
         titleCol.addView(meta);
-        LinearLayout miniPills = new LinearLayout(this);
-        miniPills.setOrientation(LinearLayout.HORIZONTAL);
         if (c.isTeam) {
-            miniPills.addView(profileDataPill(new DecimalFormat("0.0").format(c.seasonStats.ip), "IP", palette), weightLp());
-            miniPills.addView(profileDataPill(fmtCount(c.seasonStats.pa), "BF", palette), weightLp());
-            miniPills.addView(profileDataPill(format(c.seasonStats.get("teamERA"), metricByKey("teamERA")), "ERA", palette), weightLp());
-            miniPills.addView(profileDataPill(format(c.seasonStats.get("teamOPS"), metricByKey("teamOPS")), "OPS", palette), weightLp());
+            titleCol.addView(heroMetricGrid(c, new String[] { "teamWinPct", "teamRunDiff", "teamOPS", "teamERA" }, palette), matchWrap());
         } else if (c.seasonStats.ip > 0 && (c.seasonStats.get("era") != null || c.seasonStats.get("whip") != null)) {
-            miniPills.addView(profileDataPill(new DecimalFormat("0.0").format(c.seasonStats.ip), "IP", palette), weightLp());
-            miniPills.addView(profileDataPill(fmtCount(c.seasonStats.pa), "BF", palette), weightLp());
-            miniPills.addView(profileDataPill(format(c.seasonStats.get("era"), metricByKey("era")), "ERA", palette), weightLp());
-            miniPills.addView(profileDataPill(format(c.seasonStats.get("whip"), metricByKey("whip")), "WHIP", palette), weightLp());
+            titleCol.addView(heroMetricGrid(c, new String[] { "era", "whip", "k9", "kbb" }, palette), matchWrap());
         } else {
-            miniPills.addView(profileDataPill(format(c.seasonStats.get("avg"), metricByKey("avg")), "AVG", palette), weightLp());
-            miniPills.addView(profileDataPill(format(c.seasonStats.get("ops"), metricByKey("ops")), "OPS", palette), weightLp());
-            miniPills.addView(profileDataPill(format(c.seasonStats.get("wOBA"), metricByKey("wOBA")), "wOBA", palette), weightLp());
-            miniPills.addView(profileDataPill(format(c.seasonStats.get("xwOBA"), metricByKey("xwOBA")), "xwOBA", palette), weightLp());
+            titleCol.addView(heroMetricGrid(c, new String[] { "avg", "ops", "wOBA", "xwOBA" }, palette), matchWrap());
         }
-        titleCol.addView(miniPills, matchWrap());
 
-        if (c.isTeam) addTeamProfileSnapshot(card, c, palette);
+        if (c.isTeam) addProfileSnapshotGrid(card, c, palette);
         addBaseballCardSummary(card, c, palette);
         if (!c.isTeam) addPlayerLensSummaryCard(card, c, palette);
+        addProfileMetricCards(card, c, palette);
 
         LinearLayout sectionRow = new LinearLayout(this);
         sectionRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -5302,6 +5291,269 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(156));
         lp.setMargins(0, dp(10), 0, 0);
         card.addView(lensCard, lp);
+    }
+
+
+    private LinearLayout heroMetricGrid(Comparison c, String[] keys, TeamPalette palette) {
+        LinearLayout grid = new LinearLayout(this);
+        grid.setOrientation(LinearLayout.VERTICAL);
+        if (keys == null || keys.length == 0) return grid;
+        for (int i = 0; i < keys.length; i += 2) {
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            for (int j = 0; j < 2 && i + j < keys.length; j++) {
+                String key = keys[i + j];
+                Metric m = metricByKey(key);
+                String label = heroMetricLabel(m, key);
+                Double val = c == null || c.seasonStats == null ? null : c.seasonStats.get(key);
+                TextView pill = profileDataPill(format(val, m), label, palette);
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(43), 1);
+                lp.setMargins(j == 0 ? 0 : dp(6), i == 0 ? 0 : dp(6), 0, 0);
+                row.addView(pill, lp);
+            }
+            grid.addView(row, matchWrap());
+        }
+        return grid;
+    }
+
+    private String heroMetricLabel(Metric m, String key) {
+        if (key == null) return "STAT";
+        if ("teamWinPct".equals(key)) return "W-L";
+        if ("teamRunDiff".equals(key)) return "RD";
+        if (m == null) return key.toUpperCase(Locale.US);
+        return m.label.replace("Allowed", "").replace("Team ", "").trim();
+    }
+
+    private void addProfileSnapshotGrid(LinearLayout card, Comparison c, TeamPalette palette) {
+        if (card == null || c == null || c.seasonStats == null) return;
+        String[] keys = c.isTeam
+                ? new String[] { "teamAVG", "teamOPS", "teamHR", "teamOBP", "teamRunsScored", "teamERA" }
+                : new String[] { "avg", "ops", "hr", "obp", "wOBA", "xwOBA" };
+        LinearLayout shell = new LinearLayout(this);
+        shell.setOrientation(LinearLayout.VERTICAL);
+        shell.setPadding(dp(12), dp(12), dp(12), dp(12));
+        shell.setBackground(roundedGradientStroke(new int[] {
+                Color.rgb(7, 11, 18),
+                mixColor(readableTeamColor(palette.primary, palette.secondary, true), Color.rgb(7, 11, 18), 0.88f),
+                Color.rgb(7, 11, 18)
+        }, 22, Color.argb(76, 255, 255, 255), 1));
+        LinearLayout.LayoutParams shellLp = matchWrap();
+        shellLp.setMargins(0, dp(10), 0, 0);
+        card.addView(shell, shellLp);
+
+        LinearLayout head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        TextView title = text(c.isTeam ? "TEAM SNAPSHOT" : "PLAYER SNAPSHOT", 11, softColor(palette.primary, 0.16f), true);
+        title.setLetterSpacing(0.12f);
+        head.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView season = text(c.season + " SEASON", 10, Color.rgb(218, 230, 244), true);
+        season.setGravity(Gravity.CENTER);
+        season.setPadding(dp(9), dp(4), dp(9), dp(4));
+        season.setBackground(roundedStroke(Color.argb(24, 255, 255, 255), Color.argb(72, 255, 255, 255), 999, 1));
+        head.addView(season);
+        shell.addView(head, matchWrap());
+
+        for (int i = 0; i < keys.length; i += 3) {
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            LinearLayout.LayoutParams rowLp = matchWrap();
+            rowLp.setMargins(0, dp(i == 0 ? 10 : 7), 0, 0);
+            for (int j = 0; j < 3 && i + j < keys.length; j++) {
+                Metric m = metricByKey(keys[i + j]);
+                View tile = profileSnapshotTile(c, m, keys[i + j], palette);
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(76), 1);
+                lp.setMargins(j == 0 ? 0 : dp(7), 0, 0, 0);
+                row.addView(tile, lp);
+            }
+            shell.addView(row, rowLp);
+        }
+    }
+
+    private View profileSnapshotTile(Comparison c, Metric m, String key, TeamPalette palette) {
+        LinearLayout tile = new LinearLayout(this);
+        tile.setOrientation(LinearLayout.VERTICAL);
+        tile.setGravity(Gravity.CENTER);
+        tile.setPadding(dp(6), dp(7), dp(6), dp(7));
+        tile.setBackground(roundedStroke(Color.argb(104, 13, 17, 25), Color.argb(56, 255, 255, 255), 14, 1));
+        String label = snapshotMetricLabel(m, key);
+        Double v = c == null || c.seasonStats == null ? null : c.seasonStats.get(key);
+        TextView lab = text(label, 9, Color.rgb(204, 214, 230), true);
+        lab.setGravity(Gravity.CENTER);
+        lab.setLetterSpacing(0.06f);
+        tile.addView(lab, matchWrap());
+        TextView val = text(format(v, m), 19, softColor(palette.primary, 0.10f), true);
+        val.setGravity(Gravity.CENTER);
+        val.setFontFeatureSettings("'tnum' 1");
+        LinearLayout.LayoutParams vlp = matchWrap();
+        vlp.setMargins(0, dp(5), 0, 0);
+        tile.addView(val, vlp);
+        return tile;
+    }
+
+    private String snapshotMetricLabel(Metric m, String key) {
+        if ("teamAVG".equals(key)) return "TEAM AVG";
+        if ("teamRunsScored".equals(key)) return "RUNS";
+        if ("teamRunDiff".equals(key)) return "RUN DIFF";
+        if (m == null) return key == null ? "STAT" : key.toUpperCase(Locale.US);
+        return m.label.toUpperCase(Locale.US).replace("RUNS SCORED", "RUNS");
+    }
+
+    private void addProfileMetricCards(LinearLayout card, Comparison c, TeamPalette palette) {
+        if (card == null || c == null || c.seasonStats == null) return;
+        ArrayList<Metric> metrics = profileMetricCardMetrics(c);
+        if (metrics.isEmpty()) return;
+
+        LinearLayout shell = new LinearLayout(this);
+        shell.setOrientation(LinearLayout.VERTICAL);
+        shell.setPadding(dp(12), dp(12), dp(12), dp(12));
+        shell.setBackground(roundedGradientStroke(new int[] {
+                Color.rgb(6, 10, 18),
+                Color.rgb(9, 14, 23),
+                Color.rgb(6, 10, 18)
+        }, 22, Color.argb(68, 255, 255, 255), 1));
+        LinearLayout.LayoutParams shellLp = matchWrap();
+        shellLp.setMargins(0, dp(10), 0, 0);
+        card.addView(shell, shellLp);
+
+        LinearLayout head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        TextView title = text(c.isTeam ? "KEY TEAM METRICS" : "KEY LENS METRICS", 11, softColor(palette.primary, 0.14f), true);
+        title.setLetterSpacing(0.12f);
+        head.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView sub = text(c.isTeam ? "vs MLB teams" : currentLensNameForUi(), 10, Color.rgb(168, 184, 206), true);
+        sub.setGravity(Gravity.RIGHT);
+        head.addView(sub);
+        shell.addView(head, matchWrap());
+
+        for (int i = 0; i < metrics.size(); i += 2) {
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            LinearLayout.LayoutParams rowLp = matchWrap();
+            rowLp.setMargins(0, dp(i == 0 ? 10 : 8), 0, 0);
+            for (int j = 0; j < 2 && i + j < metrics.size(); j++) {
+                Metric m = metrics.get(i + j);
+                View tile = metricComparisonTile(c, m, palette);
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(164), 1);
+                lp.setMargins(j == 0 ? 0 : dp(8), 0, 0, 0);
+                row.addView(tile, lp);
+            }
+            shell.addView(row, rowLp);
+        }
+    }
+
+    private ArrayList<Metric> profileMetricCardMetrics(Comparison c) {
+        ArrayList<Metric> out = new ArrayList<>();
+        if (c == null) return out;
+        String[] preferred = c.isTeam
+                ? new String[] { "teamOPS", "teamWOBA", "teamXWOBA", "teamRPG", "teamHR", "teamERA" }
+                : (c.player != null && isPitcher(c.player)
+                    ? new String[] { "era", "whip", "k9", "pitchKMinusBBPct", "pxwOBA", "pWhiffPct" }
+                    : new String[] { "ops", "wOBA", "xwOBA", "barrelPct", "hardHitPct", "sprintSpeed" });
+        for (String key : preferred) addMetricIfComparable(out, c, key, 6);
+        if (!c.isTeam) {
+            for (Metric m : scorableLensMetricsForProfile(c)) {
+                if (out.size() >= 6) break;
+                if (!containsMetricKey(out, m.key)) out.add(m);
+            }
+        }
+        return out;
+    }
+
+    private void addMetricIfComparable(ArrayList<Metric> out, Comparison c, String key, int max) {
+        if (out == null || out.size() >= max || c == null || c.seasonStats == null || c.leagueStats == null) return;
+        Metric m = metricByKey(key);
+        if (m == null || c.seasonStats.get(key) == null || c.leagueStats.get(key) == null) return;
+        if (!containsMetricKey(out, key)) out.add(m);
+    }
+
+    private boolean containsMetricKey(ArrayList<Metric> list, String key) {
+        if (list == null || key == null) return false;
+        for (Metric m : list) if (m != null && key.equals(m.key)) return true;
+        return false;
+    }
+
+    private View metricComparisonTile(Comparison c, Metric m, TeamPalette palette) {
+        LinearLayout tile = new LinearLayout(this);
+        tile.setOrientation(LinearLayout.VERTICAL);
+        tile.setPadding(dp(10), dp(10), dp(10), dp(9));
+        tile.setBackground(roundedGradientStroke(new int[] {
+                Color.argb(222, 9, 13, 20),
+                Color.argb(210, 14, 19, 28)
+        }, 17, Color.argb(58, 255, 255, 255), 1));
+
+        Double value = c.seasonStats == null ? null : c.seasonStats.get(m.key);
+        Double league = c.leagueStats == null ? null : c.leagueStats.get(m.key);
+        Double career = c.careerStats == null ? null : c.careerStats.get(m.key);
+        Double pct = c.percentile == null ? null : c.percentile.get(m.key);
+        int accent = pctColorForTile(palette, pct, m);
+
+        LinearLayout head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        TextView label = text(m.label.toUpperCase(Locale.US), 12, Color.WHITE, true);
+        label.setSingleLine(true);
+        head.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView pctBadge = text(pct == null ? "— PCTL" : ordinalPercentile(pct), 9, accent, true);
+        pctBadge.setGravity(Gravity.CENTER);
+        pctBadge.setPadding(dp(7), dp(3), dp(7), dp(3));
+        pctBadge.setBackground(roundedStroke(Color.argb(24, Color.red(accent), Color.green(accent), Color.blue(accent)), Color.argb(104, Color.red(accent), Color.green(accent), Color.blue(accent)), 999, 1));
+        head.addView(pctBadge);
+        tile.addView(head, matchWrap());
+
+        TextView big = text(format(value, m), 23, accent, true);
+        big.setFontFeatureSettings("'tnum' 1");
+        LinearLayout.LayoutParams bigLp = matchWrap();
+        bigLp.setMargins(0, dp(7), 0, 0);
+        tile.addView(big, bigLp);
+
+        LeagueSparkBarView bar = new LeagueSparkBarView(this, m, value, league, pct, palette);
+        LinearLayout.LayoutParams barLp = new LinearLayout.LayoutParams(-1, dp(56));
+        barLp.setMargins(0, dp(2), 0, 0);
+        tile.addView(bar, barLp);
+
+        LinearLayout vals = new LinearLayout(this);
+        vals.setOrientation(LinearLayout.HORIZONTAL);
+        vals.setGravity(Gravity.CENTER_VERTICAL);
+        vals.addView(metricTileMiniValue("THIS YEAR", format(value, m), accent), new LinearLayout.LayoutParams(0, -2, 1));
+        vals.addView(metricTileMiniValue("MLB AVG", format(league, m), Color.rgb(220, 228, 240)), new LinearLayout.LayoutParams(0, -2, 1));
+        vals.addView(metricTileMiniValue(c.isTeam ? "2015+" : "CAREER", format(career, m), Color.rgb(220, 228, 240)), new LinearLayout.LayoutParams(0, -2, 1));
+        LinearLayout.LayoutParams valsLp = matchWrap();
+        valsLp.setMargins(0, dp(2), 0, 0);
+        tile.addView(vals, valsLp);
+        return tile;
+    }
+
+    private TextView metricTileMiniValue(String label, String value, int color) {
+        TextView tv = text((value == null ? "—" : value) + "\n" + label, 9, color, true);
+        tv.setGravity(Gravity.CENTER);
+        tv.setPadding(dp(3), dp(4), dp(3), dp(4));
+        tv.setLineSpacing(dp(1), 1.0f);
+        tv.setBackground(roundedStroke(Color.argb(26, 255, 255, 255), Color.argb(40, 255, 255, 255), 10, 1));
+        tv.setFontFeatureSettings("'tnum' 1");
+        return tv;
+    }
+
+    private int pctColorForTile(TeamPalette palette, Double pct, Metric m) {
+        if (pct == null || Double.isNaN(pct)) return softColor(palette.primary, 0.10f);
+        double p = Math.max(0, Math.min(100, pct));
+        if (p >= 80) return softColor(palette.primary, 0.08f);
+        if (p >= 60) return mixColor(Color.WHITE, softColor(palette.primary, 0.10f), 0.30f);
+        if (p <= 35) return profileNegativeColor();
+        return Color.rgb(220, 228, 240);
+    }
+
+    private String ordinalPercentile(Double pct) {
+        if (pct == null || Double.isNaN(pct)) return "— PCTL";
+        int p = (int)Math.round(Math.max(0, Math.min(100, pct)));
+        String suffix = "TH";
+        if (p % 100 < 11 || p % 100 > 13) {
+            if (p % 10 == 1) suffix = "ST";
+            else if (p % 10 == 2) suffix = "ND";
+            else if (p % 10 == 3) suffix = "RD";
+        }
+        return p + suffix + " PCTL";
     }
 
     private View profileSparkLegend() {
@@ -5797,9 +6049,9 @@ public class MainActivity extends Activity {
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(0, 0, 0, dp(5));
-        TextView season = tableCell("Season", 56, Color.rgb(186, 199, 216), true, Gravity.LEFT);
+        TextView season = tableCell("Season", 50, Color.rgb(186, 199, 216), true, Gravity.LEFT);
         row.addView(season);
-        for (Metric m : cols) row.addView(tableCell(m.label, 68, Color.rgb(186, 199, 216), true, Gravity.CENTER));
+        for (Metric m : cols) row.addView(tableCell(m.label, 58, Color.rgb(186, 199, 216), true, Gravity.CENTER));
         return row;
     }
 
@@ -5816,16 +6068,16 @@ public class MainActivity extends Activity {
         row.setBackground(roundedStroke(fill, stroke, 14, 1));
         int labelColor = current ? softColor(palette.primary, 0.18f) : (career ? Color.rgb(248, 236, 210) : Color.rgb(235, 242, 250));
         int valueColor = current ? Color.WHITE : (career ? Color.rgb(246, 239, 221) : Color.rgb(235, 242, 250));
-        row.addView(tableCell(label, 56, labelColor, true, Gravity.LEFT));
+        row.addView(tableCell(label, 50, labelColor, true, Gravity.LEFT));
         for (Metric m : cols) {
             Double val = stats == null ? null : stats.get(m.key);
-            row.addView(tableCell(format(val, m), 68, valueColor, current || career, Gravity.CENTER));
+            row.addView(tableCell(format(val, m), 58, valueColor, current || career, Gravity.CENTER));
         }
         return row;
     }
 
     private TextView tableCell(String value, int widthDp, int color, boolean bold, int gravity) {
-        TextView tv = text(value == null ? "—" : value, 11, color, bold);
+        TextView tv = text(value == null ? "—" : value, 10, color, bold);
         tv.setGravity(gravity);
         tv.setSingleLine(true);
         tv.setPadding(dp(3), dp(1), dp(3), dp(1));
@@ -8839,12 +9091,14 @@ public class MainActivity extends Activity {
     }
 
     private TextView profileDataPill(String value, String label, TeamPalette palette) {
-        TextView tv = text(label + "\n" + value, 11, Color.WHITE, true);
+        TextView tv = text(label + "
+" + value, 10, Color.WHITE, true);
         tv.setGravity(Gravity.CENTER);
-        tv.setPadding(dp(7), dp(6), dp(7), dp(6));
+        tv.setPadding(dp(7), dp(7), dp(7), dp(7));
         tv.setLineSpacing(dp(1), 1.0f);
-        tv.setBackground(roundedStroke(Color.argb(176, 15, 20, 28), Color.argb(82, 255, 255, 255), 14, 1));
+        tv.setBackground(roundedGradientStroke(new int[] { Color.argb(196, 11, 16, 24), Color.argb(156, 17, 23, 34) }, 14, Color.argb(72, 255, 255, 255), 1));
         tv.setFontFeatureSettings("'tnum' 1");
+        tv.setSingleLine(false);
         return tv;
     }
 
