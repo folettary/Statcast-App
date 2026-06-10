@@ -535,7 +535,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v156", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v157", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -3219,9 +3219,23 @@ public class MainActivity extends Activity {
             Metric m = findMetricByKey(key);
             if (roleAllowsMetric(role, m)) normalized.add(key);
         }
-        String[] order = new String[] { "recommended", "traditional", "statcastAdvanced", "plateDiscipline", "powerContact", "runPrevention", "teamOverall", "teamOffense", "teamPitchingDefense", "speedBaserunning", "moreStats", "all", "luck" };
-        for (String preset : order) if (normalized.equals(metricKeysForPresetAndRole(preset, role))) return presetDisplayName(preset, role);
+        String[] order = presetOrderForRole(role);
+        for (String preset : order) {
+            LinkedHashSet<String> presetKeys = metricKeysForPresetAndRole(preset, role);
+            if (presetKeys.isEmpty()) continue;
+            if (normalized.equals(presetKeys)) return presetDisplayName(preset, role);
+        }
         return "Custom";
+    }
+
+    private String[] presetOrderForRole(String role) {
+        if (isTeamMetricContext()) {
+            return new String[] { "teamOverall", "teamOffense", "teamPitchingDefense", "recommended", "traditional", "statcastAdvanced", "plateDiscipline", "powerContact", "runPrevention", "moreStats", "all" };
+        }
+        if ("pitch".equals(role)) {
+            return new String[] { "recommended", "traditional", "statcastAdvanced", "plateDiscipline", "powerContact", "runPrevention", "moreStats", "all" };
+        }
+        return new String[] { "recommended", "traditional", "statcastAdvanced", "plateDiscipline", "powerContact", "speedBaserunning", "moreStats", "all", "luck" };
     }
 
     private String presetDisplayName(String preset, String role) {
@@ -3375,15 +3389,7 @@ public class MainActivity extends Activity {
     }
 
     private void showMetricPicker() {
-        final LinkedHashMap<String, CheckBox> boxes = new LinkedHashMap<>();
-        final LinkedHashMap<String, CheckBox> keyBoxes = new LinkedHashMap<>();
-        final LinkedHashMap<String, TextView> presetChips = new LinkedHashMap<>();
-        final String allowedMetricRole = allowedMetricRoleForCurrentContext();
-        final ArrayList<Metric> pickerMetrics = new ArrayList<>();
-        for (Metric m : metrics) {
-            if (!roleAllowsMetric(allowedMetricRole, m)) continue;
-            pickerMetrics.add(m);
-        }
+        final String role = allowedMetricRoleForCurrentContext();
 
         LinearLayout sheet = new LinearLayout(this);
         sheet.setOrientation(LinearLayout.VERTICAL);
@@ -3400,80 +3406,174 @@ public class MainActivity extends Activity {
         handleLp.gravity = Gravity.CENTER_HORIZONTAL;
         sheet.addView(handle, handleLp);
 
-        LinearLayout header = new LinearLayout(this);
-        header.setOrientation(LinearLayout.VERTICAL);
-        header.setPadding(0, dp(10), 0, dp(8));
-        TextView title = text("Stat Lens", 18, Color.rgb(238, 245, 252), true);
+        TextView title = text("Stat Lens", 19, Color.rgb(238, 245, 252), true);
         title.setLetterSpacing(0.02f);
-        header.addView(title);
-        TextView hint = text(("both".equals(allowedMetricRole)
-                ? "Lens = which stats appear. Mode = how those stats are compared."
-                : "Locked to " + homeRoleLabel(allowedMetricRole) + " stats. Lens = which stats appear; Mode = how compared."),
-                11, Color.rgb(150, 166, 190), false);
-        hint.setPadding(0, dp(5), 0, 0);
-        header.addView(hint);
-        TextView presetPill = text("Preset", 11, Color.rgb(255, 235, 152), true);
-        presetPill.setGravity(Gravity.CENTER);
-        presetPill.setPadding(dp(10), dp(6), dp(10), dp(6));
-        LinearLayout.LayoutParams presetPillLp = new LinearLayout.LayoutParams(-2, -2);
-        presetPillLp.setMargins(0, dp(8), 0, 0);
-        header.addView(presetPill, presetPillLp);
-        sheet.addView(header, matchWrap());
+        LinearLayout.LayoutParams titleLp = matchWrap();
+        titleLp.setMargins(0, dp(12), 0, 0);
+        sheet.addView(title, titleLp);
 
-        TextView lensHelper = text("Choose a lens. Each card previews the stats it includes; use Custom/Edit below only when you want to change the checklist.", 10, Color.rgb(158, 176, 202), false);
-        lensHelper.setPadding(0, dp(2), 0, dp(8));
-        sheet.addView(lensHelper, matchWrap());
+        TextView hint = text("Lens chooses which stats appear. Comparison mode is changed on the profile page.", 11, Color.rgb(156, 173, 198), false);
+        hint.setPadding(0, dp(5), 0, dp(8));
+        sheet.addView(hint, matchWrap());
 
-        LinearLayout presetRow1 = new LinearLayout(this); presetRow1.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout presetRow2 = new LinearLayout(this); presetRow2.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout presetRow3 = new LinearLayout(this); presetRow3.setOrientation(LinearLayout.HORIZONTAL);
-        sheet.addView(presetRow1, matchWrap());
-        LinearLayout.LayoutParams preset2Lp = matchWrap(); preset2Lp.setMargins(0, dp(7), 0, 0); sheet.addView(presetRow2, preset2Lp);
-        LinearLayout.LayoutParams preset3Lp = matchWrap(); preset3Lp.setMargins(0, dp(7), 0, 0); sheet.addView(presetRow3, preset3Lp);
+        TextView current = text("Current: " + currentLensNameForUi(), 11, Color.rgb(255, 235, 152), true);
+        current.setGravity(Gravity.CENTER);
+        current.setPadding(dp(10), dp(7), dp(10), dp(7));
+        current.setBackground(roundedGradientStroke(new int[] {
+                Color.argb(210, 6, 10, 18),
+                Color.argb(160, 246, 198, 68)
+        }, 999, Color.argb(124, 246, 198, 68), 1));
+        LinearLayout.LayoutParams currentLp = new LinearLayout.LayoutParams(-2, -2);
+        currentLp.setMargins(0, 0, 0, dp(10));
+        sheet.addView(current, currentLp);
 
-        addDialogLensCard(presetRow1, presetChips, "recommended", "Recommended", boxes, keyBoxes, allowedMetricRole, presetPill);
-        addDialogLensCard(presetRow1, presetChips, "traditional", "Traditional", boxes, keyBoxes, allowedMetricRole, presetPill);
-        addDialogLensCard(presetRow2, presetChips, "statcastAdvanced", "Statcast", boxes, keyBoxes, allowedMetricRole, presetPill);
-        addDialogLensCard(presetRow2, presetChips, "plateDiscipline", "Plate Discipline", boxes, keyBoxes, allowedMetricRole, presetPill);
-        addDialogLensCard(presetRow3, presetChips, "powerContact", isTeamMetricContext() || "hit".equals(allowedMetricRole) ? "Power/Contact" : "Power/Contact Allowed", boxes, keyBoxes, allowedMetricRole, presetPill);
-        if (isTeamMetricContext() || "pitch".equals(allowedMetricRole)) addDialogLensCard(presetRow3, presetChips, "runPrevention", "Run Prevention", boxes, keyBoxes, allowedMetricRole, presetPill);
-        else addDialogLensCard(presetRow3, presetChips, "speedBaserunning", "Speed/Baserunning", boxes, keyBoxes, allowedMetricRole, presetPill);
+        final AlertDialog dialog = new AlertDialog.Builder(this).create();
 
+        ScrollView scroller = new ScrollView(this);
+        scroller.setFillViewport(false);
+        LinearLayout lensList = new LinearLayout(this);
+        lensList.setOrientation(LinearLayout.VERTICAL);
+        lensList.setPadding(0, 0, 0, dp(4));
+        scroller.addView(lensList);
+
+        addLensChoiceCard(lensList, "recommended", "Recommended", "Balanced overall profile", role, dialog);
+        addLensChoiceCard(lensList, "traditional", "Traditional", "Classic box-score production", role, dialog);
+        addLensChoiceCard(lensList, "statcastAdvanced", "Statcast", "Expected stats and contact quality", role, dialog);
+        addLensChoiceCard(lensList, "plateDiscipline", "Plate Discipline", "Swing decisions and contact control", role, dialog);
+        addLensChoiceCard(lensList, "powerContact", "Power/Contact", "Damage and contact quality", role, dialog);
+        if (isTeamMetricContext() || "pitch".equals(role)) {
+            addLensChoiceCard(lensList, "runPrevention", "Run Prevention", "Run prevention and allowed contact", role, dialog);
+        } else {
+            addLensChoiceCard(lensList, "speedBaserunning", "Speed/Baserunning", "Speed and stolen-base value", role, dialog);
+        }
         if (isTeamMetricContext()) {
-            LinearLayout presetRow4 = new LinearLayout(this); presetRow4.setOrientation(LinearLayout.HORIZONTAL);
-            LinearLayout.LayoutParams preset4Lp = matchWrap(); preset4Lp.setMargins(0, dp(7), 0, 0); sheet.addView(presetRow4, preset4Lp);
-            addDialogLensCard(presetRow4, presetChips, "teamOverall", "Team Overall", boxes, keyBoxes, allowedMetricRole, presetPill);
-            addDialogLensCard(presetRow4, presetChips, "teamOffense", "Offense", boxes, keyBoxes, allowedMetricRole, presetPill);
-            LinearLayout presetRow5 = new LinearLayout(this); presetRow5.setOrientation(LinearLayout.HORIZONTAL);
-            LinearLayout.LayoutParams preset5Lp = matchWrap(); preset5Lp.setMargins(0, dp(7), 0, 0); sheet.addView(presetRow5, preset5Lp);
-            addDialogLensCard(presetRow5, presetChips, "teamPitchingDefense", "Pitching/Defense", boxes, keyBoxes, allowedMetricRole, presetPill);
-            addDialogLensCard(presetRow5, presetChips, "moreStats", "More Stats", boxes, keyBoxes, allowedMetricRole, presetPill);
+            addLensChoiceCard(lensList, "teamOverall", "Team Overall", "Team-wide offense and run prevention", role, dialog);
+            addLensChoiceCard(lensList, "teamOffense", "Team Offense", "Lineup production and contact quality", role, dialog);
+            addLensChoiceCard(lensList, "teamPitchingDefense", "Pitching/Defense", "Pitching prevention and allowed contact", role, dialog);
+        }
+        addLensChoiceCard(lensList, "moreStats", "More Stats", "Volume, counting stats, and context", role, dialog);
+
+        LinearLayout.LayoutParams scrollerLp = new LinearLayout.LayoutParams(-1, dp(430));
+        scrollerLp.setMargins(0, 0, 0, dp(10));
+        sheet.addView(scroller, scrollerLp);
+
+        TextView customize = statsDialogAction("Customize selected lens", false);
+        LinearLayout.LayoutParams customizeLp = matchWrap();
+        customizeLp.setMargins(0, 0, 0, dp(8));
+        sheet.addView(customize, customizeLp);
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        actions.setGravity(Gravity.CENTER_VERTICAL);
+        TextView cancel = statsDialogAction("Cancel", false);
+        actions.addView(cancel, new LinearLayout.LayoutParams(-1, dp(46)));
+        sheet.addView(actions, matchWrap());
+
+        cancel.setOnClickListener(v -> dialog.dismiss());
+        customize.setOnClickListener(v -> {
+            dialog.dismiss();
+            showCustomLensEditor(role);
+        });
+
+        dialog.setView(sheet);
+        dialog.show();
+        try {
+            android.view.Window w = dialog.getWindow();
+            if (w != null) {
+                w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+                w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private void addLensChoiceCard(LinearLayout list, String presetKey, String label, String description, String role, AlertDialog dialog) {
+        if (list == null) return;
+        String preset = normalizePresetKey(presetKey);
+        LinkedHashSet<String> presetKeys = metricKeysForPresetAndRole(preset, role);
+        if (presetKeys.isEmpty()) return;
+        boolean active = preset.equals(activePresetKeyForRole(selectedMetricKeys, role));
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(13), dp(11), dp(13), dp(11));
+        card.setBackground(active
+                ? roundedGradientStroke(new int[] { Color.rgb(255, 245, 132), Color.rgb(244, 192, 54), Color.rgb(217, 132, 24) }, 18, Color.argb(230, 255, 245, 142), 2)
+                : roundedGradientStroke(new int[] { Color.argb(230, 7, 12, 23), Color.argb(212, 12, 31, 46) }, 18, Color.argb(82, 95, 230, 220), 1));
+        card.setForeground(ripple(true));
+        attachPremiumPress(card, 0.98f);
+
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        TextView name = text((active ? "✓ " : "") + label, 14, active ? Color.rgb(9, 13, 21) : Color.rgb(238, 245, 252), true);
+        name.setSingleLine(true);
+        name.setEllipsize(TextUtils.TruncateAt.END);
+        top.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
+        if (active) {
+            TextView applied = text("Applied", 10, Color.rgb(9, 13, 21), true);
+            applied.setGravity(Gravity.CENTER);
+            applied.setPadding(dp(8), dp(3), dp(8), dp(3));
+            applied.setBackground(rounded(Color.argb(54, 255, 255, 255), 999));
+            top.addView(applied);
+        }
+        card.addView(top, matchWrap());
+
+        TextView desc = text(description, 11, active ? Color.rgb(32, 38, 52) : Color.rgb(162, 181, 206), false);
+        desc.setPadding(0, dp(3), 0, dp(5));
+        card.addView(desc, matchWrap());
+
+        TextView preview = text(lensPreviewForPreset(preset, role), 11, active ? Color.rgb(18, 24, 35) : Color.rgb(226, 236, 248), true);
+        preview.setSingleLine(false);
+        preview.setMaxLines(2);
+        preview.setEllipsize(TextUtils.TruncateAt.END);
+        preview.setLineSpacing(dp(1), 0.96f);
+        card.addView(preview, matchWrap());
+
+        card.setOnClickListener(v -> {
+            applyMetricsForRoleAndPreset(role, preset, true);
+            refreshAfterLensChangeKeepScroll();
+            if (dialog != null) dialog.dismiss();
+        });
+
+        LinearLayout.LayoutParams lp = matchWrap();
+        lp.setMargins(0, 0, 0, dp(8));
+        list.addView(card, lp);
+    }
+
+    private void showCustomLensEditor(String role) {
+        final LinkedHashMap<String, CheckBox> boxes = new LinkedHashMap<>();
+        final LinkedHashMap<String, CheckBox> keyBoxes = new LinkedHashMap<>();
+        final ArrayList<Metric> pickerMetrics = new ArrayList<>();
+        for (Metric m : metrics) {
+            if (!roleAllowsMetric(role, m)) continue;
+            pickerMetrics.add(m);
         }
 
-        TextView clearChip = dialogPresetChip("Clear Custom", () -> {
-            for (CheckBox cb : boxes.values()) cb.setChecked(false);
-            for (CheckBox cb : keyBoxes.values()) cb.setChecked(false);
-            updateStatsDialogPresetState(presetPill, boxes, allowedMetricRole, presetChips);
-        });
-        LinearLayout clearRow = new LinearLayout(this); clearRow.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams clearRowLp = matchWrap(); clearRowLp.setMargins(0, dp(7), 0, 0);
-        clearRow.addView(clearChip, weightLp());
-        sheet.addView(clearRow, clearRowLp);
+        LinearLayout sheet = new LinearLayout(this);
+        sheet.setOrientation(LinearLayout.VERTICAL);
+        sheet.setPadding(dp(16), dp(14), dp(16), dp(14));
+        sheet.setBackground(roundedGradientStroke(new int[] {
+                Color.rgb(4, 8, 16),
+                Color.rgb(7, 15, 28),
+                Color.rgb(5, 24, 40)
+        }, 28, Color.argb(96, 96, 228, 222), 1));
 
-        TextView applyTop = statsDialogAction("Apply Lens", true);
-        LinearLayout.LayoutParams applyTopLp = matchWrap();
-        applyTopLp.setMargins(0, dp(10), 0, dp(2));
-        sheet.addView(applyTop, applyTopLp);
+        TextView title = text("Customize Lens", 19, Color.rgb(238, 245, 252), true);
+        title.setPadding(0, dp(4), 0, 0);
+        sheet.addView(title, matchWrap());
+
+        TextView hint = text("Use this only when a preset lens is close but not exact. Score metrics drive the rows; Card metrics drive the key metric cards.", 11, Color.rgb(156, 173, 198), false);
+        hint.setPadding(0, dp(5), 0, dp(10));
+        sheet.addView(hint, matchWrap());
 
         LinearLayout list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
-        list.setPadding(0, dp(10), 0, 0);
+        list.setPadding(0, dp(2), 0, 0);
 
         LinearLayout columnHeader = new LinearLayout(this);
         columnHeader.setOrientation(LinearLayout.HORIZONTAL);
         columnHeader.setGravity(Gravity.CENTER_VERTICAL);
         columnHeader.setPadding(dp(10), dp(4), dp(10), dp(4));
-        columnHeader.addView(text("CUSTOM / EDIT LENS", 9, Color.rgb(132, 148, 172), true), new LinearLayout.LayoutParams(0, -2, 1));
+        columnHeader.addView(text("STAT", 9, Color.rgb(132, 148, 172), true), new LinearLayout.LayoutParams(0, -2, 1));
         TextView showHdr = text("SCORE", 9, Color.rgb(132, 148, 172), true); showHdr.setGravity(Gravity.CENTER);
         TextView keyHdr = text("CARD", 9, Color.rgb(132, 148, 172), true); keyHdr.setGravity(Gravity.CENTER);
         columnHeader.addView(showHdr, new LinearLayout.LayoutParams(dp(66), -2));
@@ -3485,7 +3585,7 @@ public class MainActivity extends Activity {
             if (!m.group.equals(lastGroup)) {
                 TextView sub = text(m.group, 11, Color.rgb(194, 208, 228), true);
                 sub.setLetterSpacing(0.08f);
-                sub.setPadding(dp(2), dp(12), 0, dp(5));
+                sub.setPadding(dp(2), dp(10), 0, dp(5));
                 list.addView(sub);
                 lastGroup = m.group;
             }
@@ -3497,7 +3597,8 @@ public class MainActivity extends Activity {
                     Color.argb(208, 8, 13, 24),
                     Color.argb(188, 5, 10, 18)
             }, 17, Color.argb(44, 255, 255, 255), 1));
-            LinearLayout.LayoutParams rowLp = matchWrap(); rowLp.setMargins(0, 0, 0, dp(6));
+            LinearLayout.LayoutParams rowLp = matchWrap();
+            rowLp.setMargins(0, 0, 0, dp(6));
             list.addView(row, rowLp);
 
             LinearLayout labelCol = new LinearLayout(this);
@@ -3529,31 +3630,28 @@ public class MainActivity extends Activity {
                 keyCb.setEnabled(checked);
                 keyCb.setAlpha(checked ? 1f : 0.38f);
                 if (!checked) keyCb.setChecked(false);
-                updateStatsDialogPresetState(presetPill, boxes, allowedMetricRole, presetChips);
             });
             keyCb.setOnCheckedChangeListener((buttonView, checked) -> {
                 if (checked && !showCb.isChecked()) showCb.setChecked(true);
                 if (checked && checkedCount(keyBoxes) > 8) {
                     keyCb.setChecked(false);
-                    Toast.makeText(this, "Key Edge card can show up to 8 stats. Uncheck one first.", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, "Key metric card can show up to 8 stats. Uncheck one first.", Toast.LENGTH_SHORT).show();
                 }
             });
         }
 
-        updateStatsDialogPresetState(presetPill, boxes, allowedMetricRole, presetChips);
-
         ScrollView scroller = new ScrollView(this);
         scroller.setFillViewport(false);
         scroller.addView(list);
-        LinearLayout.LayoutParams scrollerLp = new LinearLayout.LayoutParams(-1, dp(210));
-        scrollerLp.setMargins(0, dp(10), 0, dp(10));
+        LinearLayout.LayoutParams scrollerLp = new LinearLayout.LayoutParams(-1, dp(500));
+        scrollerLp.setMargins(0, 0, 0, dp(10));
         sheet.addView(scroller, scrollerLp);
 
         LinearLayout actions = new LinearLayout(this);
         actions.setOrientation(LinearLayout.HORIZONTAL);
         actions.setGravity(Gravity.CENTER_VERTICAL);
         TextView cancel = statsDialogAction("Cancel", false);
-        TextView apply = statsDialogAction("Apply Lens", true);
+        TextView apply = statsDialogAction("Apply Custom Lens", true);
         LinearLayout.LayoutParams cancelLp = new LinearLayout.LayoutParams(0, dp(46), 1);
         LinearLayout.LayoutParams applyLp = new LinearLayout.LayoutParams(0, dp(46), 1);
         applyLp.setMargins(dp(10), 0, 0, 0);
@@ -3563,7 +3661,6 @@ public class MainActivity extends Activity {
 
         final AlertDialog dialog = new AlertDialog.Builder(this).create();
         cancel.setOnClickListener(v -> dialog.dismiss());
-        applyTop.setOnClickListener(v -> apply.performClick());
         apply.setOnClickListener(v -> {
             selectedMetricKeys.clear();
             keyEdgeMetricKeys.clear();
@@ -3581,24 +3678,24 @@ public class MainActivity extends Activity {
                     }
                 }
             }
-            String active = activePresetKeyForRole(selectedMetricKeys, allowedMetricRole);
             if (selectedMetricKeys.isEmpty()) {
-                active = "all";
-                selectedMetricKeys.addAll(metricKeysForPresetAndRole("all", allowedMetricRole));
-                Toast.makeText(this, "No stats selected — restored All Stats.", Toast.LENGTH_SHORT).show();
+                selectedMetricKeys.addAll(metricKeysForPresetAndRole("recommended", role));
+                Toast.makeText(this, "No stats selected — restored Recommended.", Toast.LENGTH_SHORT).show();
             }
-            metricsManuallyCustomized = "custom".equals(active);
-            activeComparisonPreset = metricsManuallyCustomized ? "custom" : normalizePresetKey(active);
+            metricsManuallyCustomized = true;
+            activeComparisonPreset = "custom";
             showAllResultsStats = false;
             activeResultsStatCategory = "all";
-            if (keyEdgeMetricKeys.isEmpty()) keyEdgeMetricKeys.addAll(defaultKeyEdgeForPresetAndRole(activeComparisonPreset, allowedMetricRole, selectedMetricKeys));
+            if (keyEdgeMetricKeys.isEmpty()) keyEdgeMetricKeys.addAll(defaultKeyEdgeForRole(role, selectedMetricKeys));
+            selectedRankMetricPosition = -1;
             rebuildRankMetricSpinner();
             updateMetricPickerLabel();
             syncMetricChecks();
-            refreshCurrentResults();
+            refreshAfterLensChangeKeepScroll();
             refreshRankingsIfActive();
             dialog.dismiss();
         });
+
         dialog.setView(sheet);
         dialog.show();
         try {
@@ -3608,6 +3705,19 @@ public class MainActivity extends Activity {
                 w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             }
         } catch (Exception ignored) {}
+    }
+
+    private void refreshAfterLensChangeKeepScroll() {
+        int keepY = mainScroll == null ? 0 : mainScroll.getScrollY();
+        suppressNextAutoScroll = true;
+        if (lastHeadToHead != null) {
+            renderHeadToHead(lastHeadToHead);
+        } else if (lastComparison != null) {
+            renderComparison(lastComparison);
+        } else {
+            refreshCurrentResults();
+        }
+        if (mainScroll != null) mainScroll.post(() -> mainScroll.scrollTo(0, keepY));
     }
 
     private void addDialogLensCard(LinearLayout row, LinkedHashMap<String, TextView> presetChips, String presetKey, String label, Map<String, CheckBox> boxes, Map<String, CheckBox> keyBoxes, String role, TextView presetPill) {
@@ -3681,8 +3791,12 @@ public class MainActivity extends Activity {
             Metric m = findMetricByKey(key);
             if (roleAllowsMetric(role, m)) normalized.add(key);
         }
-        String[] order = new String[] { "recommended", "traditional", "statcastAdvanced", "plateDiscipline", "powerContact", "runPrevention", "teamOverall", "teamOffense", "teamPitchingDefense", "speedBaserunning", "moreStats", "all", "luck" };
-        for (String preset : order) if (normalized.equals(metricKeysForPresetAndRole(preset, role))) return preset;
+        String[] order = presetOrderForRole(role);
+        for (String preset : order) {
+            LinkedHashSet<String> presetKeys = metricKeysForPresetAndRole(preset, role);
+            if (presetKeys.isEmpty()) continue;
+            if (normalized.equals(presetKeys)) return preset;
+        }
         return "custom";
     }
 
@@ -5177,7 +5291,7 @@ public class MainActivity extends Activity {
         TeamPalette palette = paletteForComparison(c);
 
         LinearLayout card = verticalCard(24, null);
-        card.setPadding(dp(14), dp(14), dp(14), dp(14));
+        card.setPadding(dp(10), dp(10), dp(10), dp(10));
         card.setBackground(roundedGradient(new int[] {
                 Color.rgb(8, 12, 20),
                 darkColor(palette.primary, 0.46f),
@@ -5201,14 +5315,14 @@ public class MainActivity extends Activity {
         card.addView(topMeta, matchWrap());
 
         FrameLayout heroShell = new FrameLayout(this);
-        heroShell.setPadding(dp(9), dp(9), dp(9), dp(9));
+        heroShell.setPadding(dp(8), dp(8), dp(8), dp(8));
         heroShell.setBackground(roundedGradient(new int[] {
                 Color.rgb(7, 10, 16),
                 darkColor(palette.primary, 0.70f),
                 Color.rgb(6, 10, 18)
         }, 26));
         LinearLayout.LayoutParams topLp = matchWrap();
-        topLp.setMargins(0, dp(8), 0, dp(6));
+        topLp.setMargins(0, dp(6), 0, dp(5));
         card.addView(heroShell, topLp);
 
         View heroGlow = new View(this);
@@ -5217,7 +5331,7 @@ public class MainActivity extends Activity {
                 Color.argb(44, Color.red(palette.secondary), Color.green(palette.secondary), Color.blue(palette.secondary)),
                 Color.TRANSPARENT
         }, 26));
-        FrameLayout.LayoutParams glowLp = new FrameLayout.LayoutParams(dp(244), dp(164));
+        FrameLayout.LayoutParams glowLp = new FrameLayout.LayoutParams(dp(210), dp(116));
         glowLp.gravity = Gravity.START | Gravity.TOP;
         glowLp.leftMargin = dp(4);
         heroShell.addView(heroGlow, glowLp);
@@ -5236,7 +5350,7 @@ public class MainActivity extends Activity {
             watermark.setScaleType(ImageView.ScaleType.FIT_CENTER);
             watermark.setAlpha(0.10f);
             loadTeamLogo(c.team, watermark);
-            FrameLayout.LayoutParams wmLp = new FrameLayout.LayoutParams(dp(122), dp(122));
+            FrameLayout.LayoutParams wmLp = new FrameLayout.LayoutParams(dp(96), dp(96));
             wmLp.gravity = Gravity.END | Gravity.TOP;
             wmLp.topMargin = dp(0);
             wmLp.rightMargin = dp(0);
@@ -5251,7 +5365,7 @@ public class MainActivity extends Activity {
         heroShell.addView(top, topInnerLp);
 
         FrameLayout avatarFrame = new FrameLayout(this);
-        avatarFrame.setPadding(dp(6), dp(6), dp(6), dp(6));
+        avatarFrame.setPadding(dp(5), dp(5), dp(5), dp(5));
         avatarFrame.setBackground(roundedGradient(new int[] {
                 softColor(palette.primary, 0.04f),
                 softColor(palette.primary, 0.14f),
@@ -5289,8 +5403,8 @@ public class MainActivity extends Activity {
             logoLp.gravity = Gravity.CENTER;
             matte.addView(teamLogo, logoLp);
         }
-        LinearLayout.LayoutParams imgLp = new LinearLayout.LayoutParams(dp(84), dp(84));
-        imgLp.setMargins(0, 0, dp(12), 0);
+        LinearLayout.LayoutParams imgLp = new LinearLayout.LayoutParams(dp(66), dp(66));
+        imgLp.setMargins(0, 0, dp(10), 0);
         top.addView(avatarFrame, imgLp);
 
         LinearLayout titleCol = new LinearLayout(this);
@@ -5301,24 +5415,23 @@ public class MainActivity extends Activity {
             club.setLetterSpacing(0.10f);
             titleCol.addView(club);
         }
-        TextView name = text(c.name, 20, Color.WHITE, true);
+        TextView name = text(c.name, 18, Color.WHITE, true);
         name.setLetterSpacing(0.02f);
         titleCol.addView(name);
-        TextView meta = text(c.meta, 12, Color.rgb(214, 223, 236), true);
-        meta.setPadding(0, dp(2), 0, dp(6));
+        TextView meta = text(c.meta + " · " + c.season, 11, Color.rgb(214, 223, 236), true);
+        meta.setPadding(0, dp(1), 0, dp(5));
         titleCol.addView(meta);
         if (c.isTeam) {
-            titleCol.addView(heroMetricGrid(c, new String[] { "teamWinPct", "teamRunDiff", "teamOPS", "teamERA" }, palette), matchWrap());
+            titleCol.addView(heroMetricGrid(c, new String[] { "teamWinPct", "teamRunDiff" }, palette), matchWrap());
         } else if (c.seasonStats.ip > 0 && (c.seasonStats.get("era") != null || c.seasonStats.get("whip") != null)) {
-            titleCol.addView(heroMetricGrid(c, new String[] { "era", "whip", "k9", "kbb" }, palette), matchWrap());
+            titleCol.addView(heroMetricGrid(c, new String[] { "era", "whip" }, palette), matchWrap());
         } else {
-            titleCol.addView(heroMetricGrid(c, new String[] { "avg", "ops", "wOBA", "xwOBA" }, palette), matchWrap());
+            titleCol.addView(heroMetricGrid(c, new String[] { "ops", "wOBA" }, palette), matchWrap());
         }
 
         if (c.isTeam) addProfileSnapshotGrid(card, c, palette);
         addBaseballCardSummary(card, c, palette);
         addProfileAnalysisControls(card, c, palette);
-        if (!c.isTeam) addPlayerLensSummaryCard(card, c, palette);
         addProfileMetricCards(card, c, palette);
 
         LinearLayout sectionRow = new LinearLayout(this);
@@ -5367,7 +5480,7 @@ public class MainActivity extends Activity {
         if (card == null || c == null) return;
         LinearLayout shell = new LinearLayout(this);
         shell.setOrientation(LinearLayout.VERTICAL);
-        shell.setPadding(dp(10), dp(10), dp(10), dp(10));
+        shell.setPadding(dp(8), dp(8), dp(8), dp(8));
         shell.setBackground(roundedGradientStroke(new int[] {
                 Color.argb(222, 6, 10, 18),
                 Color.argb(202, 9, 16, 28),
@@ -5405,12 +5518,18 @@ public class MainActivity extends Activity {
         shell.addView(modes, modesLp);
 
         TextView mlbChip = profileControlChip("MLB Avg", Color.rgb(210, 222, 238), !expectedMode, () -> {
+            int keepY = mainScroll == null ? 0 : mainScroll.getScrollY();
             expectedMode = false;
+            suppressNextAutoScroll = true;
             if (lastComparison != null) renderComparison(lastComparison);
+            if (mainScroll != null) mainScroll.post(() -> mainScroll.scrollTo(0, keepY));
         });
         TextView xChip = profileControlChip("xStats", Color.rgb(110, 190, 255), expectedMode, () -> {
+            int keepY = mainScroll == null ? 0 : mainScroll.getScrollY();
             expectedMode = true;
+            suppressNextAutoScroll = true;
             if (lastComparison != null) renderComparison(lastComparison);
+            if (mainScroll != null) mainScroll.post(() -> mainScroll.scrollTo(0, keepY));
         });
         LinearLayout.LayoutParams mlbLp = new LinearLayout.LayoutParams(0, dp(38), 1);
         LinearLayout.LayoutParams xLp = new LinearLayout.LayoutParams(0, dp(38), 1);
@@ -5481,7 +5600,7 @@ public class MainActivity extends Activity {
                 String label = heroMetricLabel(m, key);
                 Double val = c == null || c.seasonStats == null ? null : c.seasonStats.get(key);
                 TextView pill = profileDataPill(format(val, m), label, palette);
-                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(38), 1);
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(32), 1);
                 lp.setMargins(j == 0 ? 0 : dp(5), i == 0 ? 0 : dp(5), 0, 0);
                 row.addView(pill, lp);
             }
@@ -6282,15 +6401,15 @@ public class MainActivity extends Activity {
     private void addBaseballCardSummary(LinearLayout card, Comparison c, TeamPalette palette) {
         LinearLayout shell = new LinearLayout(this);
         shell.setOrientation(LinearLayout.VERTICAL);
-        shell.setPadding(dp(10), dp(10), dp(10), dp(10));
+        shell.setPadding(dp(8), dp(8), dp(8), dp(8));
         LinearLayout.LayoutParams shellLp = matchWrap();
-        shellLp.setMargins(0, dp(10), 0, 0);
+        shellLp.setMargins(0, dp(8), 0, 0);
         shell.setBackground(roundedStroke(Color.argb(204, 10, 14, 22), Color.argb(74, 255, 255, 255), 20, 1));
         card.addView(shell, shellLp);
         View accent = new View(this);
         accent.setBackground(roundedGradient(new int[] { palette.primary, palette.secondary }, 8));
-        LinearLayout.LayoutParams accentLp = new LinearLayout.LayoutParams(-1, dp(5));
-        accentLp.setMargins(0, 0, 0, dp(8));
+        LinearLayout.LayoutParams accentLp = new LinearLayout.LayoutParams(-1, dp(4));
+        accentLp.setMargins(0, 0, 0, dp(6));
         shell.addView(accent, accentLp);
 
         LinearLayout head = new LinearLayout(this);
@@ -6302,7 +6421,7 @@ public class MainActivity extends Activity {
         TextView title = text(c.isTeam ? "TEAM CARD" : "PLAYER CARD", 10, softColor(palette.primary, 0.18f), true);
         title.setLetterSpacing(0.08f);
         headText.addView(title);
-        headText.addView(text(c.isTeam ? "Recent seasons + 2015+ avg" : "Recent seasons + career", 12, Color.rgb(244, 248, 252), true));
+        headText.addView(text(c.isTeam ? "Recent seasons + 2015+ avg" : "Seasons + career", 11, Color.rgb(244, 248, 252), true));
         head.addView(headText, new LinearLayout.LayoutParams(0, -2, 1));
         TextView chip = text(String.valueOf(c.season), 10, Color.WHITE, true);
         chip.setGravity(Gravity.CENTER);
@@ -6316,7 +6435,7 @@ public class MainActivity extends Activity {
         table.setOrientation(LinearLayout.VERTICAL);
         hsv.addView(table, new HorizontalScrollView.LayoutParams(-2, -2));
         LinearLayout.LayoutParams hsvLp = matchWrap();
-        hsvLp.setMargins(0, dp(7), 0, 0);
+        hsvLp.setMargins(0, dp(5), 0, 0);
         shell.addView(hsv, hsvLp);
 
         Metric[] cols = summaryMetricsForCard(c);
@@ -6344,7 +6463,7 @@ public class MainActivity extends Activity {
 
         LinearLayout section = new LinearLayout(this);
         section.setOrientation(LinearLayout.VERTICAL);
-        section.setPadding(0, dp(8), 0, 0);
+        section.setPadding(0, dp(6), 0, 0);
 
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
@@ -6356,10 +6475,10 @@ public class MainActivity extends Activity {
 
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(9), dp(7), dp(9), dp(7));
+        panel.setPadding(dp(7), dp(5), dp(7), dp(5));
         panel.setBackground(roundedStroke(Color.argb(182, 12, 16, 24), Color.argb(58, 255, 255, 255), 16, 1));
         LinearLayout.LayoutParams panelLp = matchWrap();
-        panelLp.setMargins(0, dp(4), 0, 0);
+        panelLp.setMargins(0, dp(3), 0, 0);
 
         ArrayList<Map.Entry<String, Stats>> windows = new ArrayList<>(c.recentWindows.entrySet());
         LinearLayout top = new LinearLayout(this);
@@ -6377,15 +6496,15 @@ public class MainActivity extends Activity {
             LinearLayout line = new LinearLayout(this);
             line.setOrientation(LinearLayout.HORIZONTAL);
             line.setGravity(Gravity.CENTER_VERTICAL);
-            line.setPadding(0, dp(5), 0, 0);
+            line.setPadding(0, dp(3), 0, 0);
             TextView lab = text(m.label, 9, Color.rgb(184, 196, 212), true);
             lab.setLetterSpacing(0.06f);
             line.addView(lab, new LinearLayout.LayoutParams(dp(52), -2));
             for (Map.Entry<String, Stats> e : windows) {
                 Double v = e.getValue() == null ? null : e.getValue().get(m.key);
-                TextView val = text(format(v, m), 11, Color.rgb(240, 245, 252), true);
+                TextView val = text(format(v, m), 10, Color.rgb(240, 245, 252), true);
                 val.setGravity(Gravity.CENTER);
-                val.setPadding(dp(2), dp(3), dp(2), dp(3));
+                val.setPadding(dp(2), dp(2), dp(2), dp(2));
                 val.setBackground(roundedStroke(Color.argb(32, 255, 255, 255), Color.argb(58, 255, 255, 255), 12, 1));
                 LinearLayout.LayoutParams vlp = new LinearLayout.LayoutParams(0, -2, 1);
                 vlp.setMargins(dp(4), 0, 0, 0);
@@ -6445,9 +6564,9 @@ public class MainActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(7), dp(6), dp(7), dp(6));
+        row.setPadding(dp(6), dp(4), dp(6), dp(4));
         LinearLayout.LayoutParams rowLp = matchWrap();
-        rowLp.setMargins(0, dp(3), 0, dp(3));
+        rowLp.setMargins(0, dp(2), 0, dp(2));
         row.setLayoutParams(rowLp);
         int fill = current ? Color.argb(188, 18, 22, 30) : (career ? Color.argb(146, 28, 32, 40) : Color.argb(28, 255, 255, 255));
         int stroke = current ? softColor(palette.primary, 0.28f) : (career ? softColor(palette.primary, 0.50f) : Color.argb(44, 255, 255, 255));
@@ -9451,9 +9570,9 @@ public class MainActivity extends Activity {
     }
 
     private TextView profileDataPill(String value, String label, TeamPalette palette) {
-        TextView tv = text(label + "\n" + value, 10, Color.WHITE, true);
+        TextView tv = text(label + "\n" + value, 9, Color.WHITE, true);
         tv.setGravity(Gravity.CENTER);
-        tv.setPadding(dp(7), dp(7), dp(7), dp(7));
+        tv.setPadding(dp(5), dp(5), dp(5), dp(5));
         tv.setLineSpacing(dp(1), 1.0f);
         tv.setBackground(roundedGradientStroke(new int[] { Color.argb(196, 11, 16, 24), Color.argb(156, 17, 23, 34) }, 14, Color.argb(72, 255, 255, 255), 1));
         tv.setFontFeatureSettings("'tnum' 1");
@@ -13740,7 +13859,7 @@ public class MainActivity extends Activity {
             applyRoundedClip(img, 30);
             avatar.addView(img, new FrameLayout.LayoutParams(-1, -1));
             LinearLayout.LayoutParams imgLp = new LinearLayout.LayoutParams(dp(68), dp(68));
-            imgLp.setMargins(0, 0, dp(12), 0);
+            imgLp.setMargins(0, 0, dp(10), 0);
             row.addView(avatar, imgLp);
             loadPlayerImage(p.id, img);
             LinearLayout col = new LinearLayout(MainActivity.this);
