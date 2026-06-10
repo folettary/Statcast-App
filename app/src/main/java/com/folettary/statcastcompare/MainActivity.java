@@ -8839,7 +8839,8 @@ public class MainActivity extends Activity {
     }
 
     private TextView profileDataPill(String value, String label, TeamPalette palette) {
-        TextView tv = text(label + "\n" + value, 10, Color.WHITE, true);
+        TextView tv = text(label + "
+" + value, 10, Color.WHITE, true);
         tv.setGravity(Gravity.CENTER);
         tv.setPadding(dp(7), dp(7), dp(7), dp(7));
         tv.setLineSpacing(dp(1), 1.0f);
