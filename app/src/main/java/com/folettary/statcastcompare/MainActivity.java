@@ -589,7 +589,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v162", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v163", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -10111,6 +10111,7 @@ public class MainActivity extends Activity {
         tabs.setOrientation(LinearLayout.HORIZONTAL);
         tabs.setPadding(0, dp(5), 0, 0);
         addTrendTab(tabs, "Season", "season", palette, hasSeason);
+        addTrendTab(tabs, "Month", "month", palette, hasSeason);
         addTrendTab(tabs, "30d", "30d", palette, hasSeason);
         addTrendTab(tabs, "15d", "15d", palette, hasSeason);
         addTrendTab(tabs, "7d", "7d", palette, hasSeason);
@@ -10137,7 +10138,8 @@ public class MainActivity extends Activity {
     }
 
     private String trendModeCaption() {
-        if ("years".equals(trendWindowMode)) return "season-to-season";
+        if ("years".equals(trendWindowMode)) return "year-by-year";
+        if ("month".equals(trendWindowMode)) return "month-by-month";
         if ("season".equals(trendWindowMode)) return "cumulative season";
         return trendWindowMode + " window average";
     }
@@ -10279,7 +10281,7 @@ public class MainActivity extends Activity {
         titleRow.addView(avgChip);
         shell.addView(titleRow, matchWrap());
 
-        SparklineView spark = new SparklineView(this, values, labels, m, palette.primary);
+        SparklineView spark = new SparklineView(this, values, labels, m, palette.primary, mode);
         LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(-1, dp(72));
         slp.setMargins(0, dp(5), 0, 0);
         shell.addView(spark, slp);
@@ -10288,6 +10290,8 @@ public class MainActivity extends Activity {
         } else if ("month".equals(mode)) {
             shell.addView(monthValueStrip(values, labels, m), matchWrap());
             shell.addView(careerBaselineRow(m), matchWrap());
+        } else if ("years".equals(mode)) {
+            shell.addView(monthValueStrip(values, labels, m), matchWrap());
         } else {
             shell.addView(trendDateRow(labels), matchWrap());
         }
@@ -10322,7 +10326,7 @@ public class MainActivity extends Activity {
         ArrayList<String> months = uniqueTrendMonths(labels);
         if (months.isEmpty()) return trendDateRow(labels);
         for (String month : months) {
-            TextView tv = text("│ " + month, 10, Color.rgb(188, 202, 222), true);
+            TextView tv = text(month, 10, Color.rgb(188, 202, 222), true);
             tv.setGravity(Gravity.CENTER);
             tv.setSingleLine(true);
             tv.setFontFeatureSettings("'tnum' 1");
@@ -15095,14 +15099,16 @@ public class MainActivity extends Activity {
         final ArrayList<String> labels;
         final Metric metric;
         final int lineColor;
+        final String mode;
         final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
-        SparklineView(Context ctx, ArrayList<Double> values, ArrayList<String> labels, Metric metric, int lineColor) {
+        SparklineView(Context ctx, ArrayList<Double> values, ArrayList<String> labels, Metric metric, int lineColor, String mode) {
             super(ctx);
             this.values = values;
             this.labels = labels;
             this.metric = metric;
             this.lineColor = lineColor;
+            this.mode = mode == null ? "season" : mode;
         }
 
         @Override protected void onDraw(Canvas canvas) {
@@ -15132,6 +15138,16 @@ public class MainActivity extends Activity {
             paint.setShader(null);
             paint.setStyle(Paint.Style.STROKE);
             paint.setStrokeWidth(dp(1));
+
+            // v163: structured trend modes get faint full-height guide lines.
+            paint.setColor(Color.argb(24, 255, 255, 255));
+            ArrayList<Integer> guideIndices = guideIndicesForMode();
+            for (Integer index : guideIndices) {
+                if (index == null || index < 0 || index >= n) continue;
+                float x = padL + (n <= 1 ? 0 : plotW * index / (n - 1f));
+                canvas.drawLine(x, padT, x, padT + plotH, paint);
+            }
+
             paint.setColor(Color.rgb(232, 237, 246));
             for (int i = 0; i < 3; i++) {
                 float y = padT + plotH * i / 2f;
@@ -15182,6 +15198,32 @@ public class MainActivity extends Activity {
 
             // v161: dates are rendered as normal TextViews below the chart.
             // Do not draw tiny canvas date labels here.
+        }
+
+        private ArrayList<Integer> guideIndicesForMode() {
+            ArrayList<Integer> out = new ArrayList<>();
+            if (labels == null || labels.isEmpty()) return out;
+
+            if ("month".equals(mode) || "years".equals(mode)) {
+                for (int i = 0; i < labels.size(); i++) {
+                    String label = safe(labels.get(i)).trim();
+                    if (!label.isEmpty()) out.add(i);
+                }
+                return out;
+            }
+
+            if ("season".equals(mode)) {
+                String lastMonth = "";
+                for (int i = 0; i < labels.size(); i++) {
+                    String month = monthNameFromTrendLabel(labels.get(i));
+                    if (month.isEmpty()) continue;
+                    if (!month.equals(lastMonth)) {
+                        out.add(i);
+                        lastMonth = month;
+                    }
+                }
+            }
+            return out;
         }
     }
 
