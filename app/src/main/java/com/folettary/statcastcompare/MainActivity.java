@@ -12355,6 +12355,87 @@ public class MainActivity extends Activity {
             p.setTypeface(android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, bold ? android.graphics.Typeface.BOLD : android.graphics.Typeface.NORMAL));
             canvas.drawText(text == null ? "" : text, x, y, p);
         }
+
+
+        // v164 pill rescue: PlayerLeagueMatchupCardView drawPill overloads
+        private void drawPill(Canvas canvas, String text, float x, float y, float w, float h, int fillColor, int strokeColor, int textColor) {
+            drawPillBaseV164(canvas, text, x, y, w, h, fillColor, strokeColor, textColor, dp(9), 0, 1);
+        }
+
+        // v164 pill rescue: PlayerLeagueMatchupCardView drawPill overloads int height variant
+        private void drawPill(Canvas canvas, String text, float x, float y, float w, int h, int fillColor, int strokeColor, int textColor) {
+            drawPillBaseV164(canvas, text, x, y, w, (float) h, fillColor, strokeColor, textColor, dp(9), 0, 1);
+        }
+
+        // v164 pill rescue: PlayerLeagueMatchupCardView drawPill overloads int width/height variant
+        private void drawPill(Canvas canvas, String text, float x, float y, int w, int h, int fillColor, int strokeColor, int textColor) {
+            drawPillBaseV164(canvas, text, x, y, (float) w, (float) h, fillColor, strokeColor, textColor, dp(9), 0, 1);
+        }
+
+        // v164 pill rescue: PlayerLeagueMatchupCardView drawPill overloads text-size variant
+        private void drawPill(Canvas canvas, String text, float x, float y, float w, float h, int fillColor, int strokeColor, int textColor, int textSizePx) {
+            drawPillBaseV164(canvas, text, x, y, w, h, fillColor, strokeColor, textColor, textSizePx, 0, 1);
+        }
+
+        // v164 pill rescue: PlayerLeagueMatchupCardView drawPill overloads text-size int height variant
+        private void drawPill(Canvas canvas, String text, float x, float y, float w, int h, int fillColor, int strokeColor, int textColor, int textSizePx) {
+            drawPillBaseV164(canvas, text, x, y, w, (float) h, fillColor, strokeColor, textColor, textSizePx, 0, 1);
+        }
+
+        // v164 pill rescue: PlayerLeagueMatchupCardView drawPill overloads text-size int width/height variant
+        private void drawPill(Canvas canvas, String text, float x, float y, int w, int h, int fillColor, int strokeColor, int textColor, int textSizePx) {
+            drawPillBaseV164(canvas, text, x, y, (float) w, (float) h, fillColor, strokeColor, textColor, textSizePx, 0, 1);
+        }
+
+        // v164 pill rescue: PlayerLeagueMatchupCardView drawPill overloads text-size + radius variant matching the GitHub compile error shape
+        private void drawPill(Canvas canvas, String text, float x, float y, float w, int h, int fillColor, int strokeColor, int textColor, int textSizePx, int radiusPx) {
+            drawPillBaseV164(canvas, text, x, y, w, (float) h, fillColor, strokeColor, textColor, textSizePx, radiusPx, 1);
+        }
+
+        // v164 pill rescue: PlayerLeagueMatchupCardView drawPill overloads text-size + radius int width/height variant
+        private void drawPill(Canvas canvas, String text, float x, float y, int w, int h, int fillColor, int strokeColor, int textColor, int textSizePx, int radiusPx) {
+            drawPillBaseV164(canvas, text, x, y, (float) w, (float) h, fillColor, strokeColor, textColor, textSizePx, radiusPx, 1);
+        }
+
+        // v164 pill rescue: PlayerLeagueMatchupCardView drawPill overloads full variant
+        private void drawPill(Canvas canvas, String text, float x, float y, float w, int h, int fillColor, int strokeColor, int textColor, int textSizePx, int radiusPx, int strokeWidthPx) {
+            drawPillBaseV164(canvas, text, x, y, w, (float) h, fillColor, strokeColor, textColor, textSizePx, radiusPx, strokeWidthPx);
+        }
+
+        // v164 pill rescue: PlayerLeagueMatchupCardView drawPill overloads full int width/height variant
+        private void drawPill(Canvas canvas, String text, float x, float y, int w, int h, int fillColor, int strokeColor, int textColor, int textSizePx, int radiusPx, int strokeWidthPx) {
+            drawPillBaseV164(canvas, text, x, y, (float) w, (float) h, fillColor, strokeColor, textColor, textSizePx, radiusPx, strokeWidthPx);
+        }
+
+        // v164 pill rescue: PlayerLeagueMatchupCardView drawPill overloads base renderer
+        private void drawPillBaseV164(Canvas canvas, String text, float x, float y, float w, float h, int fillColor, int strokeColor, int textColor, int textSizePx, int radiusPx, int strokeWidthPx) {
+            if (canvas == null) return;
+            float safeW = Math.max(1f, w);
+            float safeH = Math.max(1f, h);
+            float radius = radiusPx > 0 ? (float) radiusPx : safeH / 2f;
+            android.graphics.RectF rect = new android.graphics.RectF(x, y, x + safeW, y + safeH);
+
+            Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+            p.setStyle(Paint.Style.FILL);
+            p.setColor(fillColor);
+            canvas.drawRoundRect(rect, radius, radius, p);
+
+            if (strokeWidthPx > 0 && Color.alpha(strokeColor) > 0) {
+                p.setStyle(Paint.Style.STROKE);
+                p.setStrokeWidth(Math.max(1f, (float) strokeWidthPx));
+                p.setColor(strokeColor);
+                canvas.drawRoundRect(rect, radius, radius, p);
+            }
+
+            Paint t = new Paint(Paint.ANTI_ALIAS_FLAG);
+            t.setColor(textColor);
+            t.setTextSize(Math.max(1f, (float) textSizePx));
+            t.setTextAlign(Paint.Align.CENTER);
+            t.setTypeface(android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD));
+            Paint.FontMetrics fm = t.getFontMetrics();
+            float baseline = rect.centerY() - (fm.ascent + fm.descent) / 2f;
+            canvas.drawText(text == null ? "" : text, rect.centerX(), baseline, t);
+        }
 }
 
 
