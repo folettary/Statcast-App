@@ -12338,7 +12338,24 @@ public class MainActivity extends Activity {
                 drawCardText(canvas, fallback, cx, cy + dp(8), dp(22), Color.WHITE, true, Paint.Align.CENTER);
             }
         }
-    }
+    
+
+        // v164 compile rescue: PlayerLeagueMatchupCardView drawCardText overload
+        private void drawCardText(Canvas canvas, String text, float x, float y, int textSizePx, int color, boolean bold, Paint.Align align) {
+            drawCardTextCompatV164(canvas, text, x, y, (float) textSizePx, color, bold, align);
+        }
+
+        // v164 compile rescue: PlayerLeagueMatchupCardView drawCardText overload float variant
+        private void drawCardTextCompatV164(Canvas canvas, String text, float x, float y, float textSizePx, int color, boolean bold, Paint.Align align) {
+            if (canvas == null) return;
+            Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+            p.setColor(color);
+            p.setTextSize(textSizePx);
+            p.setTextAlign(align == null ? Paint.Align.LEFT : align);
+            p.setTypeface(android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, bold ? android.graphics.Typeface.BOLD : android.graphics.Typeface.NORMAL));
+            canvas.drawText(text == null ? "" : text, x, y, p);
+        }
+}
 
 
     class PlayerLensSummaryView extends View {
