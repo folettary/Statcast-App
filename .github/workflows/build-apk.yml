@@ -2,8 +2,6 @@ name: Build Android APK
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ main, master ]
 
 permissions:
   contents: read
@@ -11,47 +9,12 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Check out code
+      - name: Check out repo
         uses: actions/checkout@v4
 
-      - name: Apply Statcast app v143 phone-fix files
-        shell: bash
-        run: |
-          set -euo pipefail
-          ZIP="statcast-v143-phone-fix.zip"
-          echo "Found $ZIP. Applying v143 files before build..."
-          test -f "$ZIP"
-          rm -rf /tmp/statcast-phone-fix
-          mkdir -p /tmp/statcast-phone-fix
-          unzip -o "$ZIP" -d /tmp/statcast-phone-fix
-          find /tmp/statcast-phone-fix -maxdepth 6 -type f -print
-
-          if [ -f "/tmp/statcast-phone-fix/MainActivity.java" ]; then
-            cp /tmp/statcast-phone-fix/MainActivity.java app/src/main/java/com/folettary/statcastcompare/MainActivity.java
-          elif [ -f "/tmp/statcast-phone-fix/app/src/main/java/com/folettary/statcastcompare/MainActivity.java" ]; then
-            cp /tmp/statcast-phone-fix/app/src/main/java/com/folettary/statcastcompare/MainActivity.java app/src/main/java/com/folettary/statcastcompare/MainActivity.java
-          else
-            echo "MainActivity.java not found inside $ZIP"
-            exit 1
-          fi
-
-          if [ -f "/tmp/statcast-phone-fix/build.gradle" ]; then
-            cp /tmp/statcast-phone-fix/build.gradle app/build.gradle
-          elif [ -f "/tmp/statcast-phone-fix/app/build.gradle" ]; then
-            cp /tmp/statcast-phone-fix/app/build.gradle app/build.gradle
-          else
-            echo "build.gradle not found inside $ZIP"
-            exit 1
-          fi
-
-          echo "Version marker:"
-          grep -n "versionName" app/build.gradle || true
-          echo "UI/code markers:"
-          grep -n "v143" app/src/main/java/com/folettary/statcastcompare/MainActivity.java | head || true
-          grep -n "ComparisonBarView" app/src/main/java/com/folettary/statcastcompare/MainActivity.java | head || true
-
-      - name: Set up JDK
+      - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -60,13 +23,19 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.10.2'
+          gradle-version: 8.10.2
 
       - name: Build debug APK
-        run: gradle assembleDebug
+        run: |
+          if [ -f ./gradlew ]; then
+            chmod +x ./gradlew
+            ./gradlew :app:assembleDebug
+          else
+            gradle :app:assembleDebug
+          fi
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: StatcastCompare-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: statcast-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
