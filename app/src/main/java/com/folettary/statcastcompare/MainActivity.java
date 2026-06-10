@@ -589,7 +589,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v161", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v162", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -1045,8 +1045,8 @@ public class MainActivity extends Activity {
         LinearLayout card3 = dashboardCard("♚", "Teams", Color.rgb(14, 12, 22), Color.rgb(46, 31, 6), Color.rgb(242, 194, 68));
         LinearLayout card4 = dashboardCard("▥", "Rankings", Color.rgb(8, 17, 24), Color.rgb(5, 43, 48), Color.rgb(93, 230, 215));
         card1.setOnClickListener(v -> setPrimaryTab(TAB_MATCHUP));
-        card2.setOnClickListener(v -> { setMode(false); setPrimaryTab(TAB_PROFILE); });
-        card3.setOnClickListener(v -> { setMode(true); setPrimaryTab(TAB_PROFILE); });
+        card2.setOnClickListener(v -> { resetProfileSelectionState(); setMode(false); setPrimaryTab(TAB_PROFILE); });
+        card3.setOnClickListener(v -> { resetProfileSelectionState(); setMode(true); setPrimaryTab(TAB_PROFILE); });
         card4.setOnClickListener(v -> setPrimaryTab(TAB_RANKINGS));
         attachPremiumPress(card1, 0.975f);
         attachPremiumPress(card2, 0.975f);
@@ -2305,6 +2305,57 @@ public class MainActivity extends Activity {
     }
 
     
+    private void activateProfilePlayerSearch(boolean openKeyboard) {
+        if (searchInput == null) return;
+        headToHeadMode = false;
+        rankingsModeActive = false;
+        teamMode = false;
+        selectedPlayer = null;
+        lastComparison = null;
+        if (resultsBox != null) resultsBox.setVisibility(View.GONE);
+        if (headerBox != null) headerBox.removeAllViews();
+        if (metricBox != null) metricBox.removeAllViews();
+        if (selectedPreviewBox != null) selectedPreviewBox.setVisibility(View.GONE);
+        if (teamPickerButton != null) teamPickerButton.setVisibility(View.GONE);
+        if (teamChipRow != null) teamChipRow.setVisibility(View.GONE);
+        searchInput.setVisibility(View.VISIBLE);
+        searchInput.setText("");
+        suggestionsList.setVisibility(View.GONE);
+        updateAnalysisModeButtons();
+        updateViewModeButtons();
+        if (mainScroll != null) mainScroll.post(() -> mainScroll.scrollTo(0, 0));
+        searchInput.requestFocus();
+        if (openKeyboard) showKeyboard(searchInput);
+    }
+
+    private void resetProfileSelectionState() {
+        selectedPlayer = null;
+        selectedTeam = null;
+        lastComparison = null;
+        lastHeadToHead = null;
+        expectedMode = false;
+        rankingsModeActive = false;
+        headToHeadMode = false;
+        if (searchInput != null) {
+            searchInput.setText("");
+            searchInput.clearFocus();
+            searchInput.setVisibility(teamMode ? View.GONE : View.VISIBLE);
+        }
+        if (suggestionsList != null) suggestionsList.setVisibility(View.GONE);
+        if (selectedPreviewBox != null) selectedPreviewBox.setVisibility(View.GONE);
+        if (resultsBox != null) resultsBox.setVisibility(View.GONE);
+        if (headerBox != null) headerBox.removeAllViews();
+        if (metricBox != null) metricBox.removeAllViews();
+        if (teamPickerButton != null) teamPickerButton.setVisibility(teamMode ? View.VISIBLE : View.GONE);
+        if (teamChipRow != null) teamChipRow.setVisibility(View.GONE);
+        showError(null);
+    }
+
+    private void openProfileTabFresh() {
+        resetProfileSelectionState();
+        setPrimaryTab(TAB_PROFILE);
+    }
+
     private void setPrimaryTab(int tab) {
         if (!restoringNavHistory && activePrimaryTab != tab) {
             navTabHistory.push(activePrimaryTab);
@@ -4164,9 +4215,8 @@ public class MainActivity extends Activity {
             if (!headToHeadMode && !rankingsModeActive) {
                 if (teamMode) {
                     if (teamPickerButton != null) teamPickerButton.performClick();
-                } else if (searchInput != null) {
-                    searchInput.setVisibility(View.VISIBLE);
-                    searchInput.requestFocus();
+                } else {
+                    activateProfilePlayerSearch(true);
                 }
             } else {
                 openProfileForCurrentSelection();
@@ -4380,12 +4430,12 @@ public class MainActivity extends Activity {
         teamModeButton.setOnClickListener(v -> setMode(true));
         headToHeadButton.setOnClickListener(v -> setPrimaryTab(TAB_MATCHUP));
         if (stickyCompareButton != null) stickyCompareButton.setOnClickListener(v -> setPrimaryTab(TAB_MATCHUP));
-        if (singleViewButton != null) singleViewButton.setOnClickListener(v -> setPrimaryTab(TAB_PROFILE));
-        if (stickyProfileButton != null) stickyProfileButton.setOnClickListener(v -> setPrimaryTab(TAB_PROFILE));
+        if (singleViewButton != null) singleViewButton.setOnClickListener(v -> openProfileTabFresh());
+        if (stickyProfileButton != null) stickyProfileButton.setOnClickListener(v -> openProfileTabFresh());
         if (stickyRankingsButton != null) stickyRankingsButton.setOnClickListener(v -> setPrimaryTab(TAB_RANKINGS));
         if (bottomHomeTab != null) bottomHomeTab.setOnClickListener(v -> setPrimaryTab(TAB_HOME));
         if (bottomMatchupTab != null) bottomMatchupTab.setOnClickListener(v -> setPrimaryTab(TAB_MATCHUP));
-        if (bottomSearchTab != null) bottomSearchTab.setOnClickListener(v -> setPrimaryTab(TAB_PROFILE));
+        if (bottomSearchTab != null) bottomSearchTab.setOnClickListener(v -> openProfileTabFresh());
         if (bottomRankingsTab != null) bottomRankingsTab.setOnClickListener(v -> setPrimaryTab(TAB_RANKINGS));
         if (teamPickerButton != null) teamPickerButton.setOnClickListener(v -> showTeamPickerDialog(true));
         if (compareTeamPickerButton != null) compareTeamPickerButton.setOnClickListener(v -> showTeamPickerDialog(false));
@@ -10075,8 +10125,7 @@ public class MainActivity extends Activity {
         tv.setGravity(Gravity.CENTER);
         tv.setPadding(dp(11), dp(6), dp(11), dp(6));
         tv.setBackground(mode.equals(trendWindowMode) && enabled ? roundedGradient(new int[] { palette.primary, palette.secondary }, 14) : roundedStroke(Color.WHITE, Color.rgb(218, 226, 238), 14, 1));
-        tv.setEnabled(enabled);
-        if (enabled) tv.setOnClickListener(v -> {
+        tv.setOnClickListener(v -> {
             trendWindowMode = mode;
             if (lastComparison != null) {
                 if (expectedMode) renderExpectedComparison(lastComparison); else renderComparison(lastComparison);
@@ -10121,6 +10170,7 @@ public class MainActivity extends Activity {
         tabs.setPadding(0, dp(6), 0, 0);
         tabs.addView(text("Trend", 10, Color.rgb(148, 161, 181), true), new LinearLayout.LayoutParams(0, -2, 1));
         addInlineTrendTab(tabs, m, "Season", "season", palette, hasTrendForMode(c, m, "season", hasSeasons), mode);
+        addInlineTrendTab(tabs, m, "Month", "month", palette, hasTrendForMode(c, m, "month", hasSeasons), mode);
         if (currentSeason) {
             addInlineTrendTab(tabs, m, "30d", "30d", palette, hasTrendForMode(c, m, "30d", hasSeasons), mode);
             addInlineTrendTab(tabs, m, "15d", "15d", palette, hasTrendForMode(c, m, "15d", hasSeasons), mode);
@@ -10137,12 +10187,13 @@ public class MainActivity extends Activity {
     }
 
     private void addInlineTrendTab(LinearLayout tabs, Metric m, String label, String mode, TeamPalette palette, boolean enabled, String activeMode) {
-        TextView tv = text(label, 9, enabled ? (mode.equals(activeMode) ? Color.WHITE : palette.primary) : Color.rgb(160, 168, 180), true);
+        // v162: hide unavailable trend durations entirely instead of showing dead tabs.
+        if (!enabled) return;
+        TextView tv = text(label, 9, mode.equals(activeMode) ? Color.WHITE : palette.primary, true);
         tv.setGravity(Gravity.CENTER);
         tv.setPadding(dp(7), dp(4), dp(7), dp(4));
-        tv.setBackground(mode.equals(activeMode) && enabled ? roundedGradientStroke(new int[] { boostNeonColor(palette.primary, 1.06f, 1.03f), mixColor(boostNeonColor(palette.secondary, 1.04f, 1.02f), Color.rgb(8, 13, 22), 0.20f) }, 12, Color.argb(124, 255, 255, 255), 1) : roundedStroke(Color.argb(138, 8, 13, 22), Color.argb(70, 255, 255, 255), 12, 1));
-        tv.setEnabled(enabled);
-        if (enabled) tv.setOnClickListener(v -> {
+        tv.setBackground(mode.equals(activeMode) ? roundedGradientStroke(new int[] { boostNeonColor(palette.primary, 1.06f, 1.03f), mixColor(boostNeonColor(palette.secondary, 1.04f, 1.02f), Color.rgb(8, 13, 22), 0.20f) }, 12, Color.argb(124, 255, 255, 255), 1) : roundedStroke(Color.argb(138, 8, 13, 22), Color.argb(70, 255, 255, 255), 12, 1));
+        tv.setOnClickListener(v -> {
             int keepY = mainScroll == null ? 0 : mainScroll.getScrollY();
             metricTrendModes.put(m.key, mode);
             suppressNextAutoScroll = true;
@@ -10165,7 +10216,9 @@ public class MainActivity extends Activity {
         boolean currentSeason = isCurrentSeason(c.season);
         if (!currentSeason && isRollingTrendMode(mode)) mode = hasTrendForMode(c, m, "season", hasSeasons) ? "season" : "years";
         if (!hasTrendForMode(c, m, mode, hasSeasons)) {
-            if (hasTrendForMode(c, m, "season", hasSeasons)) mode = "season";
+            if (hasTrendForMode(c, m, "15d", hasSeasons)) mode = "15d";
+            else if (hasTrendForMode(c, m, "season", hasSeasons)) mode = "season";
+            else if (hasTrendForMode(c, m, "month", hasSeasons)) mode = "month";
             else if (hasSeasons) mode = "years";
         }
         addMetricTrendTabs(parent, c, m, palette, hasSeason, hasSeasons, mode);
@@ -10175,7 +10228,7 @@ public class MainActivity extends Activity {
         }
         ArrayList<TrendPoint> points = c.seasonTrends == null ? null : c.seasonTrends.get(trendMetricKey(m.key, mode));
         if (trendPointCount(points) >= 2) {
-            String title = "season".equals(mode) ? "Season-to-date" : mode + (m.isCount() ? " cumulative total" : " period rate");
+            String title = "season".equals(mode) ? "Season-to-date" : ("month".equals(mode) ? "Month by month" : mode + (m.isCount() ? " cumulative total" : " period rate"));
             renderTrendPointRow(parent, title, points, m, palette, mode);
         } else if (hasSeasons) {
             renderSparklineRow(parent, c.recentSeasons, m, palette);
@@ -10183,7 +10236,7 @@ public class MainActivity extends Activity {
     }
 
     private String trendMetricKey(String metricKey, String mode) {
-        if ("7d".equals(mode) || "15d".equals(mode) || "30d".equals(mode)) return metricKey + "__" + mode;
+        if ("7d".equals(mode) || "15d".equals(mode) || "30d".equals(mode) || "month".equals(mode)) return metricKey + "__" + mode;
         return metricKey;
     }
 
@@ -10217,6 +10270,7 @@ public class MainActivity extends Activity {
         titleRow.addView(sparkTitle, new LinearLayout.LayoutParams(0, -2, 1));
         String chipText;
         if ("season".equals(mode) || "years".equals(mode)) chipText = "Current " + format(lastNonNull(values), m);
+        else if ("month".equals(mode)) chipText = "Latest month " + format(lastNonNull(values), m);
         else chipText = (m.isCount() ? "Total " : "Window ") + format(lastNonNull(values), m);
         TextView avgChip = text(chipText, 9, palette.primary, true);
         avgChip.setGravity(Gravity.CENTER);
@@ -10229,7 +10283,14 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(-1, dp(72));
         slp.setMargins(0, dp(5), 0, 0);
         shell.addView(spark, slp);
-        shell.addView(trendDateRow(labels), matchWrap());
+        if ("season".equals(mode)) {
+            shell.addView(trendMonthTickRow(labels), matchWrap());
+        } else if ("month".equals(mode)) {
+            shell.addView(monthValueStrip(values, labels, m), matchWrap());
+            shell.addView(careerBaselineRow(m), matchWrap());
+        } else {
+            shell.addView(trendDateRow(labels), matchWrap());
+        }
         parent.addView(shell, shellLp);
     }
 
@@ -10252,6 +10313,98 @@ public class MainActivity extends Activity {
         return tv;
     }
 
+
+    private LinearLayout trendMonthTickRow(ArrayList<String> labels) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(2), dp(3), dp(2), 0);
+        ArrayList<String> months = uniqueTrendMonths(labels);
+        if (months.isEmpty()) return trendDateRow(labels);
+        for (String month : months) {
+            TextView tv = text("│ " + month, 10, Color.rgb(188, 202, 222), true);
+            tv.setGravity(Gravity.CENTER);
+            tv.setSingleLine(true);
+            tv.setFontFeatureSettings("'tnum' 1");
+            row.addView(tv, new LinearLayout.LayoutParams(0, -2, 1));
+        }
+        return row;
+    }
+
+    private ArrayList<String> uniqueTrendMonths(ArrayList<String> labels) {
+        ArrayList<String> out = new ArrayList<>();
+        if (labels == null) return out;
+        for (String label : labels) {
+            String m = monthNameFromTrendLabel(label);
+            if (!m.isEmpty() && !out.contains(m)) out.add(m);
+        }
+        return out;
+    }
+
+    private String monthNameFromTrendLabel(String label) {
+        String v = safe(label).trim();
+        if (v.isEmpty()) return "";
+        try {
+            if (v.matches("\\d{1,2}/\\d{1,2}")) {
+                int m = Integer.parseInt(v.split("/")[0]);
+                return shortMonthName(m);
+            }
+            String normalized = v.replace("/", "-");
+            if (normalized.matches("\\d{4}-\\d{2}-\\d{2}")) {
+                int m = Integer.parseInt(normalized.split("-")[1]);
+                return shortMonthName(m);
+            }
+            String lower = v.toLowerCase(Locale.US);
+            String[] names = new String[] {"jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"};
+            String[] display = new String[] {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+            for (int i = 0; i < names.length; i++) if (lower.startsWith(names[i])) return display[i];
+        } catch (Exception ignored) {}
+        return "";
+    }
+
+    private String shortMonthName(int m) {
+        String[] months = new String[] { "", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+        return m >= 1 && m <= 12 ? months[m] : "";
+    }
+
+    private LinearLayout monthValueStrip(ArrayList<Double> values, ArrayList<String> labels, Metric m) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setPadding(dp(1), dp(4), dp(1), 0);
+        if (values == null || labels == null) return row;
+        int n = Math.min(values.size(), labels.size());
+        for (int i = 0; i < n; i++) {
+            Double value = values.get(i);
+            if (value == null || Double.isNaN(value)) continue;
+            LinearLayout cell = new LinearLayout(this);
+            cell.setOrientation(LinearLayout.VERTICAL);
+            cell.setGravity(Gravity.CENTER);
+            cell.setPadding(dp(3), dp(4), dp(3), dp(4));
+            cell.setBackground(roundedStroke(Color.argb(116, 8, 13, 22), Color.argb(64, 255, 255, 255), 12, 1));
+            TextView month = text(shortTrendLabel(labels.get(i)), 9, Color.rgb(160, 178, 202), true);
+            month.setGravity(Gravity.CENTER);
+            TextView val = text(format(value, m), 11, Color.WHITE, true);
+            val.setGravity(Gravity.CENTER);
+            cell.addView(month);
+            cell.addView(val);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1);
+            if (row.getChildCount() > 0) lp.setMargins(dp(4), 0, 0, 0);
+            row.addView(cell, lp);
+        }
+        return row;
+    }
+
+    private LinearLayout careerBaselineRow(Metric m) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setPadding(dp(2), dp(5), dp(2), 0);
+        Double career = lastComparison == null || lastComparison.careerStats == null || m == null ? null : lastComparison.careerStats.get(m.key);
+        String textValue = career == null || Double.isNaN(career) ? "Career baseline unavailable" : "Career avg " + format(career, m);
+        TextView tv = text(textValue, 10, Color.rgb(170, 186, 208), true);
+        tv.setGravity(Gravity.RIGHT);
+        row.addView(tv, new LinearLayout.LayoutParams(0, -2, 1));
+        return row;
+    }
 
     private LinearLayout trendReferenceRow(ArrayList<Double> values, ArrayList<String> labels, Metric m) {
         LinearLayout row = new LinearLayout(this);
@@ -11649,6 +11802,7 @@ public class MainActivity extends Activity {
         ArrayList<GameLogEntry> logs = dailyGameLogs(fetchTeamGameLogs(team, season));
         if (logs.size() < 2) return out;
         addSeasonTrend(out, logs);
+        addMonthlyTrend(out, logs);
         addWindowTrend(out, logs, 7);
         addWindowTrend(out, logs, 15);
         addWindowTrend(out, logs, 30);
@@ -11694,6 +11848,7 @@ public class MainActivity extends Activity {
         ArrayList<GameLogEntry> logs = dailyGameLogs(fetchPlayerGameLogs(player, season));
         if (logs.size() < 2) return out;
         addSeasonTrend(out, logs);
+        addMonthlyTrend(out, logs);
         addWindowTrend(out, logs, 7);
         addWindowTrend(out, logs, 15);
         addWindowTrend(out, logs, 30);
@@ -11729,6 +11884,26 @@ public class MainActivity extends Activity {
             boolean checkpoint = i == logs.size() - 1 || i == 0 || ((i + 1) % step == 0);
             if (checkpoint) addTrendSnapshot(out, "", shortDate(g.date), cumulative.build());
         }
+    }
+
+    private void addMonthlyTrend(Map<String, ArrayList<TrendPoint>> out, ArrayList<GameLogEntry> logs) {
+        if (logs == null || logs.size() < 2) return;
+        LinkedHashMap<String, WeightedStatsBuilder> byMonth = new LinkedHashMap<>();
+        SimpleDateFormat keyFmt = new SimpleDateFormat("yyyy-MM", Locale.US);
+        SimpleDateFormat labelFmt = new SimpleDateFormat("MMM", Locale.US);
+        LinkedHashMap<String, String> labels = new LinkedHashMap<>();
+        for (GameLogEntry g : logs) {
+            if (g == null || g.date == null || g.stats == null) continue;
+            String key = keyFmt.format(g.date);
+            WeightedStatsBuilder b = byMonth.get(key);
+            if (b == null) {
+                b = new WeightedStatsBuilder(metrics, true);
+                byMonth.put(key, b);
+                labels.put(key, labelFmt.format(g.date));
+            }
+            b.add(g.stats);
+        }
+        for (String key : byMonth.keySet()) addTrendSnapshot(out, "__month", labels.get(key), byMonth.get(key).build());
     }
 
     private void addWindowTrend(Map<String, ArrayList<TrendPoint>> out, ArrayList<GameLogEntry> logs, int days) {
@@ -14895,13 +15070,20 @@ public class MainActivity extends Activity {
         String v = safe(raw).trim();
         if (v.isEmpty()) return "";
         try {
+            if (v.matches("\\d{1,2}/\\d{1,2}")) {
+                String[] p = v.split("/");
+                int month = Integer.parseInt(p[0]);
+                int day = Integer.parseInt(p[1]);
+                String m = shortMonthName(month);
+                if (!m.isEmpty()) return m + " " + day;
+            }
             String normalized = v.replace("/", "-");
             if (normalized.matches("\\d{4}-\\d{2}-\\d{2}")) {
                 String[] p = normalized.split("-");
                 int month = Integer.parseInt(p[1]);
                 int day = Integer.parseInt(p[2]);
-                String[] months = new String[] { "", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
-                if (month >= 1 && month <= 12) return months[month] + " " + day;
+                String m = shortMonthName(month);
+                if (!m.isEmpty()) return m + " " + day;
             }
         } catch (Exception ignored) {}
         if (v.length() > 10 && v.charAt(4) == '-') return v.substring(5, 10);
