@@ -535,7 +535,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v151", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v152", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -5298,8 +5298,8 @@ public class MainActivity extends Activity {
     private void addPlayerLensSummaryCard(LinearLayout card, Comparison c, TeamPalette palette) {
         if (card == null || c == null || c.isTeam) return;
         ArrayList<Metric> lensMetrics = scorableLensMetricsForProfile(c);
-        PlayerLeagueMatchupCardView lensCard = new PlayerLeagueMatchupCardView(this, c, lensMetrics, palette);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(562));
+        PlayerLensSummaryView lensCard = new PlayerLensSummaryView(this, c, lensMetrics, palette);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(156));
         lp.setMargins(0, dp(10), 0, 0);
         card.addView(lensCard, lp);
     }
@@ -5718,7 +5718,7 @@ public class MainActivity extends Activity {
 
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(11), dp(9), dp(11), dp(9));
+        panel.setPadding(dp(9), dp(7), dp(9), dp(7));
         panel.setBackground(roundedStroke(Color.argb(182, 12, 16, 24), Color.argb(58, 255, 255, 255), 16, 1));
         LinearLayout.LayoutParams panelLp = matchWrap();
         panelLp.setMargins(0, dp(4), 0, 0);
@@ -5748,7 +5748,7 @@ public class MainActivity extends Activity {
                 TextView val = text(format(v, m), 11, Color.rgb(240, 245, 252), true);
                 val.setGravity(Gravity.CENTER);
                 val.setPadding(dp(2), dp(3), dp(2), dp(3));
-                val.setBackground(roundedGradientStroke(new int[] { Color.argb(172, 12, 18, 28), Color.argb(132, 18, 26, 38) }, 12, Color.argb(62, 255, 255, 255), 1));
+                val.setBackground(roundedStroke(Color.argb(32, 255, 255, 255), Color.argb(58, 255, 255, 255), 12, 1));
                 LinearLayout.LayoutParams vlp = new LinearLayout.LayoutParams(0, -2, 1);
                 vlp.setMargins(dp(4), 0, 0, 0);
                 line.addView(val, vlp);
@@ -8839,11 +8839,11 @@ public class MainActivity extends Activity {
     }
 
     private TextView profileDataPill(String value, String label, TeamPalette palette) {
-        TextView tv = text(label + "\n" + value, 10, Color.WHITE, true);
+        TextView tv = text(label + "\n" + value, 11, Color.WHITE, true);
         tv.setGravity(Gravity.CENTER);
-        tv.setPadding(dp(7), dp(7), dp(7), dp(7));
+        tv.setPadding(dp(7), dp(6), dp(7), dp(6));
         tv.setLineSpacing(dp(1), 1.0f);
-        tv.setBackground(roundedGradientStroke(new int[] { Color.argb(196, 11, 16, 24), Color.argb(156, 17, 23, 34) }, 14, Color.argb(72, 255, 255, 255), 1));
+        tv.setBackground(roundedStroke(Color.argb(176, 15, 20, 28), Color.argb(82, 255, 255, 255), 14, 1));
         tv.setFontFeatureSettings("'tnum' 1");
         return tv;
     }
@@ -11827,29 +11827,32 @@ public class MainActivity extends Activity {
         @Override protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
             int w = MeasureSpec.getSize(widthMeasureSpec);
             if (w <= 0) w = dp(360);
-            int h = Math.max(dp(548), Math.round(w * 1.46f));
+            int h = Math.max(dp(626), Math.round(w * 1.62f));
             setMeasuredDimension(w, h);
         }
 
         @Override protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
             float w = getWidth();
+            float h = getHeight();
             float pad = dp(4);
-            RectF card = new RectF(pad, pad, w - pad, getHeight() - pad);
+            RectF card = new RectF(pad, pad, w - pad, h - pad);
             float radius = dp(28);
-            int playerAccent = boostNeonColor(readableTeamColor(palette.primary, palette.secondary, true), 1.16f, 1.06f);
+            int playerAccent = boostNeonColor(readableTeamColor(palette.primary, palette.secondary, true), 1.20f, 1.08f);
+            int leagueAccent = profileSparkColor(averageLensSignedEdge(c, lensMetrics));
+            if (leagueAccent == profileNeutralColor()) leagueAccent = Color.rgb(210, 220, 235);
             int neutralBlue = Color.rgb(112, 181, 255);
-            int sparkColor = profileSparkColor(averageLensSignedEdge(c, lensMetrics));
-            if (sparkColor == profileNeutralColor()) sparkColor = Color.rgb(210, 220, 235);
+            int blend = mixColor(playerAccent, leagueAccent == profileNeutralColor() ? neutralBlue : leagueAccent, 0.50f);
 
             paint.setStyle(Paint.Style.FILL);
             paint.setShader(new LinearGradient(card.left, card.top, card.right, card.bottom,
                     new int[] {
-                            mixColor(playerAccent, Color.rgb(4, 7, 13), 0.82f),
-                            mixColor(palette.secondary, Color.rgb(5, 8, 15), 0.88f),
-                            Color.rgb(5, 9, 17),
-                            mixColor(neutralBlue, Color.rgb(4, 7, 13), 0.88f)
-                    }, new float[] {0f, .26f, .68f, 1f}, Shader.TileMode.CLAMP));
+                            mixColor(playerAccent, Color.rgb(2, 4, 9), 0.76f),
+                            mixColor(palette.secondary, Color.rgb(4, 7, 13), 0.82f),
+                            Color.rgb(5, 8, 15),
+                            mixColor(neutralBlue, Color.rgb(5, 8, 15), 0.86f),
+                            mixColor(leagueAccent, Color.rgb(2, 4, 9), 0.78f)
+                    }, new float[] {0f, .24f, .50f, .76f, 1f}, Shader.TileMode.CLAMP));
             paint.setShadowLayer(dp(10), 0, dp(5), Color.argb(42, 0, 0, 0));
             canvas.drawRoundRect(card, radius, radius, paint);
             paint.clearShadowLayer();
@@ -11859,22 +11862,39 @@ public class MainActivity extends Activity {
             Path clip = new Path();
             clip.addRoundRect(card, radius, radius, Path.Direction.CW);
             canvas.clipPath(clip);
+            drawProfileAtmosphere(canvas, card, playerAccent, neutralBlue);
             drawVignette(canvas, card);
-            drawCompactAtmosphere(canvas, card, playerAccent, neutralBlue);
 
             float titleY = card.top + dp(28);
             drawCardText(canvas, c.season + " PLAYER LENS CARD", card.centerX(), titleY, dp(10), Color.rgb(204, 215, 230), true, Paint.Align.CENTER);
             String lensName = currentLensNameForUi();
             String statPill = lensName.toUpperCase(Locale.US) + " · " + lensMetrics.size() + " SCORED STATS";
-            drawPill(canvas, statPill, card.centerX(), titleY + dp(24), Math.min(card.width() - dp(54), dp(224)), dp(25), Color.argb(34, 255, 255, 255), Color.argb(78, 255, 255, 255), Color.rgb(220, 230, 244), dp(9));
+            drawPill(canvas, statPill, card.centerX(), titleY + dp(24), Math.min(card.width() - dp(56), dp(206)), dp(25), Color.argb(38, 255, 255, 255), Color.argb(78, 255, 255, 255), Color.rgb(220, 230, 244), dp(9));
 
-            RectF hero = new RectF(card.left + dp(18), card.top + dp(54), card.right - dp(18), card.top + dp(190));
-            drawCompactHero(canvas, hero, playerAccent, neutralBlue);
+            drawCornerLogo(canvas, card.left + dp(34), card.top + dp(54), dp(66), playerAccent, true);
+            drawMlbCornerMark(canvas, card.right - dp(34), card.top + dp(54), dp(66), neutralBlue);
 
-            RectF score = new RectF(card.left + dp(18), hero.bottom + dp(14), card.right - dp(18), hero.bottom + dp(126));
-            drawScoreBlock(canvas, score, playerAccent);
+            float portraitR = Math.min(dp(74), w * 0.20f);
+            float leftCx = card.left + w * 0.25f;
+            float rightCx = card.right - w * 0.25f;
+            float portraitCy = card.top + dp(142);
+            float vsCx = card.centerX();
+            float vsCy = portraitCy + dp(1);
 
-            drawKeyStats(canvas, card, score.bottom + dp(28), playerAccent);
+            drawBattleBeam(canvas, leftCx + portraitR, vsCy, vsCx - dp(25), vsCy, playerAccent, true);
+            drawBattleBeam(canvas, rightCx - portraitR, vsCy, vsCx + dp(25), vsCy, neutralBlue, false);
+            drawPortrait(canvas, playerIcon, leftCx, portraitCy, portraitR, playerAccent, initials(c.name));
+            drawLeagueOrb(canvas, rightCx, portraitCy, portraitR, neutralBlue);
+            drawVsAverageBadge(canvas, vsCx, vsCy, dp(27), playerAccent, neutralBlue, blend);
+
+            drawNameBlock(canvas, c.name, c.meta, leftCx, portraitCy + portraitR + dp(32), playerAccent, true);
+            drawNameBlock(canvas, "MLB Average", "League baseline", rightCx, portraitCy + portraitR + dp(32), neutralBlue, false);
+
+            float scoreTop = card.top + dp(326);
+            RectF score = new RectF(card.left + dp(26), scoreTop, card.right - dp(26), scoreTop + dp(112));
+            drawScoreBlock(canvas, score, playerAccent, neutralBlue);
+
+            drawKeyStats(canvas, card, score.bottom + dp(30), playerAccent, neutralBlue);
             canvas.restoreToCount(save);
 
             stroke.setShader(null);
@@ -11884,101 +11904,51 @@ public class MainActivity extends Activity {
             canvas.drawRoundRect(card, radius, radius, stroke);
         }
 
-        private void drawCompactAtmosphere(Canvas canvas, RectF card, int playerAccent, int leagueAccent) {
-            paint.setStyle(Paint.Style.FILL);
-            paint.setShader(new RadialGradient(card.left + card.width() * .22f, card.top + dp(112), card.width() * .42f,
-                    new int[] { Color.argb(118, Color.red(playerAccent), Color.green(playerAccent), Color.blue(playerAccent)), Color.argb(18, Color.red(playerAccent), Color.green(playerAccent), Color.blue(playerAccent)), Color.TRANSPARENT },
-                    new float[] {0f, .46f, 1f}, Shader.TileMode.CLAMP));
-            canvas.drawCircle(card.left + card.width() * .22f, card.top + dp(112), card.width() * .42f, paint);
-            paint.setShader(new RadialGradient(card.right - card.width() * .18f, card.top + dp(148), card.width() * .36f,
-                    new int[] { Color.argb(92, Color.red(leagueAccent), Color.green(leagueAccent), Color.blue(leagueAccent)), Color.argb(16, 255, 255, 255), Color.TRANSPARENT },
-                    new float[] {0f, .40f, 1f}, Shader.TileMode.CLAMP));
-            canvas.drawCircle(card.right - card.width() * .18f, card.top + dp(148), card.width() * .36f, paint);
-            paint.setShader(null);
-        }
+        private void drawProfileAtmosphere(Canvas canvas, RectF card, int playerAccent, int leagueAccent) {
+            RectF left = new RectF(card.left, card.top, card.centerX(), card.bottom);
+            RectF right = new RectF(card.centerX(), card.top, card.right, card.bottom);
 
-        private void drawCompactHero(Canvas canvas, RectF hero, int playerAccent, int leagueAccent) {
             paint.setStyle(Paint.Style.FILL);
-            paint.setShader(new LinearGradient(hero.left, hero.top, hero.right, hero.bottom,
-                    new int[] { Color.argb(228, 8, 12, 20), Color.argb(206, 12, 18, 28), Color.argb(228, 8, 12, 20) },
-                    null, Shader.TileMode.CLAMP));
-            canvas.drawRoundRect(hero, dp(24), dp(24), paint);
+            paint.setShader(new RadialGradient(left.centerX(), card.top + dp(146), left.width() * 0.64f,
+                    new int[] { Color.argb(128, Color.red(playerAccent), Color.green(playerAccent), Color.blue(playerAccent)), Color.argb(38, Color.red(palette.secondary), Color.green(palette.secondary), Color.blue(palette.secondary)), Color.TRANSPARENT },
+                    new float[] {0f, .35f, 1f}, Shader.TileMode.CLAMP));
+            canvas.drawCircle(left.centerX(), card.top + dp(146), left.width() * 0.66f, paint);
+            paint.setShader(new RadialGradient(right.centerX(), card.top + dp(146), right.width() * 0.62f,
+                    new int[] { Color.argb(94, Color.red(leagueAccent), Color.green(leagueAccent), Color.blue(leagueAccent)), Color.argb(28, 255, 255, 255), Color.TRANSPARENT },
+                    new float[] {0f, .38f, 1f}, Shader.TileMode.CLAMP));
+            canvas.drawCircle(right.centerX(), card.top + dp(146), right.width() * 0.64f, paint);
             paint.setShader(null);
-            stroke.setStyle(Paint.Style.STROKE);
-            stroke.setStrokeWidth(dp(1));
-            stroke.setColor(Color.argb(72, 255, 255, 255));
-            canvas.drawRoundRect(hero, dp(24), dp(24), stroke);
 
             if (teamLogo != null) {
-                paint.setAlpha(28);
-                RectF logoBox = new RectF(hero.right - dp(146), hero.top + dp(10), hero.right - dp(22), hero.bottom - dp(14));
+                paint.setAlpha(32);
+                RectF logoBox = new RectF(card.left + dp(18), card.top + dp(72), card.left + dp(198), card.top + dp(252));
                 drawBitmapFitCenter(canvas, teamLogo, logoBox, false, 0);
                 paint.setAlpha(255);
             }
 
-            float portraitR = dp(38);
-            float portraitCx = hero.left + dp(56);
-            float portraitCy = hero.centerY() - dp(4);
-            drawPortrait(canvas, playerIcon, portraitCx, portraitCy, portraitR, playerAccent, initials(c.name));
+            drawSkyline(canvas, left, card.top + dp(304), Color.argb(34, Color.red(playerAccent), Color.green(playerAccent), Color.blue(playerAccent)));
+            drawSkyline(canvas, right, card.top + dp(304), Color.argb(28, 255, 255, 255));
 
-            float textLeft = hero.left + dp(108);
-            drawCardText(canvas, "PLAYER OVERVIEW", textLeft, hero.top + dp(24), dp(10), softColor(playerAccent, 0.12f), true, Paint.Align.LEFT);
-            drawCardText(canvas, c.name, textLeft, hero.top + dp(52), dp(23), Color.WHITE, true, Paint.Align.LEFT);
-            drawCardText(canvas, c.meta, textLeft, hero.top + dp(74), dp(12), Color.rgb(210, 220, 235), true, Paint.Align.LEFT);
-            String lensLabel = currentLensNameForUi().toUpperCase(Locale.US) + " LENS";
-            drawPill(canvas, lensLabel, textLeft + dp(56), hero.top + dp(95), dp(116), dp(24), Color.argb(28, Color.red(playerAccent), Color.green(playerAccent), Color.blue(playerAccent)), Color.argb(82, Color.red(playerAccent), Color.green(playerAccent), Color.blue(playerAccent)), Color.rgb(232, 241, 252), dp(8));
-
-            RectF avgBadge = new RectF(hero.right - dp(102), hero.top + dp(16), hero.right - dp(16), hero.top + dp(86));
-            paint.setStyle(Paint.Style.FILL);
-            paint.setShader(new LinearGradient(avgBadge.left, avgBadge.top, avgBadge.right, avgBadge.bottom,
-                    new int[] { Color.argb(218, 5, 12, 22), Color.argb(198, 12, 26, 40), Color.argb(218, 5, 12, 22) },
-                    null, Shader.TileMode.CLAMP));
-            canvas.drawRoundRect(avgBadge, dp(20), dp(20), paint);
+            paint.setShader(new LinearGradient(card.centerX() - dp(20), card.top, card.centerX() + dp(20), card.bottom,
+                    new int[] { Color.TRANSPARENT, Color.argb(34, 255, 255, 255), Color.TRANSPARENT },
+                    new float[] {0f, .50f, 1f}, Shader.TileMode.CLAMP));
+            canvas.drawRect(card.centerX() - dp(1.3f), card.top + dp(54), card.centerX() + dp(1.3f), card.bottom - dp(26), paint);
             paint.setShader(null);
-            stroke.setColor(Color.argb(86, Color.red(leagueAccent), Color.green(leagueAccent), Color.blue(leagueAccent)));
-            canvas.drawRoundRect(avgBadge, dp(20), dp(20), stroke);
-            drawCardText(canvas, "MLB", avgBadge.centerX(), avgBadge.top + dp(26), dp(17), Color.WHITE, true, Paint.Align.CENTER);
-            drawCardText(canvas, "AVG", avgBadge.centerX(), avgBadge.top + dp(45), dp(11), Color.rgb(192, 214, 240), true, Paint.Align.CENTER);
-            drawCardText(canvas, "baseline", avgBadge.centerX(), avgBadge.top + dp(60), dp(8), Color.rgb(146, 162, 184), false, Paint.Align.CENTER);
-
-            Metric[] heroMetrics = heroMetrics();
-            float chipTop = hero.bottom - dp(42);
-            float chipLeft = textLeft;
-            float chipRight = hero.right - dp(16);
-            float gap = dp(6);
-            int count = 0;
-            for (Metric m : heroMetrics) if (m != null) count++;
-            if (count == 0) return;
-            float chipW = (chipRight - chipLeft - gap * (count - 1)) / count;
-            int idx = 0;
-            for (Metric m : heroMetrics) {
-                if (m == null) continue;
-                float left = chipLeft + idx * (chipW + gap);
-                RectF chip = new RectF(left, chipTop, left + chipW, chipTop + dp(28));
-                drawHeroStatChip(canvas, chip, m.label, format(c.seasonStats == null ? null : c.seasonStats.get(m.key), m), playerAccent);
-                idx++;
-            }
         }
 
-        private Metric[] heroMetrics() {
-            if (c != null && c.player != null && isPitcher(c.player)) {
-                return new Metric[] { metricByKey("era"), metricByKey("whip"), metricByKey("k9") };
-            }
-            return new Metric[] { metricByKey("ops"), metricByKey("wOBA"), metricByKey("xwOBA") };
-        }
-
-        private void drawHeroStatChip(Canvas canvas, RectF chip, String label, String value, int accent) {
-            paint.setStyle(Paint.Style.FILL);
-            paint.setShader(new LinearGradient(chip.left, chip.top, chip.right, chip.bottom,
-                    new int[] { Color.argb(172, 16, 22, 32), Color.argb(132, 12, 18, 28) }, null, Shader.TileMode.CLAMP));
-            canvas.drawRoundRect(chip, dp(14), dp(14), paint);
+        private void drawSkyline(Canvas canvas, RectF zone, float base, int color) {
             paint.setShader(null);
-            stroke.setStyle(Paint.Style.STROKE);
-            stroke.setStrokeWidth(dp(1));
-            stroke.setColor(Color.argb(52, 255, 255, 255));
-            canvas.drawRoundRect(chip, dp(14), dp(14), stroke);
-            drawCardText(canvas, label.toUpperCase(Locale.US), chip.left + dp(10), chip.top + dp(11), dp(7), softColor(accent, 0.14f), true, Paint.Align.LEFT);
-            drawCardText(canvas, safe(value), chip.left + dp(10), chip.bottom - dp(8), dp(12), Color.WHITE, true, Paint.Align.LEFT);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(color);
+            float x = zone.left + dp(14);
+            float[] heights = new float[] {34, 52, 28, 66, 42, 58, 36, 48};
+            float gap = Math.max(dp(4), (zone.width() - dp(28)) / 8f - dp(13));
+            for (int i = 0; i < heights.length; i++) {
+                float ww = dp(11 + (i % 3) * 3);
+                float hh = dp(heights[i]);
+                canvas.drawRoundRect(new RectF(x, base - hh, x + ww, base), dp(2), dp(2), paint);
+                x += ww + gap;
+            }
         }
 
         private void drawVignette(Canvas canvas, RectF card) {
@@ -11990,7 +11960,7 @@ public class MainActivity extends Activity {
             paint.setShader(null);
         }
 
-        private void drawScoreBlock(Canvas canvas, RectF score, int playerAccent) {
+        private void drawScoreBlock(Canvas canvas, RectF score, int playerAccent, int leagueAccent) {
             Double pct = averageLensPercentile(c, lensMetrics);
             double signed = averageLensSignedEdge(c, lensMetrics);
             int sparkColor = profileSparkColor(signed);
@@ -12012,7 +11982,7 @@ public class MainActivity extends Activity {
 
             drawCardText(canvas, "LENS EDGE", score.left + dp(18), score.top + dp(24), dp(10), Color.rgb(155, 171, 195), true, Paint.Align.LEFT);
             drawCardText(canvas, edge, score.left + dp(18), score.top + dp(47), dp(16), Color.WHITE, true, Paint.Align.LEFT);
-            drawCardText(canvas, currentLensNameForUi() + " · vs MLB average", score.left + dp(18), score.top + dp(69), dp(10), Color.rgb(156, 172, 196), false, Paint.Align.LEFT);
+            drawCardText(canvas, currentLensNameForUi(), score.left + dp(18), score.top + dp(69), dp(10), Color.rgb(156, 172, 196), false, Paint.Align.LEFT);
 
             drawCardText(canvas, big, score.right - dp(18), score.top + dp(42), dp(31), sparkColor, true, Paint.Align.RIGHT);
             drawCardText(canvas, tier, score.right - dp(18), score.top + dp(66), dp(12), Color.rgb(226, 235, 247), true, Paint.Align.RIGHT);
@@ -12035,7 +12005,7 @@ public class MainActivity extends Activity {
             return "Slightly below avg";
         }
 
-        private void drawKeyStats(Canvas canvas, RectF card, float startY, int playerAccent) {
+        private void drawKeyStats(Canvas canvas, RectF card, float startY, int playerAccent, int leagueAccent) {
             ArrayList<Metric> metrics = displayMetrics();
             drawCardText(canvas, "KEY LENS STATS", card.left + dp(24), startY, dp(10), Color.rgb(190, 205, 224), true, Paint.Align.LEFT);
             drawCardText(canvas, "PLAYER", card.left + dp(24), startY + dp(22), dp(8), softColor(playerAccent, 0.14f), true, Paint.Align.LEFT);
@@ -12045,7 +12015,7 @@ public class MainActivity extends Activity {
                 return;
             }
             float y = startY + dp(48);
-            float rowH = dp(56);
+            float rowH = dp(48);
             for (int i = 0; i < metrics.size(); i++) {
                 Metric m = metrics.get(i);
                 Double value = c.seasonStats == null ? null : c.seasonStats.get(m.key);
@@ -12054,26 +12024,22 @@ public class MainActivity extends Activity {
                 if (signed == null) signed = 0d;
                 int color = profileSparkColor(signed);
                 if (color == profileNeutralColor()) color = Color.rgb(218, 228, 242);
-                RectF row = new RectF(card.left + dp(18), y - dp(24), card.right - dp(18), y + dp(24));
+                RectF row = new RectF(card.left + dp(18), y - dp(21), card.right - dp(18), y + dp(20));
                 paint.setStyle(Paint.Style.FILL);
-                paint.setColor(i % 2 == 0 ? Color.argb(62, 255, 255, 255) : Color.argb(42, 255, 255, 255));
+                paint.setColor(i % 2 == 0 ? Color.argb(74, 255, 255, 255) : Color.argb(40, 255, 255, 255));
                 canvas.drawRoundRect(row, dp(14), dp(14), paint);
-                stroke.setStyle(Paint.Style.STROKE);
-                stroke.setStrokeWidth(dp(1));
-                stroke.setColor(Color.argb(26, 255, 255, 255));
-                canvas.drawRoundRect(row, dp(14), dp(14), stroke);
 
-                drawCardText(canvas, m.label, card.left + dp(28), y - dp(8), dp(11), Color.rgb(236, 243, 251), true, Paint.Align.LEFT);
-                drawCardText(canvas, format(value, m), card.left + dp(28), y + dp(13), dp(13), softColor(playerAccent, 0.06f), true, Paint.Align.LEFT);
-                drawCardText(canvas, format(league, m), card.right - dp(28), y + dp(13), dp(13), Color.rgb(222, 232, 246), true, Paint.Align.RIGHT);
+                drawCardText(canvas, m.label, card.left + dp(28), y - dp(2), dp(11), Color.rgb(236, 243, 251), true, Paint.Align.LEFT);
+                drawCardText(canvas, format(value, m), card.left + dp(28), y + dp(14), dp(10), softColor(playerAccent, 0.08f), true, Paint.Align.LEFT);
+                drawCardText(canvas, format(league, m), card.right - dp(28), y + dp(7), dp(11), Color.rgb(222, 232, 246), true, Paint.Align.RIGHT);
 
-                float railLeft = card.left + dp(142);
-                float railRight = card.right - dp(96);
-                drawMiniSparkRail(canvas, railLeft, railRight, y + dp(2), signed, color);
+                float railLeft = card.left + dp(132);
+                float railRight = card.right - dp(88);
+                drawMiniSparkRail(canvas, railLeft, railRight, y + dp(5), signed, color);
 
                 Double pct = c.percentile == null ? null : c.percentile.get(m.key);
                 String pctText = pct == null ? "" : Math.round(Math.max(0, Math.min(100, pct))) + "%";
-                drawCardText(canvas, pctText, railRight + dp(8), y + dp(4), dp(9), color, true, Paint.Align.LEFT);
+                drawCardText(canvas, pctText, railRight + dp(7), y + dp(7), dp(9), color, true, Paint.Align.LEFT);
                 y += rowH;
             }
         }
@@ -12082,7 +12048,7 @@ public class MainActivity extends Activity {
             ArrayList<Metric> out = new ArrayList<>();
             if (lensMetrics == null) return out;
             for (Metric m : lensMetrics) {
-                if (out.size() >= 4) break;
+                if (out.size() >= 5) break;
                 if (m == null || c == null || c.seasonStats == null || c.leagueStats == null) continue;
                 if (c.seasonStats.get(m.key) == null || c.leagueStats.get(m.key) == null) continue;
                 out.add(m);
@@ -12165,8 +12131,123 @@ public class MainActivity extends Activity {
                 drawCardText(canvas, fallback, cx, cy + dp(8), dp(22), Color.WHITE, true, Paint.Align.CENTER);
             }
         }
-    }
 
+        private void drawLeagueOrb(Canvas canvas, float cx, float cy, float r, int accent) {
+            paint.setStyle(Paint.Style.FILL);
+            paint.setShader(new RadialGradient(cx, cy, r * 1.55f,
+                    new int[] { Color.argb(138, Color.red(accent), Color.green(accent), Color.blue(accent)), Color.argb(36, 255, 255, 255), Color.TRANSPARENT },
+                    new float[] {0f, .45f, 1f}, Shader.TileMode.CLAMP));
+            canvas.drawCircle(cx, cy, r * 1.34f, paint);
+            paint.setShader(null);
+            stroke.setStyle(Paint.Style.STROKE);
+            stroke.setStrokeWidth(dp(5));
+            stroke.setColor(Color.argb(220, Color.red(accent), Color.green(accent), Color.blue(accent)));
+            stroke.setShadowLayer(dp(14), 0, 0, Color.argb(172, Color.red(accent), Color.green(accent), Color.blue(accent)));
+            canvas.drawCircle(cx, cy, r, stroke);
+            stroke.clearShadowLayer();
+            paint.setStyle(Paint.Style.FILL);
+            paint.setShader(new LinearGradient(cx - r, cy - r, cx + r, cy + r,
+                    new int[] { Color.rgb(8, 13, 23), Color.rgb(17, 28, 45), Color.rgb(8, 13, 23) }, null, Shader.TileMode.CLAMP));
+            canvas.drawCircle(cx, cy, r - dp(7), paint);
+            paint.setShader(null);
+            drawCardText(canvas, "MLB", cx, cy - dp(3), dp(20), Color.WHITE, true, Paint.Align.CENTER);
+            drawCardText(canvas, "AVG", cx, cy + dp(19), dp(13), Color.rgb(190, 212, 240), true, Paint.Align.CENTER);
+        }
+
+        private void drawVsAverageBadge(Canvas canvas, float cx, float cy, float r, int leftColor, int rightColor, int blend) {
+            paint.setStyle(Paint.Style.FILL);
+            paint.setShader(new RadialGradient(cx, cy, r * 2.6f,
+                    new int[] { Color.argb(78, Color.red(blend), Color.green(blend), Color.blue(blend)), Color.argb(32, 255, 255, 255), Color.TRANSPARENT },
+                    new float[] {0f, .40f, 1f}, Shader.TileMode.CLAMP));
+            canvas.drawCircle(cx, cy, r * 2.2f, paint);
+            paint.setShader(null);
+            stroke.setStyle(Paint.Style.STROKE);
+            stroke.setStrokeWidth(dp(4.2f));
+            stroke.setShader(new LinearGradient(cx - r, cy, cx + r, cy, new int[] { leftColor, Color.WHITE, rightColor }, null, Shader.TileMode.CLAMP));
+            stroke.setShadowLayer(dp(16), 0, 0, Color.argb(184, Color.red(blend), Color.green(blend), Color.blue(blend)));
+            canvas.drawCircle(cx, cy, r + dp(5), stroke);
+            stroke.clearShadowLayer();
+            stroke.setShader(null);
+            paint.setShader(new LinearGradient(cx - r, cy, cx + r, cy,
+                    new int[] { mixColor(leftColor, Color.rgb(3, 7, 14), .46f), Color.rgb(9, 14, 22), mixColor(rightColor, Color.rgb(3, 7, 14), .46f) }, null, Shader.TileMode.CLAMP));
+            canvas.drawCircle(cx, cy, r, paint);
+            paint.setShader(null);
+            drawCardText(canvas, "VS", cx, cy - dp(1), dp(12), Color.WHITE, true, Paint.Align.CENTER);
+            drawCardText(canvas, "AVG", cx, cy + dp(12), dp(8), Color.rgb(222, 232, 246), true, Paint.Align.CENTER);
+        }
+
+        private void drawBattleBeam(Canvas canvas, float x1, float y1, float x2, float y2, int color, boolean fromLeft) {
+            Path beam = new Path();
+            beam.moveTo(x1, y1);
+            float mid = (x1 + x2) / 2f;
+            beam.cubicTo(mid, y1 + dp(fromLeft ? -7 : 7), mid, y2 + dp(fromLeft ? 7 : -7), x2, y2);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeCap(Paint.Cap.ROUND);
+            paint.setStrokeWidth(dp(9));
+            paint.setShader(new LinearGradient(x1, y1, x2, y2,
+                    new int[] { Color.TRANSPARENT, Color.argb(194, Color.red(color), Color.green(color), Color.blue(color)), Color.argb(220, 255, 255, 255), Color.TRANSPARENT },
+                    new float[] {0f, .34f, .82f, 1f}, Shader.TileMode.CLAMP));
+            paint.setShadowLayer(dp(15), 0, 0, Color.argb(168, Color.red(color), Color.green(color), Color.blue(color)));
+            canvas.drawPath(beam, paint);
+            paint.clearShadowLayer();
+            paint.setShader(null);
+            paint.setStrokeWidth(dp(2));
+            paint.setColor(Color.argb(212, 255, 250, 230));
+            canvas.drawPath(beam, paint);
+            paint.setStrokeCap(Paint.Cap.BUTT);
+        }
+
+        private void drawNameBlock(Canvas canvas, String title, String subtitle, float cx, float y, int accent, boolean leftSide) {
+            drawCardText(canvas, title, cx, y, dp(18), Color.WHITE, true, Paint.Align.CENTER);
+            String sub = safe(subtitle);
+            if (sub.length() > 28) sub = sub.substring(0, 28) + "…";
+            drawCardText(canvas, sub, cx, y + dp(20), dp(10), Color.rgb(192, 205, 224), true, Paint.Align.CENTER);
+        }
+
+        private void drawCornerLogo(Canvas canvas, float cx, float cy, float size, int accent, boolean left) {
+            if (teamLogo != null) {
+                RectF box = new RectF(cx - size / 2, cy - size / 2, cx + size / 2, cy + size / 2);
+                paint.setAlpha(168);
+                drawBitmapFitCenter(canvas, teamLogo, box, false, 0);
+                paint.setAlpha(255);
+            } else {
+                drawCardText(canvas, safe(c.player == null ? "" : c.player.teamAbbr), cx, cy + dp(4), dp(14), softColor(accent, .12f), true, Paint.Align.CENTER);
+            }
+        }
+
+        private void drawMlbCornerMark(Canvas canvas, float cx, float cy, float size, int accent) {
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(dp(1.4f));
+            paint.setColor(Color.argb(92, Color.red(accent), Color.green(accent), Color.blue(accent)));
+            canvas.drawRoundRect(new RectF(cx - size / 2, cy - size / 2, cx + size / 2, cy + size / 2), dp(18), dp(18), paint);
+            drawCardText(canvas, "MLB", cx, cy - dp(2), dp(13), Color.rgb(208, 224, 244), true, Paint.Align.CENTER);
+            drawCardText(canvas, "AVG", cx, cy + dp(15), dp(9), Color.rgb(152, 172, 198), true, Paint.Align.CENTER);
+        }
+
+        private void drawPill(Canvas canvas, String text, float cx, float cy, float width, float height, int fill, int strokeColor, int textColor, float radius) {
+            RectF r = new RectF(cx - width / 2f, cy - height / 2f, cx + width / 2f, cy + height / 2f);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setShader(null);
+            paint.setColor(fill);
+            canvas.drawRoundRect(r, radius, radius, paint);
+            stroke.setStyle(Paint.Style.STROKE);
+            stroke.setStrokeWidth(dp(1));
+            stroke.setColor(strokeColor);
+            canvas.drawRoundRect(r, radius, radius, stroke);
+            drawCardText(canvas, text, cx, cy + dp(4), dp(9), textColor, true, Paint.Align.CENTER);
+        }
+
+        private void drawCardText(Canvas canvas, String text, float x, float y, float size, int color, boolean bold, Paint.Align align) {
+            paint.setShader(null);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(color);
+            paint.setTextSize(size);
+            paint.setTypeface(bold ? tfBold : tfMedium);
+            paint.setTextAlign(align);
+            paint.setFontFeatureSettings("'tnum' 1");
+            canvas.drawText(text == null ? "" : text, x, y, paint);
+        }
+    }
 
     class PlayerLensSummaryView extends View {
         final Comparison c;
