@@ -547,7 +547,7 @@ public class MainActivity extends Activity {
         scroll.setBackgroundColor(Color.rgb(4, 8, 15));
         root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(10), dp(28), dp(10), dp(12));
+        root.setPadding(dp(10), dp(18), dp(10), dp(10));
         scroll.addView(root, new ScrollView.LayoutParams(-1, -2));
         screen.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
         setContentView(screen);
@@ -589,7 +589,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v160", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v161", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -603,9 +603,9 @@ public class MainActivity extends Activity {
 
         form = verticalCard(28, new int[] { Color.rgb(5, 10, 18), Color.rgb(8, 18, 34), Color.rgb(7, 24, 46) });
         form.setBackground(roundedGradientStroke(new int[] { Color.rgb(5, 10, 18), Color.rgb(8, 18, 34), Color.rgb(7, 24, 46) }, 28, Color.argb(92, 104, 195, 228), 1));
-        form.setPadding(dp(10), dp(8), dp(10), dp(9));
+        form.setPadding(dp(9), dp(7), dp(9), dp(8));
         LinearLayout.LayoutParams formLp = matchWrap();
-        formLp.setMargins(0, dp(4), 0, 0);
+        formLp.setMargins(0, dp(3), 0, 0);
         root.addView(form, formLp);
 
         LinearLayout commandHeader = new LinearLayout(this);
@@ -714,7 +714,7 @@ public class MainActivity extends Activity {
         teamSpinner.setVisibility(View.GONE);
         form.addView(teamSpinner, new LinearLayout.LayoutParams(dp(1), dp(1)));
 
-        teamPickerButton = secondaryActionButton("Choose Team A");
+        teamPickerButton = secondaryActionButton("Choose Team");
         teamPickerButton.setVisibility(View.GONE);
         teamPickerButton.setForeground(ripple(false));
         LinearLayout.LayoutParams teamPickerLp = matchWrap();
@@ -1266,7 +1266,6 @@ public class MainActivity extends Activity {
         listLp.setMargins(0, dp(10), 0, 0);
         card.addView(homeInlineSuggestionList, listLp);
 
-        homeInlineSearchInput.setOnFocusChangeListener((v, hasFocus) -> { if (hasFocus) keepInputAboveKeyboard(homeInlineSearchInput, 58); });
         homeInlineSearchInput.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) { filterHomeInlineSuggestions(s == null ? "" : s.toString()); }
@@ -1302,10 +1301,12 @@ public class MainActivity extends Activity {
     private void showHomePickerDialog() {
         if (homePickerDialog != null && homePickerDialog.isShowing()) {
             updateHomeInlineSelectorUi();
-            if (homeInlineSearchInput != null) {
+            if (homeInlineSearchInput != null && !homeInlineTeamMode) {
                 homeInlineSearchInput.requestFocus();
                 homeInlineSearchInput.setSelection(homeInlineSearchInput.getText() == null ? 0 : homeInlineSearchInput.getText().length());
                 showKeyboard(homeInlineSearchInput);
+            } else {
+                hideKeyboard();
             }
             return;
         }
@@ -1415,20 +1416,25 @@ public class MainActivity extends Activity {
             if (w != null) {
                 w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
                 w.setGravity(Gravity.BOTTOM);
-                w.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+                w.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE | android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
                 int maxH = (int) (getResources().getDisplayMetrics().heightPixels * 0.72f);
                 w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, maxH);
             }
         } catch (Exception ignored) {}
 
-        setBottomDockVisible(false);
+        setBottomDockVisible(true);
         updateHomeInlineSelectorUi();
-        homeInlineSearchInput.postDelayed(() -> {
-            try {
-                homeInlineSearchInput.requestFocus();
-                showKeyboard(homeInlineSearchInput);
-            } catch (Exception ignored) {}
-        }, 120);
+        if (!homeInlineTeamMode) {
+            homeInlineSearchInput.postDelayed(() -> {
+                try {
+                    homeInlineSearchInput.requestFocus();
+                    showKeyboard(homeInlineSearchInput);
+                } catch (Exception ignored) {}
+            }, 120);
+        } else {
+            homeInlineSearchInput.clearFocus();
+            hideKeyboard();
+        }
     }
 
     private void closeHomeInlineSelector() {
@@ -2281,11 +2287,13 @@ public class MainActivity extends Activity {
     }
 
     private void updateBottomNavSelection() {
+        if (bottomNavHost != null) bottomNavHost.setVisibility(View.VISIBLE);
         styleBottomTab(bottomHomeTab, bottomHomeIcon, bottomHomeLabel, bottomHomeLine, activePrimaryTab == TAB_HOME, Color.rgb(245, 198, 74));
         styleBottomTab(bottomMatchupTab, bottomMatchupIcon, bottomMatchupLabel, bottomMatchupLine, activePrimaryTab == TAB_MATCHUP, Color.rgb(99, 166, 255));
         styleBottomTab(bottomSearchTab, bottomSearchIcon, bottomSearchLabel, bottomSearchLine, activePrimaryTab == TAB_PROFILE, Color.rgb(245, 198, 74));
         styleBottomTab(bottomRankingsTab, bottomRankingsIcon, bottomRankingsLabel, bottomRankingsLine, activePrimaryTab == TAB_RANKINGS, Color.rgb(100, 226, 218));
     }
+
 
     private void styleBottomTab(LinearLayout item, TextView icon, TextView label, View line, boolean active, int accent) {
         if (item == null || icon == null || label == null || line == null) return;
@@ -2335,8 +2343,11 @@ public class MainActivity extends Activity {
     }
 
     private void setBottomDockVisible(boolean visible) {
-        if (bottomNavHost != null) bottomNavHost.setVisibility(visible ? View.VISIBLE : View.GONE);
+        // v161: bottom nav is a persistent root-level control. Do not hide it during normal
+        // selectors/search focus; modal sheets can cover it naturally.
+        if (bottomNavHost != null) bottomNavHost.setVisibility(View.VISIBLE);
     }
+
 
     private void keepInputAboveKeyboard(View target, int topPaddingDp) {
         if (mainScroll == null || root == null || target == null) return;
@@ -2514,9 +2525,9 @@ public class MainActivity extends Activity {
         LinearLayout titleCol = new LinearLayout(this);
         titleCol.setOrientation(LinearLayout.VERTICAL);
         header.addView(titleCol, new LinearLayout.LayoutParams(0, -2, 1));
-        String titleText = primarySide ? (headToHeadMode ? "Select Team A" : "Select team profile") : "Select Team B";
+        String titleText = primarySide ? (headToHeadMode ? "Select Team A" : "Select Team") : "Select Team B";
         titleCol.addView(text(titleText, 18, Color.WHITE, true));
-        TextView hint = text("Search city, nickname, or abbreviation.", 11, Color.rgb(156, 173, 197), false);
+        TextView hint = text("Scroll all teams, or tap Search teams to filter.", 11, Color.rgb(156, 173, 197), false);
         hint.setPadding(0, dp(4), 0, 0);
         titleCol.addView(hint);
 
@@ -2597,18 +2608,14 @@ public class MainActivity extends Activity {
             if (w != null) {
                 w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
                 w.setGravity(Gravity.BOTTOM);
-                w.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+                w.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE | android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
                 int maxH = (int) (getResources().getDisplayMetrics().heightPixels * 0.74f);
                 w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, maxH);
             }
         } catch (Exception ignored) {}
 
-        filter.postDelayed(() -> {
-            try {
-                filter.requestFocus();
-                showKeyboard(filter);
-            } catch (Exception ignored) {}
-        }, 120);
+        filter.clearFocus();
+        hideKeyboard();
     }
 
     private ArrayList<String> teamPickerLabels(ArrayList<Team> teams, boolean primarySide) {
@@ -2632,9 +2639,9 @@ public class MainActivity extends Activity {
         }
     }
 
-    
     private void showRankMetricPickerDialog() {
         rebuildRankMetricSpinner();
+        final String role = allowedMetricRoleForCurrentContext();
 
         LinearLayout sheet = verticalCard(26, new int[] {
                 Color.rgb(6, 10, 20),
@@ -2660,7 +2667,7 @@ public class MainActivity extends Activity {
         titleCol.setOrientation(LinearLayout.VERTICAL);
         header.addView(titleCol, new LinearLayout.LayoutParams(0, -2, 1));
         titleCol.addView(text("Ranking Stat", 18, Color.WHITE, true));
-        TextView hint = text("Choose the stat that powers the leaderboard.", 11, Color.rgb(156, 173, 197), false);
+        TextView hint = text("Filter by lens, then choose one leaderboard stat.", 11, Color.rgb(156, 173, 197), false);
         hint.setPadding(0, dp(4), 0, 0);
         titleCol.addView(hint);
 
@@ -2671,6 +2678,16 @@ public class MainActivity extends Activity {
         close.setOnClickListener(v -> dialog.dismiss());
         header.addView(close);
 
+        final String[] activeCategory = new String[] { "all" };
+        final ArrayList<TextView> categoryChips = new ArrayList<>();
+        LinearLayout filterRow = new LinearLayout(this);
+        filterRow.setOrientation(LinearLayout.HORIZONTAL);
+        filterRow.setPadding(0, dp(8), 0, 0);
+        HorizontalScrollView filterScroller = new HorizontalScrollView(this);
+        filterScroller.setHorizontalScrollBarEnabled(false);
+        filterScroller.addView(filterRow, new HorizontalScrollView.LayoutParams(-2, -2));
+        sheet.addView(filterScroller, matchWrap());
+
         EditText filter = new EditText(this);
         filter.setHint("Search stats");
         filter.setSingleLine(true);
@@ -2680,7 +2697,7 @@ public class MainActivity extends Activity {
         filter.setPadding(dp(14), dp(12), dp(14), dp(12));
         filter.setBackground(roundedStroke(Color.argb(34, 255, 255, 255), Color.argb(72, 255, 255, 255), 18, 1));
         LinearLayout.LayoutParams inputLp = matchWrap();
-        inputLp.setMargins(0, dp(12), 0, 0);
+        inputLp.setMargins(0, dp(10), 0, 0);
         sheet.addView(filter, inputLp);
 
         ListView list = new ListView(this);
@@ -2688,32 +2705,50 @@ public class MainActivity extends Activity {
         list.setCacheColorHint(Color.TRANSPARENT);
         list.setSelector(rounded(Color.argb(26, 255, 255, 255), 20));
         list.setBackground(roundedStroke(Color.argb(14, 255, 255, 255), Color.argb(36, 255, 255, 255), 20, 1));
-        LinearLayout.LayoutParams listLp = new LinearLayout.LayoutParams(-1, dp(430));
+        LinearLayout.LayoutParams listLp = new LinearLayout.LayoutParams(-1, dp(390));
         listLp.setMargins(0, dp(10), 0, 0);
         sheet.addView(list, listLp);
 
         final ArrayList<Integer> visibleIndexes = new ArrayList<>();
-        visibleIndexes.add(-1);
-        for (int i = 0; i < rankMetrics.size(); i++) visibleIndexes.add(i);
-
-        final ArrayAdapter<String> adapter = premiumStringAdapter(rankMetricPickerLabels(visibleIndexes), Color.rgb(95, 230, 220));
+        final ArrayAdapter<String> adapter = premiumStringAdapter(new ArrayList<String>(), Color.rgb(95, 230, 220));
         list.setAdapter(adapter);
+
+        final Runnable[] refresh = new Runnable[1];
+        refresh[0] = () -> {
+            String q = filter.getText() == null ? "" : filter.getText().toString().trim().toLowerCase(Locale.US);
+            visibleIndexes.clear();
+            if ("all".equals(activeCategory[0]) && (q.isEmpty() || "all selected stats".contains(q))) visibleIndexes.add(-1);
+            for (int i = 0; i < rankMetrics.size(); i++) {
+                Metric m = rankMetrics.get(i);
+                if (!rankMetricMatchesCategory(m, activeCategory[0], role)) continue;
+                String hay = (m.label + " " + m.key + " " + m.group + " " + m.side).toLowerCase(Locale.US);
+                if (q.isEmpty() || hay.contains(q)) visibleIndexes.add(i);
+            }
+            adapter.clear();
+            adapter.addAll(rankMetricPickerLabels(visibleIndexes));
+            adapter.notifyDataSetChanged();
+            for (TextView chip : categoryChips) {
+                Object tag = chip.getTag();
+                styleRankSelectorFilterChip(chip, tag != null && tag.toString().equals(activeCategory[0]));
+            }
+        };
+
+        for (String cat : rankingStatCategoriesForRole(role)) {
+            TextView chip = rankSelectorFilterChip(rankCategoryLabel(cat, role), "all".equals(cat));
+            chip.setTag(cat);
+            chip.setOnClickListener(v -> {
+                activeCategory[0] = String.valueOf(v.getTag());
+                if (refresh[0] != null) refresh[0].run();
+            });
+            categoryChips.add(chip);
+            LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(-2, dp(34));
+            cp.setMargins(0, 0, dp(7), 0);
+            filterRow.addView(chip, cp);
+        }
 
         filter.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
-                String q = s == null ? "" : s.toString().trim().toLowerCase(Locale.US);
-                visibleIndexes.clear();
-                if (q.isEmpty() || "all selected stats".contains(q)) visibleIndexes.add(-1);
-                for (int i = 0; i < rankMetrics.size(); i++) {
-                    Metric m = rankMetrics.get(i);
-                    String hay = (m.label + " " + m.key + " " + m.group + " " + m.side).toLowerCase(Locale.US);
-                    if (q.isEmpty() || hay.contains(q)) visibleIndexes.add(i);
-                }
-                adapter.clear();
-                adapter.addAll(rankMetricPickerLabels(visibleIndexes));
-                adapter.notifyDataSetChanged();
-            }
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) { if (refresh[0] != null) refresh[0].run(); }
             @Override public void afterTextChanged(Editable s) {}
         });
 
@@ -2727,6 +2762,8 @@ public class MainActivity extends Activity {
             dialog.dismiss();
         });
 
+        if (refresh[0] != null) refresh[0].run();
+
         dialog.setView(sheet);
         dialog.setOnDismissListener(d -> hideKeyboard());
         dialog.show();
@@ -2735,19 +2772,59 @@ public class MainActivity extends Activity {
             if (w != null) {
                 w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
                 w.setGravity(Gravity.BOTTOM);
-                w.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
-                int maxH = (int) (getResources().getDisplayMetrics().heightPixels * 0.74f);
+                w.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE | android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
+                int maxH = (int) (getResources().getDisplayMetrics().heightPixels * 0.78f);
                 w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, maxH);
             }
         } catch (Exception ignored) {}
 
-        filter.postDelayed(() -> {
-            try {
-                filter.requestFocus();
-                showKeyboard(filter);
-            } catch (Exception ignored) {}
-        }, 120);
+        filter.clearFocus();
+        hideKeyboard();
     }
+
+    private String[] rankingStatCategoriesForRole(String role) {
+        if (isTeamMetricContext()) {
+            return new String[] { "all", "teamOverall", "teamOffense", "teamPitchingDefense", "statcastAdvanced", "plateDiscipline", "powerContact" };
+        }
+        if ("pitch".equals(role)) {
+            return new String[] { "all", "traditional", "statcastAdvanced", "plateDiscipline", "powerContact", "runPrevention" };
+        }
+        return new String[] { "all", "traditional", "statcastAdvanced", "plateDiscipline", "powerContact", "speedBaserunning" };
+    }
+
+    private String rankCategoryLabel(String cat, String role) {
+        if ("all".equals(cat)) return "All";
+        return presetDisplayName(cat, role);
+    }
+
+    private boolean rankMetricMatchesCategory(Metric m, String category, String role) {
+        if (m == null) return false;
+        if (category == null || "all".equals(category)) return true;
+        LinkedHashSet<String> keys = metricKeysForPresetAndRole(category, role);
+        return keys.contains(m.key);
+    }
+
+    private TextView rankSelectorFilterChip(String label, boolean active) {
+        TextView chip = text(label, 11, active ? Color.rgb(8, 12, 20) : Color.rgb(224, 236, 248), true);
+        chip.setGravity(Gravity.CENTER);
+        chip.setSingleLine(true);
+        chip.setPadding(dp(12), dp(7), dp(12), dp(7));
+        styleRankSelectorFilterChip(chip, active);
+        chip.setForeground(ripple(true));
+        attachPremiumPress(chip, 0.97f);
+        return chip;
+    }
+
+    private void styleRankSelectorFilterChip(TextView chip, boolean active) {
+        if (chip == null) return;
+        chip.setTextColor(active ? Color.rgb(8, 12, 20) : Color.rgb(224, 236, 248));
+        chip.setBackground(active
+                ? roundedGradientStroke(new int[] { Color.rgb(255, 245, 132), Color.rgb(244, 192, 54), Color.rgb(217, 132, 24) }, 999, Color.argb(190, 255, 245, 142), 1)
+                : roundedStroke(Color.argb(28, 255, 255, 255), Color.argb(72, 255, 255, 255), 999, 1));
+    }
+
+
+
 
 
     private ArrayAdapter<String> premiumStringAdapter(ArrayList<String> values, int accent) {
@@ -2974,7 +3051,7 @@ public class MainActivity extends Activity {
         if (profileToolsShell != null) profileToolsShell.setVisibility(View.GONE);
         if (expectedViewButton != null) expectedViewButton.setVisibility(View.GONE);
         if (rankControlContainer != null) rankControlContainer.setVisibility(rankingsModeActive ? View.VISIBLE : View.GONE);
-        if (metricPickerButton != null) metricPickerButton.setVisibility((activePrimaryTab != TAB_HOME && !profileActive) ? View.VISIBLE : View.GONE);
+        if (metricPickerButton != null) metricPickerButton.setVisibility(activePrimaryTab == TAB_MATCHUP ? View.VISIBLE : View.GONE);
         updatePrimarySelectorLabel();
         updateControlsVisibility();
 
@@ -4090,7 +4167,6 @@ public class MainActivity extends Activity {
                 } else if (searchInput != null) {
                     searchInput.setVisibility(View.VISIBLE);
                     searchInput.requestFocus();
-                    keepInputAboveKeyboard(searchInput, 70);
                 }
             } else {
                 openProfileForCurrentSelection();
@@ -4316,12 +4392,11 @@ public class MainActivity extends Activity {
         expectedViewButton.setOnClickListener(v -> setExpectedMode());
 
         searchInput.setOnFocusChangeListener((v, hasFocus) -> {
-            setBottomDockVisible(!hasFocus);
-            if (hasFocus) keepInputAboveKeyboard(searchInput, 70);
+            setBottomDockVisible(true);
+            if (hasFocus && activePrimaryTab == TAB_PROFILE && mainScroll != null) mainScroll.scrollTo(0, 0);
         });
         compareSearchInput.setOnFocusChangeListener((v, hasFocus) -> {
-            setBottomDockVisible(!hasFocus);
-            if (hasFocus) keepInputAboveKeyboard(compareSelectorLabel != null ? compareSelectorLabel : compareSearchInput, 56);
+            setBottomDockVisible(true);
         });
 
         searchInput.addTextChangedListener(new TextWatcher() {
@@ -4625,7 +4700,9 @@ public class MainActivity extends Activity {
         }
         suggestionsAdapter.notifyDataSetChanged();
         suggestionsList.setVisibility(filteredPlayers.isEmpty() ? View.GONE : View.VISIBLE);
-        if (!filteredPlayers.isEmpty()) keepInputAboveKeyboard(searchInput, 70);
+        if (activePrimaryTab == TAB_PROFILE && searchInput != null && searchInput.hasFocus() && mainScroll != null) {
+            mainScroll.scrollTo(0, 0);
+        }
     }
 
     private void filterComparePlayers(String raw) {
@@ -4646,7 +4723,6 @@ public class MainActivity extends Activity {
         }
         compareSuggestionsAdapter.notifyDataSetChanged();
         compareSuggestionsList.setVisibility(filteredComparePlayers.isEmpty() ? View.GONE : View.VISIBLE);
-        if (!filteredComparePlayers.isEmpty()) keepInputAboveKeyboard(compareSelectorLabel != null ? compareSelectorLabel : compareSearchInput, 56);
     }
 
     private void renderComparePreview() {
@@ -4728,6 +4804,7 @@ public class MainActivity extends Activity {
     private void comparePlayer(Player player, int season) {
         lastComparison = null;
         lastHeadToHead = null;
+        resetTrendDefaults();
         StatScope scope = scopeForPlayer(player);
         constrainSelectedMetricsToPlayerRole(roleForScope(scope), true);
         showProfileSkeleton();  // v29: skeleton while season data loads
@@ -4744,14 +4821,6 @@ public class MainActivity extends Activity {
                 HashMap<String, Integer> ranks = computePlayerRankMap(entries, season, player.id, rankMetrics);
                 HashMap<String, Integer> totals = computePlayerRankTotalMap(entries, season, rankMetrics);
                 HashMap<String, Double> percentiles = percentileMap(ranks, totals);
-                Stats pendingCareer = new Stats();
-                Comparison quick = new Comparison(false, player.fullName, player.teamAbbr, player.position, player.id, season, seasonStats, pendingCareer, leagueStats, new Date(), "Career loading…", player, null, ranks, totals, percentiles, new HashMap<>());
-                main.post(() -> {
-                    lastComparison = quick;
-                    if (expectedMode) renderExpectedComparison(quick); else renderComparison(quick);
-                    setBusy(false, expectedMode ? "Actual + expected loaded. Career numbers are filling in…" : "Season + league loaded. Career numbers are filling in…");
-                });
-
                 Stats careerStats = fetchPlayerCareerStats(player, season);
                 LinkedHashMap<Integer, Stats> recentSeasons = fetchPlayerRecentSeasonStats(player, season);
                 LinkedHashMap<String, Stats> recentWindows = fetchPlayerRecentWindows(player, season);
@@ -4762,6 +4831,7 @@ public class MainActivity extends Activity {
                     if (!teamMode && selectedPlayer != null && selectedPlayer.id == player.id && currentSeason() == season) {
                         lastComparison = complete;
                         if (expectedMode) renderExpectedComparison(complete); else renderComparison(complete);
+                        setBusy(false, null);
                         statusView.setText(expectedMode ? "Complete · actual vs expected loaded" : "Complete · season, league, and career loaded");
                     }
                 });
@@ -4777,6 +4847,7 @@ public class MainActivity extends Activity {
     private void compareTeam(Team team, int season) {
         lastComparison = null;
         lastHeadToHead = null;
+        resetTrendDefaults();
         StatScope scope = StatScope.BOTH;
         constrainSelectedMetricsToPlayerRole("both", true);
         showProfileSkeleton();  // v29: skeleton while season data loads
@@ -4798,14 +4869,6 @@ public class MainActivity extends Activity {
                 HashMap<String, Integer> ranks = computeTeamRankMap(teamStatsMap, team.key(), rankMetrics);
                 HashMap<String, Integer> totals = computeTeamRankTotalMap(teamStatsMap, rankMetrics);
                 HashMap<String, Double> percentiles = percentileMap(ranks, totals);
-                Stats pendingHistory = new Stats();
-                Comparison quick = new Comparison(true, team.name, team.abbr, "Team", 0, season, teamStats, pendingHistory, leagueStats, new Date(), "History loading…", null, team, ranks, totals, percentiles, new HashMap<>());
-                main.post(() -> {
-                    lastComparison = quick;
-                    if (expectedMode) renderExpectedComparison(quick); else renderComparison(quick);
-                    setBusy(false, expectedMode ? "Actual + expected loaded. Team history is filling in…" : "Season + league loaded. Team history is filling in…");
-                });
-
                 Stats historyStats = fetchTeamHistoryStats(team, season);
                 LinkedHashMap<Integer, Stats> recentSeasons = fetchTeamRecentSeasonStats(team, season);
                 Map<String, ArrayList<TrendPoint>> seasonTrends = fetchTeamSeasonTrendMap(team, season);
@@ -4815,6 +4878,7 @@ public class MainActivity extends Activity {
                     if (teamMode && selectedTeam != null && selectedTeam.key().equals(team.key()) && currentSeason() == season) {
                         lastComparison = complete;
                         if (expectedMode) renderExpectedComparison(complete); else renderComparison(complete);
+                        setBusy(false, null);
                         statusView.setText(expectedMode ? "Complete · actual vs expected loaded" : "Complete · season, league, and team history loaded");
                     }
                 });
@@ -4830,6 +4894,7 @@ public class MainActivity extends Activity {
     private void comparePlayersSideBySide(Player a, Player b, int season) {
         lastComparison = null;
         lastHeadToHead = null;
+        resetTrendDefaults();
         StatScope scope = scopeForPlayers(a, b);
         constrainSelectedMetricsToPlayerRole(roleForScope(scope), true);
         showProfileSkeleton();  // v29: skeleton while H2H loads
@@ -4868,6 +4933,7 @@ public class MainActivity extends Activity {
     private void compareTeamsSideBySide(Team a, Team b, int season) {
         lastComparison = null;
         lastHeadToHead = null;
+        resetTrendDefaults();
         StatScope scope = StatScope.BOTH;
         constrainSelectedMetricsToPlayerRole("both", true);
         showProfileSkeleton();  // v29: skeleton while H2H loads
@@ -5177,6 +5243,11 @@ public class MainActivity extends Activity {
         col.addView(text("Leader: " + r.leaderName + " " + format(r.leaderValue, r.metric), 10, Color.rgb(178, 195, 216), false));
         row.addView(col, new LinearLayout.LayoutParams(0, -2, 1));
 
+        TextView info = compactStatInfoButton(r.metric);
+        LinearLayout.LayoutParams infoLp = new LinearLayout.LayoutParams(dp(24), dp(24));
+        infoLp.setMargins(dp(4), 0, dp(6), 0);
+        row.addView(info, infoLp);
+
         TextView val = text(format(r.value, r.metric), 14, Color.rgb(88, 210, 232), true);
         val.setGravity(Gravity.RIGHT);
         row.addView(val);
@@ -5475,7 +5546,7 @@ public class MainActivity extends Activity {
         TeamPalette palette = paletteForComparison(c);
 
         LinearLayout card = verticalCard(24, null);
-        card.setPadding(dp(7), dp(6), dp(7), dp(7));
+        card.setPadding(dp(6), dp(5), dp(6), dp(6));
         card.setBackground(roundedGradient(new int[] {
                 Color.rgb(8, 12, 20),
                 darkColor(palette.primary, 0.46f),
@@ -5499,7 +5570,7 @@ public class MainActivity extends Activity {
         card.addView(topMeta, matchWrap());
 
         FrameLayout heroShell = new FrameLayout(this);
-        heroShell.setPadding(dp(5), dp(5), dp(5), dp(5));
+        heroShell.setPadding(dp(4), dp(4), dp(4), dp(4));
         heroShell.setBackground(roundedGradient(new int[] {
                 Color.rgb(7, 10, 16),
                 darkColor(palette.primary, 0.70f),
@@ -6097,6 +6168,18 @@ public class MainActivity extends Activity {
         return label.replace("Allowed", "").trim();
     }
 
+    private TextView compactStatInfoButton(Metric m) {
+        TextView info = text("i", 9, Color.rgb(178, 195, 216), true);
+        info.setGravity(Gravity.CENTER);
+        info.setPadding(0, 0, 0, dp(1));
+        info.setBackground(roundedStroke(Color.argb(24, 255, 255, 255), Color.argb(72, 255, 255, 255), 999, 1));
+        info.setForeground(ripple(false));
+        info.setContentDescription(m == null ? "Stat info" : "About " + m.label);
+        info.setOnClickListener(v -> showMetricGlossary(m));
+        return info;
+    }
+
+
     private View metricComparisonTile(Comparison c, Metric m, TeamPalette palette) {
         if (expectedMode) return expectedMetricComparisonTile(c, m, palette);
 
@@ -6121,6 +6204,10 @@ public class MainActivity extends Activity {
         label.setSingleLine(true);
         label.setEllipsize(TextUtils.TruncateAt.END);
         head.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView info = compactStatInfoButton(m);
+        LinearLayout.LayoutParams infoLp = new LinearLayout.LayoutParams(dp(21), dp(21));
+        infoLp.setMargins(dp(3), 0, dp(4), 0);
+        head.addView(info, infoLp);
         TextView pctBadge = text(expectedMode ? "MLB AVG" : (pct == null ? "— PCTL" : ordinalPercentile(pct)), 8, accent, true);
         pctBadge.setGravity(Gravity.CENTER);
         pctBadge.setPadding(dp(6), dp(3), dp(6), dp(3));
@@ -6177,6 +6264,10 @@ public class MainActivity extends Activity {
         label.setSingleLine(true);
         label.setEllipsize(TextUtils.TruncateAt.END);
         head.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView info = compactStatInfoButton(actualMetric);
+        LinearLayout.LayoutParams infoLp = new LinearLayout.LayoutParams(dp(21), dp(21));
+        infoLp.setMargins(dp(3), 0, dp(4), 0);
+        head.addView(info, infoLp);
         TextView mode = text("xSTAT", 8, Color.rgb(174, 218, 255), true);
         mode.setGravity(Gravity.CENTER);
         mode.setPadding(dp(6), dp(3), dp(6), dp(3));
@@ -10002,6 +10093,12 @@ public class MainActivity extends Activity {
         return trendWindowMode + " window average";
     }
 
+    private void resetTrendDefaults() {
+        trendWindowMode = "15d";
+        metricTrendModes.clear();
+    }
+
+
     private String trendModeFor(Metric m) {
         if (m == null) return trendWindowMode;
         String mode = metricTrendModes.get(m.key);
@@ -10129,11 +10226,32 @@ public class MainActivity extends Activity {
         shell.addView(titleRow, matchWrap());
 
         SparklineView spark = new SparklineView(this, values, labels, m, palette.primary);
-        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(-1, dp(76));
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(-1, dp(72));
         slp.setMargins(0, dp(5), 0, 0);
         shell.addView(spark, slp);
+        shell.addView(trendDateRow(labels), matchWrap());
         parent.addView(shell, shellLp);
     }
+
+    private LinearLayout trendDateRow(ArrayList<String> labels) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setPadding(dp(2), dp(2), dp(2), 0);
+        String firstLabel = labels == null || labels.isEmpty() ? "Start" : shortTrendLabel(safe(labels.get(0)));
+        String lastLabel = labels == null || labels.isEmpty() ? "Now" : shortTrendLabel(safe(labels.get(labels.size() - 1)));
+        row.addView(trendDateLabel(firstLabel, Gravity.LEFT), new LinearLayout.LayoutParams(0, -2, 1));
+        row.addView(trendDateLabel(lastLabel, Gravity.RIGHT), new LinearLayout.LayoutParams(0, -2, 1));
+        return row;
+    }
+
+    private TextView trendDateLabel(String s, int gravity) {
+        TextView tv = text(s, 11, Color.rgb(188, 202, 222), true);
+        tv.setGravity(gravity);
+        tv.setSingleLine(true);
+        tv.setFontFeatureSettings("'tnum' 1");
+        return tv;
+    }
+
 
     private LinearLayout trendReferenceRow(ArrayList<Double> values, ArrayList<String> labels, Metric m) {
         LinearLayout row = new LinearLayout(this);
@@ -10153,11 +10271,13 @@ public class MainActivity extends Activity {
     }
 
     private TextView trendRefText(String s, int gravity) {
-        TextView tv = text(s, 8, MUTED, false);
+        TextView tv = text(s, 11, Color.rgb(188, 202, 222), true);
         tv.setGravity(gravity);
         tv.setSingleLine(true);
+        tv.setFontFeatureSettings("'tnum' 1");
         return tv;
     }
+
 
     private Double lastNonNull(ArrayList<Double> values) {
         if (values == null) return null;
@@ -14338,6 +14458,7 @@ public class MainActivity extends Activity {
     }
 
     /** v29: Show shimmer skeleton in results area while profile data loads. */
+
     private void showProfileSkeleton() {
         if (resultsBox != null) resultsBox.setBackgroundColor(Color.rgb(2, 6, 13));
         if (headerBox != null) headerBox.removeAllViews();
@@ -14346,8 +14467,10 @@ public class MainActivity extends Activity {
             skeletonView = new SkeletonLoadingView(this);
             resultsBox.addView(skeletonView, 0, new LinearLayout.LayoutParams(-1, -2));
         }
+        if (statusView != null) statusView.setText("Loading full profile…");
         resultsBox.setVisibility(View.VISIBLE);
     }
+
 
     /** v29: Remove shimmer skeleton when real content is ready. */
     private void hideProfileSkeleton() {
@@ -14805,7 +14928,7 @@ public class MainActivity extends Activity {
             int n = values.size();
             if (n < 2) return;
             float w = getWidth(), h = getHeight();
-            float padL = dp(8), padR = dp(54), padT = dp(12), padB = dp(24);
+            float padL = dp(8), padR = dp(54), padT = dp(12), padB = dp(8);
 
             double min = Double.MAX_VALUE, max = -Double.MAX_VALUE;
             for (Double v : values) {
@@ -14875,13 +14998,8 @@ public class MainActivity extends Activity {
 
             // No point markers: the line represents a continuous rolling/cumulative trend.
 
-            paint.setTextSize(dp(11));
-            paint.setTypeface(tfBold);  // v29
-            paint.setColor(Color.rgb(218, 228, 242));
-            paint.setTextAlign(Paint.Align.LEFT);
-            if (labels != null && !labels.isEmpty()) canvas.drawText(shortTrendLabel(labels.get(0)), padL, h - dp(3), paint);
-            paint.setTextAlign(Paint.Align.RIGHT);
-            if (labels != null && !labels.isEmpty()) canvas.drawText(shortTrendLabel(labels.get(labels.size() - 1)), padL + plotW, h - dp(3), paint);
+            // v161: dates are rendered as normal TextViews below the chart.
+            // Do not draw tiny canvas date labels here.
         }
     }
 
