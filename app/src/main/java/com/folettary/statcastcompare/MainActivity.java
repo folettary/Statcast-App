@@ -246,7 +246,9 @@ public class MainActivity extends Activity {
     private boolean rankingsModeActive = false;
     private boolean generalRankingsMode = false;
     private boolean suppressNextAutoScroll = false;
-    private String trendWindowMode = "season";
+    private String trendWindowMode = "15d";
+    private final ArrayDeque<Integer> navTabHistory = new ArrayDeque<>();
+    private boolean restoringNavHistory = false;
 
     private final LinkedHashSet<String> selectedMetricKeys = new LinkedHashSet<>();
     // v119: stats shown on screen and stats shown in the hero Key Stat Edge card are separate controls.
@@ -450,6 +452,58 @@ public class MainActivity extends Activity {
         io.shutdown();
     }
 
+    @Override
+    public void onBackPressed() {
+        if (homePickerDialog != null && homePickerDialog.isShowing()) {
+            closeHomeInlineSelector();
+            return;
+        }
+        if (suggestionsList != null && suggestionsList.getVisibility() == View.VISIBLE) {
+            suggestionsList.setVisibility(View.GONE);
+            hideKeyboard();
+            return;
+        }
+        if (compareSuggestionsList != null && compareSuggestionsList.getVisibility() == View.VISIBLE) {
+            compareSuggestionsList.setVisibility(View.GONE);
+            hideKeyboard();
+            return;
+        }
+        if (homeInlineSelectorCard != null && homeInlineSelectorCard.getVisibility() == View.VISIBLE) {
+            closeHomeInlineSelector();
+            return;
+        }
+
+        boolean profileLoaded = activePrimaryTab == TAB_PROFILE && !headToHeadMode && !rankingsModeActive
+                && resultsBox != null && resultsBox.getVisibility() == View.VISIBLE
+                && ((teamMode && selectedTeam != null) || (!teamMode && selectedPlayer != null));
+        if (profileLoaded) {
+            if (resultsBox != null) resultsBox.setVisibility(View.GONE);
+            if (headerBox != null) headerBox.removeAllViews();
+            if (metricBox != null) metricBox.removeAllViews();
+            renderSearchLanding();
+            updateBottomNavSelection();
+            return;
+        }
+
+        if (!navTabHistory.isEmpty()) {
+            int previous = navTabHistory.pop();
+            restoringNavHistory = true;
+            setPrimaryTab(previous);
+            restoringNavHistory = false;
+            return;
+        }
+
+        if (activePrimaryTab != TAB_HOME) {
+            restoringNavHistory = true;
+            setPrimaryTab(TAB_HOME);
+            restoringNavHistory = false;
+            return;
+        }
+
+        super.onBackPressed();
+    }
+
+
     private void initColors() {
         if (isDark) {
             NAVY     = Color.rgb(9, 15, 28);
@@ -535,7 +589,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v158", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v160", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -549,9 +603,9 @@ public class MainActivity extends Activity {
 
         form = verticalCard(28, new int[] { Color.rgb(5, 10, 18), Color.rgb(8, 18, 34), Color.rgb(7, 24, 46) });
         form.setBackground(roundedGradientStroke(new int[] { Color.rgb(5, 10, 18), Color.rgb(8, 18, 34), Color.rgb(7, 24, 46) }, 28, Color.argb(92, 104, 195, 228), 1));
-        form.setPadding(dp(12), dp(12), dp(12), dp(12));
+        form.setPadding(dp(10), dp(8), dp(10), dp(9));
         LinearLayout.LayoutParams formLp = matchWrap();
-        formLp.setMargins(0, dp(6), 0, 0);
+        formLp.setMargins(0, dp(4), 0, 0);
         root.addView(form, formLp);
 
         LinearLayout commandHeader = new LinearLayout(this);
@@ -565,13 +619,13 @@ public class MainActivity extends Activity {
         commandTitleView.setLetterSpacing(0.12f);
         commandText.addView(commandTitleView);
         commandSubtitleView = text("Matchups, profiles, and rankings share one premium control surface.", 11, Color.rgb(201, 215, 233), false);
-        commandSubtitleView.setPadding(0, dp(3), 0, 0);
+        commandSubtitleView.setPadding(0, dp(2), 0, 0);
         commandText.addView(commandSubtitleView);
 
-        metricPickerButton = compactControlButton("Stats", false);
+        metricPickerButton = compactControlButton("Stat Lens", false);
         metricPickerButton.setForeground(ripple(false));
         metricPickerButton.setVisibility(View.VISIBLE);
-        LinearLayout.LayoutParams metricPickerLp = new LinearLayout.LayoutParams(dp(104), dp(38));
+        LinearLayout.LayoutParams metricPickerLp = new LinearLayout.LayoutParams(dp(112), dp(36));
         metricPickerLp.setMargins(dp(8), 0, 0, 0);
         commandHeader.addView(metricPickerButton, metricPickerLp);
         updateMetricPickerLabel();
@@ -581,7 +635,7 @@ public class MainActivity extends Activity {
         navShell.setPadding(dp(4), dp(4), dp(4), dp(4));
         navShell.setBackground(roundedStroke(Color.argb(26, 255, 255, 255), Color.argb(52, 186, 214, 236), 20, 1));
         LinearLayout.LayoutParams navShellLp = matchWrap();
-        navShellLp.setMargins(0, dp(8), 0, dp(8));
+        navShellLp.setMargins(0, dp(6), 0, dp(6));
         form.addView(navShell, navShellLp);
         headToHeadButton = pillButton("Matchup", true);
         singleViewButton = pillButton("Profile", false);
@@ -602,7 +656,7 @@ public class MainActivity extends Activity {
         modeShell.setPadding(dp(4), dp(4), dp(4), dp(4));
         modeShell.setBackground(roundedStroke(Color.argb(26, 255, 255, 255), Color.argb(52, 186, 214, 236), 20, 1));
         LinearLayout.LayoutParams modeShellLp = matchWrap();
-        modeShellLp.setMargins(0, dp(4), 0, dp(7));
+        modeShellLp.setMargins(0, dp(3), 0, dp(5));
         form.addView(modeShell, modeShellLp);
         playerModeButton = pillButton("Player", true);
         teamModeButton = pillButton("Team", false);
@@ -643,7 +697,7 @@ public class MainActivity extends Activity {
         searchInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
         searchInput.setContentDescription("Search for a player by name, team, or position");
         LinearLayout.LayoutParams inputLp = matchWrap();
-        inputLp.setMargins(0, dp(6), 0, dp(8));
+        inputLp.setMargins(0, dp(4), 0, dp(6));
         form.addView(searchInput, inputLp);
 
         suggestionsList = new ListView(this);
@@ -2055,7 +2109,7 @@ public class MainActivity extends Activity {
     }
 
     private TextView homeStatsSelectorButton() {
-        TextView tv = text("Stats / Edge\n0 shown · 0 card", 9, Color.rgb(226, 236, 248), true);
+        TextView tv = text("Stat Lens\nRecommended", 9, Color.rgb(226, 236, 248), true);
         tv.setGravity(Gravity.CENTER);
         tv.setSingleLine(false);
         tv.setMaxLines(2);
@@ -2242,7 +2296,12 @@ public class MainActivity extends Activity {
         icon.setBackground(rounded(Color.TRANSPARENT, 14));
     }
 
+    
     private void setPrimaryTab(int tab) {
+        if (!restoringNavHistory && activePrimaryTab != tab) {
+            navTabHistory.push(activePrimaryTab);
+            while (navTabHistory.size() > 12) navTabHistory.removeLast();
+        }
         activePrimaryTab = tab;
         if (tab == TAB_HOME) {
             hideKeyboard();
@@ -2425,47 +2484,76 @@ public class MainActivity extends Activity {
         }
     }
 
+    
     private void showTeamPickerDialog(boolean primarySide) {
         if (allTeams.isEmpty()) {
             showError("Team list is still loading.");
             return;
         }
-        LinearLayout shell = new LinearLayout(this);
-        shell.setOrientation(LinearLayout.VERTICAL);
-        shell.setPadding(dp(6), dp(6), dp(6), dp(2));
+
+        LinearLayout sheet = verticalCard(26, new int[] {
+                Color.rgb(6, 10, 20),
+                Color.rgb(8, 16, 30),
+                Color.rgb(6, 24, 42)
+        });
+        sheet.setPadding(dp(16), dp(12), dp(16), dp(16));
+
+        View handle = new View(this);
+        handle.setBackground(rounded(Color.argb(92, 255, 255, 255), 99));
+        LinearLayout.LayoutParams handleLp = new LinearLayout.LayoutParams(dp(42), dp(4));
+        handleLp.gravity = Gravity.CENTER_HORIZONTAL;
+        sheet.addView(handle, handleLp);
+
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams headerLp = matchWrap();
+        headerLp.setMargins(0, dp(10), 0, 0);
+        sheet.addView(header, headerLp);
+
+        LinearLayout titleCol = new LinearLayout(this);
+        titleCol.setOrientation(LinearLayout.VERTICAL);
+        header.addView(titleCol, new LinearLayout.LayoutParams(0, -2, 1));
+        String titleText = primarySide ? (headToHeadMode ? "Select Team A" : "Select team profile") : "Select Team B";
+        titleCol.addView(text(titleText, 18, Color.WHITE, true));
+        TextView hint = text("Search city, nickname, or abbreviation.", 11, Color.rgb(156, 173, 197), false);
+        hint.setPadding(0, dp(4), 0, 0);
+        titleCol.addView(hint);
+
+        final AlertDialog dialog = new AlertDialog.Builder(this).create();
+        TextView close = text("Close", 11, Color.rgb(171, 188, 214), true);
+        close.setPadding(dp(12), dp(8), dp(12), dp(8));
+        close.setBackground(roundedStroke(Color.argb(26, 255, 255, 255), Color.argb(70, 255, 255, 255), 14, 1));
+        close.setOnClickListener(v -> dialog.dismiss());
+        header.addView(close);
 
         EditText filter = new EditText(this);
         filter.setHint("Search teams");
         filter.setSingleLine(true);
         filter.setTextSize(15);
         filter.setTextColor(Color.WHITE);
-        filter.setHintTextColor(Color.rgb(142, 156, 179));
-        filter.setPadding(dp(12), dp(10), dp(12), dp(10));
-        filter.setBackground(roundedStroke(Color.rgb(10, 15, 26), Color.rgb(50, 67, 94), 16, 1));
-        shell.addView(filter, matchWrap());
+        filter.setHintTextColor(Color.rgb(110, 126, 150));
+        filter.setPadding(dp(14), dp(12), dp(14), dp(12));
+        filter.setBackground(roundedStroke(Color.argb(34, 255, 255, 255), Color.argb(72, 255, 255, 255), 18, 1));
+        LinearLayout.LayoutParams inputLp = matchWrap();
+        inputLp.setMargins(0, dp(12), 0, 0);
+        sheet.addView(filter, inputLp);
 
         ListView list = new ListView(this);
         list.setDividerHeight(0);
         list.setCacheColorHint(Color.TRANSPARENT);
         list.setVerticalScrollBarEnabled(true);
-        list.setScrollbarFadingEnabled(false);
         list.setFastScrollEnabled(true);
-        list.setFastScrollAlwaysVisible(true);
-        list.setScrollBarStyle(View.SCROLLBARS_INSIDE_INSET);
-        list.setBackground(roundedStroke(Color.rgb(7, 12, 22), Color.rgb(38, 54, 78), 18, 1));
-        LinearLayout.LayoutParams listLp = new LinearLayout.LayoutParams(-1, dp(390));
-        listLp.setMargins(0, dp(8), 0, 0);
-        shell.addView(list, listLp);
+        list.setSmoothScrollbarEnabled(true);
+        list.setSelector(rounded(Color.argb(26, 255, 255, 255), 20));
+        list.setBackground(roundedStroke(Color.argb(14, 255, 255, 255), Color.argb(36, 255, 255, 255), 20, 1));
+        LinearLayout.LayoutParams listLp = new LinearLayout.LayoutParams(-1, dp(430));
+        listLp.setMargins(0, dp(10), 0, 0);
+        sheet.addView(list, listLp);
 
         final ArrayList<Team> visible = new ArrayList<>(allTeams);
         final TeamPickerAdapter adapter = new TeamPickerAdapter(visible, primarySide);
         list.setAdapter(adapter);
-
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle(primarySide ? (headToHeadMode ? "Choose Team A" : "Choose team") : "Choose Team B")
-                .setView(shell)
-                .setNegativeButton("Cancel", null)
-                .create();
 
         filter.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
@@ -2501,8 +2589,26 @@ public class MainActivity extends Activity {
             dialog.dismiss();
         });
 
-        dialog.setOnShowListener(d -> filter.requestFocus());
+        dialog.setView(sheet);
+        dialog.setOnDismissListener(d -> hideKeyboard());
         dialog.show();
+        try {
+            android.view.Window w = dialog.getWindow();
+            if (w != null) {
+                w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+                w.setGravity(Gravity.BOTTOM);
+                w.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+                int maxH = (int) (getResources().getDisplayMetrics().heightPixels * 0.74f);
+                w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, maxH);
+            }
+        } catch (Exception ignored) {}
+
+        filter.postDelayed(() -> {
+            try {
+                filter.requestFocus();
+                showKeyboard(filter);
+            } catch (Exception ignored) {}
+        }, 120);
     }
 
     private ArrayList<String> teamPickerLabels(ArrayList<Team> teams, boolean primarySide) {
@@ -2526,46 +2632,79 @@ public class MainActivity extends Activity {
         }
     }
 
+    
     private void showRankMetricPickerDialog() {
         rebuildRankMetricSpinner();
-        LinearLayout shell = new LinearLayout(this);
-        shell.setOrientation(LinearLayout.VERTICAL);
-        shell.setPadding(dp(6), dp(6), dp(6), dp(2));
+
+        LinearLayout sheet = verticalCard(26, new int[] {
+                Color.rgb(6, 10, 20),
+                Color.rgb(8, 16, 30),
+                Color.rgb(6, 24, 42)
+        });
+        sheet.setPadding(dp(16), dp(12), dp(16), dp(16));
+
+        View handle = new View(this);
+        handle.setBackground(rounded(Color.argb(92, 255, 255, 255), 99));
+        LinearLayout.LayoutParams handleLp = new LinearLayout.LayoutParams(dp(42), dp(4));
+        handleLp.gravity = Gravity.CENTER_HORIZONTAL;
+        sheet.addView(handle, handleLp);
+
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams headerLp = matchWrap();
+        headerLp.setMargins(0, dp(10), 0, 0);
+        sheet.addView(header, headerLp);
+
+        LinearLayout titleCol = new LinearLayout(this);
+        titleCol.setOrientation(LinearLayout.VERTICAL);
+        header.addView(titleCol, new LinearLayout.LayoutParams(0, -2, 1));
+        titleCol.addView(text("Ranking Stat", 18, Color.WHITE, true));
+        TextView hint = text("Choose the stat that powers the leaderboard.", 11, Color.rgb(156, 173, 197), false);
+        hint.setPadding(0, dp(4), 0, 0);
+        titleCol.addView(hint);
+
+        final AlertDialog dialog = new AlertDialog.Builder(this).create();
+        TextView close = text("Close", 11, Color.rgb(171, 188, 214), true);
+        close.setPadding(dp(12), dp(8), dp(12), dp(8));
+        close.setBackground(roundedStroke(Color.argb(26, 255, 255, 255), Color.argb(70, 255, 255, 255), 14, 1));
+        close.setOnClickListener(v -> dialog.dismiss());
+        header.addView(close);
 
         EditText filter = new EditText(this);
         filter.setHint("Search stats");
         filter.setSingleLine(true);
         filter.setTextSize(15);
-        filter.setPadding(dp(12), dp(9), dp(12), dp(9));
-        filter.setBackground(roundedStroke(Color.WHITE, Color.rgb(202, 215, 232), 16, 1));
-        shell.addView(filter, matchWrap());
+        filter.setTextColor(Color.WHITE);
+        filter.setHintTextColor(Color.rgb(110, 126, 150));
+        filter.setPadding(dp(14), dp(12), dp(14), dp(12));
+        filter.setBackground(roundedStroke(Color.argb(34, 255, 255, 255), Color.argb(72, 255, 255, 255), 18, 1));
+        LinearLayout.LayoutParams inputLp = matchWrap();
+        inputLp.setMargins(0, dp(12), 0, 0);
+        sheet.addView(filter, inputLp);
 
         ListView list = new ListView(this);
-        list.setDividerHeight(1);
-        list.setBackground(roundedStroke(Color.WHITE, Color.rgb(226, 233, 243), 16, 1));
-        LinearLayout.LayoutParams listLp = new LinearLayout.LayoutParams(-1, dp(380));
-        listLp.setMargins(0, dp(8), 0, 0);
-        shell.addView(list, listLp);
+        list.setDividerHeight(0);
+        list.setCacheColorHint(Color.TRANSPARENT);
+        list.setSelector(rounded(Color.argb(26, 255, 255, 255), 20));
+        list.setBackground(roundedStroke(Color.argb(14, 255, 255, 255), Color.argb(36, 255, 255, 255), 20, 1));
+        LinearLayout.LayoutParams listLp = new LinearLayout.LayoutParams(-1, dp(430));
+        listLp.setMargins(0, dp(10), 0, 0);
+        sheet.addView(list, listLp);
 
         final ArrayList<Integer> visibleIndexes = new ArrayList<>();
         visibleIndexes.add(-1);
         for (int i = 0; i < rankMetrics.size(); i++) visibleIndexes.add(i);
 
-        final ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, rankMetricPickerLabels(visibleIndexes));
+        final ArrayAdapter<String> adapter = premiumStringAdapter(rankMetricPickerLabels(visibleIndexes), Color.rgb(95, 230, 220));
         list.setAdapter(adapter);
-
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle("Choose ranking stat")
-                .setView(shell)
-                .setNegativeButton("Cancel", null)
-                .create();
 
         filter.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
                 String q = s == null ? "" : s.toString().trim().toLowerCase(Locale.US);
                 visibleIndexes.clear();
-                if (q.isEmpty() || "all".contains(q)) visibleIndexes.add(-1);
+                if (q.isEmpty() || "all selected stats".contains(q)) visibleIndexes.add(-1);
                 for (int i = 0; i < rankMetrics.size(); i++) {
                     Metric m = rankMetrics.get(i);
                     String hay = (m.label + " " + m.key + " " + m.group + " " + m.side).toLowerCase(Locale.US);
@@ -2588,8 +2727,49 @@ public class MainActivity extends Activity {
             dialog.dismiss();
         });
 
-        dialog.setOnShowListener(d -> filter.requestFocus());
+        dialog.setView(sheet);
+        dialog.setOnDismissListener(d -> hideKeyboard());
         dialog.show();
+        try {
+            android.view.Window w = dialog.getWindow();
+            if (w != null) {
+                w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+                w.setGravity(Gravity.BOTTOM);
+                w.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+                int maxH = (int) (getResources().getDisplayMetrics().heightPixels * 0.74f);
+                w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, maxH);
+            }
+        } catch (Exception ignored) {}
+
+        filter.postDelayed(() -> {
+            try {
+                filter.requestFocus();
+                showKeyboard(filter);
+            } catch (Exception ignored) {}
+        }, 120);
+    }
+
+
+    private ArrayAdapter<String> premiumStringAdapter(ArrayList<String> values, int accent) {
+        return new ArrayAdapter<String>(this, android.R.layout.simple_list_item_1, values) {
+            @Override public View getView(int position, View convertView, ViewGroup parent) {
+                TextView tv = (TextView) super.getView(position, convertView, parent);
+                String value = getItem(position);
+                boolean active = value != null && value.trim().startsWith("✓");
+                tv.setText(value == null ? "" : value.replace("✓", "").trim());
+                tv.setTextColor(active ? Color.rgb(8, 13, 21) : Color.rgb(232, 241, 252));
+                tv.setTextSize(14);
+                tv.setTypeface(active ? tfBold : tfMedium);
+                tv.setPadding(dp(14), dp(12), dp(14), dp(12));
+                tv.setSingleLine(false);
+                tv.setBackground(active
+                        ? roundedGradientStroke(new int[] { Color.rgb(255, 245, 132), Color.rgb(244, 192, 54), Color.rgb(217, 132, 24) }, 17, Color.argb(210, 255, 245, 142), 1)
+                        : roundedGradientStroke(new int[] { Color.argb(210, 8, 13, 24), Color.argb(188, 5, 10, 18) }, 17, Color.argb(52, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
+                AbsListView.LayoutParams lp = new AbsListView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(54));
+                tv.setLayoutParams(lp);
+                return tv;
+            }
+        };
     }
 
     private ArrayList<String> rankMetricPickerLabels(ArrayList<Integer> indexes) {
@@ -2958,11 +3138,12 @@ public class MainActivity extends Activity {
     }
 
 
+    
     private void updateMetricPickerLabel() {
         String preset = metricPresetNameForRole(selectedMetricKeys, allowedMetricRoleForCurrentContext());
-        if (metricPickerButton != null) metricPickerButton.setText("Stats");
+        if (metricPickerButton != null) metricPickerButton.setText("Stat Lens");
         if (homeStatsButton != null) {
-            homeStatsButton.setText("Stats / Edge\n" + selectedMetricKeys.size() + " shown · " + keyEdgeMetricKeys.size() + " card");
+            homeStatsButton.setText("Stat Lens\n" + preset);
             homeStatsButton.setTextSize(9);
             homeStatsButton.setMaxLines(2);
             homeStatsButton.setSingleLine(false);
@@ -3500,7 +3681,7 @@ public class MainActivity extends Activity {
         desc.setPadding(0, dp(3), 0, dp(5));
         card.addView(desc, matchWrap());
 
-        TextView preview = text("Open checklist", 11, Color.rgb(255, 235, 152), true);
+        TextView preview = text("Tap to choose individual stats", 11, Color.rgb(255, 235, 152), true);
         card.addView(preview, matchWrap());
 
         card.setOnClickListener(v -> {
@@ -4046,7 +4227,7 @@ public class MainActivity extends Activity {
         LinearLayout presetRow4 = new LinearLayout(this);
         presetRow4.setOrientation(LinearLayout.HORIZONTAL);
         presetRow4.addView(filterChip("All Stats", () -> applyMetricPreset("all")), weightLp());
-        presetRow4.addView(filterChip("All Stats", () -> applyMetricPreset("all")), weightLp());
+        presetRow4.addView(filterChip("Custom Lens", () -> showMetricPicker()), weightLp());
         filterBox.addView(presetRow4, matchWrap());
 
         TextView custom = text("Custom Card", 13, Color.WHITE, true);
@@ -4121,11 +4302,11 @@ public class MainActivity extends Activity {
     private void wireEvents() {
         playerModeButton.setOnClickListener(v -> setMode(false));
         teamModeButton.setOnClickListener(v -> setMode(true));
-        headToHeadButton.setOnClickListener(v -> setHeadToHeadMode(true));
-        if (stickyCompareButton != null) stickyCompareButton.setOnClickListener(v -> setHeadToHeadMode(true));
-        if (singleViewButton != null) singleViewButton.setOnClickListener(v -> openProfileForCurrentSelection());
-        if (stickyProfileButton != null) stickyProfileButton.setOnClickListener(v -> openProfileForCurrentSelection());
-        if (stickyRankingsButton != null) stickyRankingsButton.setOnClickListener(v -> showStandings());
+        headToHeadButton.setOnClickListener(v -> setPrimaryTab(TAB_MATCHUP));
+        if (stickyCompareButton != null) stickyCompareButton.setOnClickListener(v -> setPrimaryTab(TAB_MATCHUP));
+        if (singleViewButton != null) singleViewButton.setOnClickListener(v -> setPrimaryTab(TAB_PROFILE));
+        if (stickyProfileButton != null) stickyProfileButton.setOnClickListener(v -> setPrimaryTab(TAB_PROFILE));
+        if (stickyRankingsButton != null) stickyRankingsButton.setOnClickListener(v -> setPrimaryTab(TAB_RANKINGS));
         if (bottomHomeTab != null) bottomHomeTab.setOnClickListener(v -> setPrimaryTab(TAB_HOME));
         if (bottomMatchupTab != null) bottomMatchupTab.setOnClickListener(v -> setPrimaryTab(TAB_MATCHUP));
         if (bottomSearchTab != null) bottomSearchTab.setOnClickListener(v -> setPrimaryTab(TAB_PROFILE));
@@ -4754,37 +4935,11 @@ public class MainActivity extends Activity {
         return tv;
     }
 
+    
     private void renderSearchLanding() {
         if (standingsBox == null) return;
-        standingsBox.setVisibility(View.VISIBLE);
         standingsBox.removeAllViews();
-        LinearLayout card = premiumPanelCard(28);
-        card.setPadding(dp(15), dp(15), dp(15), dp(15));
-        LinearLayout.LayoutParams lp = matchWrap();
-        lp.setMargins(0, dp(8), 0, 0);
-        standingsBox.addView(card, lp);
-
-        TextView eyebrow = text(teamMode ? "TEAM SEARCH" : "PLAYER SEARCH", 10, Color.rgb(126, 235, 226), true);
-        eyebrow.setLetterSpacing(0.18f);
-        card.addView(eyebrow);
-        card.addView(text(teamMode ? "Find a team profile" : "Find a player profile", 22, Color.WHITE, true));
-        TextView sub = text(teamMode
-                ? "Use the Team button above, then open a premium team profile with season, ranking, and side-by-side-ready stats."
-                : "Type a name above, tap a result, and the profile opens with season, ranking, expected-stat, and comparison-ready views.",
-                12, Color.rgb(190, 205, 223), false);
-        sub.setPadding(0, dp(6), 0, dp(10));
-        card.addView(sub);
-
-        LinearLayout pills = new LinearLayout(this);
-        pills.setOrientation(LinearLayout.HORIZONTAL);
-        pills.addView(premiumInfoPill(teamMode ? "30 teams" : "Active players", Color.rgb(88, 210, 232)), weightLp());
-        pills.addView(premiumInfoPill("Season chips", Color.rgb(245, 198, 74)), weightLp());
-        pills.addView(premiumInfoPill("Tap to open", Color.rgb(99, 166, 255)), weightLp());
-        card.addView(pills, matchWrap());
-
-        TextView tip = text(teamMode ? "Tip: switch to Player any time to search player profiles." : "Tip: switch to Team to browse team profiles.", 11, Color.rgb(166, 183, 205), false);
-        tip.setPadding(0, dp(10), 0, 0);
-        card.addView(tip);
+        standingsBox.setVisibility(View.GONE);
     }
 
     private void renderRankingsLoadingCard(int season, Metric metric) {
@@ -5320,7 +5475,7 @@ public class MainActivity extends Activity {
         TeamPalette palette = paletteForComparison(c);
 
         LinearLayout card = verticalCard(24, null);
-        card.setPadding(dp(8), dp(7), dp(8), dp(8));
+        card.setPadding(dp(7), dp(6), dp(7), dp(7));
         card.setBackground(roundedGradient(new int[] {
                 Color.rgb(8, 12, 20),
                 darkColor(palette.primary, 0.46f),
@@ -5344,14 +5499,14 @@ public class MainActivity extends Activity {
         card.addView(topMeta, matchWrap());
 
         FrameLayout heroShell = new FrameLayout(this);
-        heroShell.setPadding(dp(6), dp(6), dp(6), dp(6));
+        heroShell.setPadding(dp(5), dp(5), dp(5), dp(5));
         heroShell.setBackground(roundedGradient(new int[] {
                 Color.rgb(7, 10, 16),
                 darkColor(palette.primary, 0.70f),
                 Color.rgb(6, 10, 18)
         }, 26));
         LinearLayout.LayoutParams topLp = matchWrap();
-        topLp.setMargins(0, dp(4), 0, dp(4));
+        topLp.setMargins(0, dp(3), 0, dp(3));
         card.addView(heroShell, topLp);
 
         View heroGlow = new View(this);
@@ -5360,7 +5515,7 @@ public class MainActivity extends Activity {
                 Color.argb(44, Color.red(palette.secondary), Color.green(palette.secondary), Color.blue(palette.secondary)),
                 Color.TRANSPARENT
         }, 26));
-        FrameLayout.LayoutParams glowLp = new FrameLayout.LayoutParams(dp(190), dp(92));
+        FrameLayout.LayoutParams glowLp = new FrameLayout.LayoutParams(dp(165), dp(76));
         glowLp.gravity = Gravity.START | Gravity.TOP;
         glowLp.leftMargin = dp(4);
         heroShell.addView(heroGlow, glowLp);
@@ -5379,7 +5534,7 @@ public class MainActivity extends Activity {
             watermark.setScaleType(ImageView.ScaleType.FIT_CENTER);
             watermark.setAlpha(0.10f);
             loadTeamLogo(c.team, watermark);
-            FrameLayout.LayoutParams wmLp = new FrameLayout.LayoutParams(dp(78), dp(78));
+            FrameLayout.LayoutParams wmLp = new FrameLayout.LayoutParams(dp(62), dp(62));
             wmLp.gravity = Gravity.END | Gravity.TOP;
             wmLp.topMargin = dp(0);
             wmLp.rightMargin = dp(0);
@@ -5432,7 +5587,7 @@ public class MainActivity extends Activity {
             logoLp.gravity = Gravity.CENTER;
             matte.addView(teamLogo, logoLp);
         }
-        LinearLayout.LayoutParams imgLp = new LinearLayout.LayoutParams(dp(58), dp(58));
+        LinearLayout.LayoutParams imgLp = new LinearLayout.LayoutParams(dp(50), dp(50));
         imgLp.setMargins(0, 0, dp(9), 0);
         top.addView(avatarFrame, imgLp);
 
@@ -5444,10 +5599,10 @@ public class MainActivity extends Activity {
             club.setLetterSpacing(0.10f);
             titleCol.addView(club);
         }
-        TextView name = text(c.name, 17, Color.WHITE, true);
+        TextView name = text(c.name, 16, Color.WHITE, true);
         name.setLetterSpacing(0.02f);
         titleCol.addView(name);
-        TextView meta = text(c.meta + " · " + c.season, 11, Color.rgb(214, 223, 236), true);
+        TextView meta = text(c.meta + " · " + c.season, 10, Color.rgb(214, 223, 236), true);
         meta.setPadding(0, 0, 0, dp(3));
         titleCol.addView(meta);
         if (c.isTeam) {
@@ -5467,7 +5622,7 @@ public class MainActivity extends Activity {
         sectionRow.setOrientation(LinearLayout.HORIZONTAL);
         sectionRow.setGravity(Gravity.CENTER_VERTICAL);
         sectionRow.setPadding(0, dp(9), 0, dp(3));
-        TextView tableTitle = text(c.isTeam ? "Profile comparison" : "Lens vs MLB Avg", 18, Color.rgb(214, 225, 242), true);
+        TextView tableTitle = text(c.isTeam ? "Profile comparison" : "Lens vs MLB average", 17, Color.rgb(214, 225, 242), true);
         sectionRow.addView(tableTitle, new LinearLayout.LayoutParams(0, -2, 1));
         sectionRow.addView(c.isTeam ? comparisonLegend(c.thirdLabelShort(), palette) : profileSparkLegend());
         metricBox.addView(sectionRow, matchWrap());
@@ -5519,8 +5674,8 @@ public class MainActivity extends Activity {
         eyebrow.setLetterSpacing(0.12f);
         shell.addView(eyebrow, matchWrap());
 
-        TextView rule = text("Lens chooses the stats. Mode chooses the comparison.", 10, Color.rgb(158, 176, 202), false);
-        rule.setPadding(0, dp(4), 0, dp(8));
+        TextView rule = text("Stats + comparison mode", 10, Color.rgb(158, 176, 202), false);
+        rule.setPadding(0, dp(3), 0, dp(7));
         shell.addView(rule, matchWrap());
 
         TextView lensLabel = text("STAT LENS", 9, Color.rgb(132, 150, 176), true);
@@ -5568,11 +5723,9 @@ public class MainActivity extends Activity {
         modes.addView(mlbChip, mlbLp);
         modes.addView(xChip, xLp);
 
-        TextView note = text(expectedMode
-                ? xStatsAvailabilityText(c)
-                : "Compares this season with MLB average and career.",
+        TextView note = text(expectedMode ? xStatsAvailabilityText(c) : "This season vs MLB average and career.",
                 10, Color.rgb(160, 178, 202), false);
-        note.setPadding(dp(2), dp(7), dp(2), 0);
+        note.setPadding(dp(2), dp(6), dp(2), 0);
         shell.addView(note, matchWrap());
     }
 
@@ -5747,13 +5900,6 @@ public class MainActivity extends Activity {
         sub.setGravity(Gravity.RIGHT);
         head.addView(sub);
         shell.addView(head, matchWrap());
-
-        TextView helper = text(expectedMode
-                ? "Only actual-vs-expected pairs from this lens."
-                : "This season vs MLB average and career.",
-                9, Color.rgb(138, 154, 180), false);
-        helper.setPadding(dp(1), dp(4), dp(1), 0);
-        shell.addView(helper, matchWrap());
 
         if (metrics == null || metrics.isEmpty()) {
             TextView empty = text(expectedMode ? "No xStat pairs are available for this lens." : "No key metrics available.", 12, Color.rgb(178, 195, 216), true);
@@ -6071,7 +6217,7 @@ public class MainActivity extends Activity {
         barLp.setMargins(0, dp(1), 0, 0);
         tile.addView(bar, barLp);
 
-        TextView gapTv = text(gap == null ? "Gap —" : "Gap " + signedFormat(gap, actualMetric), 10, accent, true);
+        TextView gapTv = text(expectedPerformanceLabel(actual, expected, actualMetric), 10, accent, true);
         gapTv.setGravity(Gravity.CENTER);
         gapTv.setPadding(dp(6), dp(3), dp(6), dp(3));
         gapTv.setBackground(roundedStroke(Color.argb(20, Color.red(accent), Color.green(accent), Color.blue(accent)), Color.argb(84, Color.red(accent), Color.green(accent), Color.blue(accent)), 999, 1));
@@ -6079,6 +6225,16 @@ public class MainActivity extends Activity {
         gapLp.setMargins(0, dp(2), 0, 0);
         tile.addView(gapTv, gapLp);
         return tile;
+    }
+
+
+    private String expectedPerformanceLabel(Double actual, Double expected, Metric m) {
+        if (actual == null || expected == null || Double.isNaN(actual) || Double.isNaN(expected) || Math.abs(expected) < 0.000001) return "Expected unavailable";
+        double pct = ((actual - expected) / Math.abs(expected)) * 100d;
+        boolean lowerBetter = m != null && m.higherGood != null && !m.higherGood;
+        double readable = lowerBetter ? -pct : pct;
+        if (Math.abs(readable) < 0.5) return "In line with expected";
+        return Math.round(Math.abs(readable)) + "% " + (readable > 0 ? "over expected" : "under expected");
     }
 
     private TextView metricTileMiniValue(String label, String value, int color) {
@@ -6112,13 +6268,13 @@ public class MainActivity extends Activity {
         return p + suffix + " PCTL";
     }
 
+    
     private View profileSparkLegend() {
         LinearLayout legend = new LinearLayout(this);
-        legend.setOrientation(LinearLayout.VERTICAL);
+        legend.setOrientation(LinearLayout.HORIZONTAL);
         legend.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        legend.addView(legendMini("Avg", Color.rgb(190, 202, 222)));
         legend.addView(legendMini("Better", profilePositiveColor()));
-        legend.addView(legendMini("League avg", Color.rgb(190, 202, 222)));
-        legend.addView(legendMini("Below avg", profileNegativeColor()));
         return legend;
     }
 
@@ -6265,6 +6421,12 @@ public class MainActivity extends Activity {
         return metricPresetNameForRole(selectedMetricKeys, allowedMetricRoleForCurrentContext());
     }
 
+    private String matchupLensNameForUi(HeadToHeadComparison h) {
+        if (h == null) return currentLensNameForUi();
+        String role = h.isTeam ? "both" : roleForScope(h.scope);
+        return metricPresetNameForRole(selectedMetricKeys, role);
+    }
+
     private void addLensStatsControl(LinearLayout target, String title, ArrayList<Metric> lensMetrics, ArrayList<Metric> allMetrics, Runnable refreshAction) {
         if (target == null) return;
         int lensCount = lensMetrics == null ? 0 : lensMetrics.size();
@@ -6288,7 +6450,7 @@ public class MainActivity extends Activity {
         copy.addView(label);
         TextView sub = text(showAllResultsStats
                 ? allCount + " available stats"
-                : lensName + " · " + lensCount + " stats",
+                : "Lens: " + lensName + " · " + lensCount + " stats",
                 11, Color.rgb(178, 195, 216), false);
         sub.setPadding(0, dp(2), 0, 0);
         copy.addView(sub);
@@ -6679,7 +6841,7 @@ public class MainActivity extends Activity {
         titleCol.addView(text(label, 16, INK, true));
         titleCol.addView(text(actualMetric.label + " vs " + expectedMetric.label, 11, MUTED, false));
         top.addView(titleCol, new LinearLayout.LayoutParams(0, -2, 1));
-        TextView gapBadge = text(gap == null ? "No gap" : "Gap " + signedFormat(gap, actualMetric), 11, Color.WHITE, true);
+        TextView gapBadge = text(expectedPerformanceLabel(actual, expected, actualMetric), 11, Color.WHITE, true);
         gapBadge.setGravity(Gravity.CENTER);
         gapBadge.setPadding(dp(9), dp(5), dp(9), dp(5));
         int gapColor = gap == null || Math.abs(gap) < 0.000001 ? Color.rgb(70, 88, 125) : (gap > 0 ? palette.primary : palette.secondary);
@@ -6751,7 +6913,10 @@ public class MainActivity extends Activity {
         sectionRow.addView(headToHeadLegend(h, paletteA, paletteB));
         metricBox.addView(sectionRow, matchWrap());
 
-        ArrayList<Metric> selectedRowMetrics = (h.selectedMetricsSnapshot == null || h.selectedMetricsSnapshot.isEmpty()) ? selectedMetricsForScope(h.scope) : h.selectedMetricsSnapshot;
+        // v159: matchup rows should follow the live selected lens.
+        // Previous versions held the metrics from when the matchup was first created,
+        // so changing lens in-place did not visibly update the card or rows.
+        ArrayList<Metric> selectedRowMetrics = selectedMetricsForScope(h.scope);
         ArrayList<Metric> rowMetrics = metricsWithHeadToHeadValues(h, selectedRowMetrics);
         if (rowMetrics.isEmpty()) rowMetrics = selectedRowMetrics;
         ArrayList<Metric> availableRowMetrics = metricsWithHeadToHeadValues(h, availableMetricsForScope(h.isTeam ? StatScope.BOTH : h.scope));
@@ -6991,8 +7156,10 @@ public class MainActivity extends Activity {
                     ? keyScore.scoredRows + " SCORING STATS"
                     : allMetrics.size() + " SELECTED · " + keyScore.scoredRows + " SCORED";
             drawPill(canvas, statPill, card.centerX(), titleY + dp(24), dp(keyScore.scoredRows == allMetrics.size() ? 104 : 138), dp(24), Color.argb(36, 255, 255, 255), Color.argb(72, 255, 255, 255), Color.rgb(218, 228, 241), dp(8));
+            String lensLabel = "LENS · " + matchupLensNameForUi(h).toUpperCase(Locale.US);
+            drawText(canvas, lensLabel, card.centerX(), titleY + dp(49), dp(7), Color.rgb(206, 218, 235), true, Paint.Align.CENTER, 0.08f);
             if (keyScore.sampleAdjustedRows > 0) {
-                drawPill(canvas, "SAMPLE WEIGHTED", card.centerX(), titleY + dp(47), dp(110), dp(17), Color.argb(24, 255, 255, 255), Color.argb(52, 255, 255, 255), Color.rgb(174, 190, 212), dp(6));
+                drawPill(canvas, "SAMPLE WEIGHTED", card.centerX(), titleY + dp(68), dp(110), dp(17), Color.argb(24, 255, 255, 255), Color.argb(52, 255, 255, 255), Color.rgb(174, 190, 212), dp(6));
             }
 
             drawCornerTeamLogo(canvas, logoA, sideAbbr(true), card.left + dp(34), card.top + dp(52), dp(70), accentA, true);
@@ -8581,27 +8748,34 @@ public class MainActivity extends Activity {
 
     private ArrayList<Metric> collectHeadToHeadMetrics(HeadToHeadComparison h, int max, boolean keyEdgeOnly) {
         ArrayList<Metric> ordered = new ArrayList<>();
-        ArrayList<Metric> snapshot = keyEdgeOnly ? h.keyEdgeMetricsSnapshot : h.selectedMetricsSnapshot;
-        if (snapshot != null && !snapshot.isEmpty()) {
-            for (Metric m : snapshot) {
+        String role = h == null ? allowedMetricRoleForCurrentContext() : roleForScope(h.scope);
+        LinkedHashSet<String> sourceKeys = keyEdgeOnly ? keyEdgeMetricKeys : selectedMetricKeys;
+        if (sourceKeys == null || sourceKeys.isEmpty()) sourceKeys = selectedMetricKeys;
+
+        if (sourceKeys != null) {
+            for (String key : sourceKeys) {
+                Metric m = findMetricByKey(key);
                 if (m == null || ordered.contains(m)) continue;
+                if (!roleAllowsMetric(role, m)) continue;
                 ordered.add(m);
                 if (ordered.size() >= max) return ordered;
             }
-            return ordered;
         }
-        LinkedHashSet<String> sourceKeys = keyEdgeOnly ? keyEdgeMetricKeys : selectedMetricKeys;
-        if (sourceKeys == null || sourceKeys.isEmpty()) sourceKeys = selectedMetricKeys;
-        for (String key : sourceKeys) {
-            Metric m = findMetricByKey(key);
-            if (m == null || ordered.contains(m)) continue;
-            if (!roleAllowsMetric(roleForScope(h.scope), m)) continue;
-            ordered.add(m);
-            if (ordered.size() >= max) return ordered;
-        }
+
         if (keyEdgeOnly && ordered.isEmpty()) {
+            LinkedHashSet<String> fallback = defaultKeyEdgeForRole(role, selectedMetricKeys);
+            for (String key : fallback) {
+                Metric m = findMetricByKey(key);
+                if (m == null || ordered.contains(m)) continue;
+                if (!roleAllowsMetric(role, m)) continue;
+                ordered.add(m);
+                if (ordered.size() >= max) return ordered;
+            }
+        }
+
+        if (!keyEdgeOnly && ordered.isEmpty() && h != null) {
             for (Metric m : selectedMetricsForScope(h.scope)) {
-                if (ordered.contains(m)) continue;
+                if (m == null || ordered.contains(m)) continue;
                 ordered.add(m);
                 if (ordered.size() >= max) return ordered;
             }
@@ -9720,18 +9894,15 @@ public class MainActivity extends Activity {
         metricTitle.setGravity(Gravity.CENTER_VERTICAL);
         TextView label = text(m.label, 16, Color.rgb(235, 242, 250), true);
         metricTitle.addView(label);
-        String desc = metricDescription(m.key);
-        if (!desc.isEmpty()) {
-            TextView info = text("i", 9, MUTED, true);
-            info.setGravity(Gravity.CENTER);
-            info.setPadding(dp(5), 0, dp(5), 0);
-            info.setBackground(roundedStroke(Color.argb(24, 255, 255, 255), Color.argb(66, 255, 255, 255), 9, 1));
-            LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(dp(18), dp(18));
-            ip.setMargins(dp(6), 0, 0, 0);
-            metricTitle.addView(info, ip);
-            info.setOnClickListener(v -> showMetricGlossary(m));
-            info.setForeground(ripple(false));
-        }
+        TextView info = text("i", 9, MUTED, true);
+        info.setGravity(Gravity.CENTER);
+        info.setPadding(dp(5), 0, dp(5), 0);
+        info.setBackground(roundedStroke(Color.argb(24, 255, 255, 255), Color.argb(66, 255, 255, 255), 9, 1));
+        LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(dp(18), dp(18));
+        ip.setMargins(dp(6), 0, 0, 0);
+        metricTitle.addView(info, ip);
+        info.setOnClickListener(v -> showMetricGlossary(m));
+        info.setForeground(ripple(false));
         topLine.addView(metricTitle, new LinearLayout.LayoutParams(0, -2, 1));
 
         TextView pctBadge = text(pct == null ? "No percentile" : percentileLabel(pct), 11, Color.WHITE, true);
@@ -12340,7 +12511,7 @@ public class MainActivity extends Activity {
 
             paint.setStyle(Paint.Style.STROKE);
             paint.setStrokeCap(Paint.Cap.ROUND);
-            paint.setStrokeWidth(dp(5.4f));
+            paint.setStrokeWidth(dp(6.0f));
             paint.setShader(new LinearGradient(left, y, right, y,
                     new int[] { Color.argb(80, 255, 139, 128), Color.argb(76, 230, 236, 247), Color.argb(86, 94, 235, 226) },
                     new float[] { 0f, 0.50f, 1f }, Shader.TileMode.CLAMP));
@@ -12355,7 +12526,7 @@ public class MainActivity extends Activity {
                         Color.argb(48, Color.red(gapColor), Color.green(gapColor), Color.blue(gapColor)),
                         Color.argb(205, Color.red(gapColor), Color.green(gapColor), Color.blue(gapColor)),
                         Shader.TileMode.CLAMP));
-                paint.setShadowLayer(dp(4), 0, 0, Color.argb(96, Color.red(gapColor), Color.green(gapColor), Color.blue(gapColor)));
+                paint.setShadowLayer(dp(6), 0, 0, Color.argb(132, Color.red(gapColor), Color.green(gapColor), Color.blue(gapColor)));
                 canvas.drawLine(expectedX, y, actualX, y, paint);
                 paint.clearShadowLayer();
                 paint.setShader(null);
@@ -14386,17 +14557,18 @@ public class MainActivity extends Activity {
 
     // ── Metric glossary ──────────────────────────────────────────────────────────────────────────
 
+    
     private void showMetricGlossary(Metric m) {
+        if (m == null) return;
         String desc = metricDescription(m.key);
-        if (desc.isEmpty()) return;
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(18), dp(16), dp(18), dp(14));
+        panel.setPadding(dp(18), dp(14), dp(18), dp(16));
         panel.setBackground(roundedGradientStroke(new int[] {
                 Color.rgb(4, 8, 16),
                 Color.rgb(7, 15, 28),
                 Color.rgb(5, 24, 40)
-        }, 26, Color.argb(96, 96, 228, 222), 1));
+        }, 28, Color.argb(96, 96, 228, 222), 1));
 
         View handle = new View(this);
         handle.setBackground(rounded(Color.argb(92, 255, 255, 255), 99));
@@ -14425,8 +14597,24 @@ public class MainActivity extends Activity {
 
         TextView body = text(desc, 13, Color.rgb(190, 205, 226), false);
         body.setLineSpacing(dp(3), 1.0f);
-        body.setPadding(0, 0, 0, dp(14));
         panel.addView(body, matchWrap());
+
+        TextView read = text("HOW TO READ IT", 9, Color.rgb(132, 150, 176), true);
+        read.setLetterSpacing(0.10f);
+        read.setPadding(0, dp(14), 0, dp(4));
+        panel.addView(read, matchWrap());
+
+        String readText = m.higherGood == null ? "Context stat. Use it with related lens metrics." : (m.higherGood ? "Higher is better." : "Lower is better.");
+        panel.addView(text(readText, 12, Color.rgb(190, 205, 226), false), matchWrap());
+
+        TextView used = text("USED IN", 9, Color.rgb(132, 150, 176), true);
+        used.setLetterSpacing(0.10f);
+        used.setPadding(0, dp(14), 0, dp(4));
+        panel.addView(used, matchWrap());
+
+        TextView usedBody = text(lensesForMetric(m), 12, Color.rgb(190, 205, 226), false);
+        usedBody.setPadding(0, 0, 0, dp(14));
+        panel.addView(usedBody, matchWrap());
 
         TextView close = text("Done", 14, Color.rgb(8, 12, 20), true);
         close.setGravity(Gravity.CENTER);
@@ -14442,9 +14630,29 @@ public class MainActivity extends Activity {
             android.view.Window w = dialog.getWindow();
             if (w != null) {
                 w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
-                w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                w.setGravity(Gravity.BOTTOM);
+                int maxH = (int) (getResources().getDisplayMetrics().heightPixels * 0.76f);
+                w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, maxH);
             }
         } catch (Exception ignored) {}
+    }
+
+
+    private String lensesForMetric(Metric m) {
+        if (m == null) return "All Stats";
+        String role = "team".equals(m.side) ? "both" : m.side;
+        StringBuilder out = new StringBuilder();
+        for (String preset : presetOrderForRole(role)) {
+            if ("luck".equals(preset) || "moreStats".equals(preset)) continue;
+            LinkedHashSet<String> keys = metricKeysForPresetAndRole(preset, role);
+            if (keys.contains(m.key)) {
+                if (out.length() > 0) out.append(" · ");
+                out.append(presetDisplayName(preset, role));
+            }
+        }
+        if (out.length() == 0) out.append("All Stats");
+        else if (out.indexOf("All") < 0) out.append(" · All Stats");
+        return out.toString();
     }
 
     private String metricDescription(String key) {
@@ -14479,9 +14687,70 @@ public class MainActivity extends Activity {
             case "pitchBB": return "Walks issued — total batters walked in the season.";
             case "saves":  return "Saves — a reliever earns a save by finishing a close win under specific conditions. Primarily tracks closers.";
             case "ip":     return "Innings Pitched — total innings a pitcher worked. Reflects workload and durability.";
-            default:       return "";
+            case "iso": return "Isolated Power — slugging minus batting average. Focuses on extra-base damage.";
+            case "teamISO": return "Team ISO — team isolated power, focused on extra-base damage.";
+            case "h": return "Hits — total hits recorded.";
+            case "teamHits": return "Team hits — total hits recorded by the lineup.";
+            case "doubles": case "teamDoubles": return "Doubles — total two-base hits.";
+            case "triples": case "teamTriples": return "Triples — total three-base hits.";
+            case "xbh": case "teamXbh": return "Extra-base hits — doubles, triples, and home runs.";
+            case "bb": case "teamWalks": return "Walks — times reaching base on balls.";
+            case "so": case "teamStrikeouts": return "Strikeouts — plate appearances ending in a strikeout.";
+            case "tb": case "teamTB": return "Total Bases — one for a single, two for a double, three for a triple, four for a home run.";
+            case "xOBP": case "teamXOBP": return "Expected OBP — expected on-base percentage from underlying events.";
+            case "xISO": case "teamXISO": return "Expected ISO — expected extra-base power.";
+            case "wOBAcon": return "wOBA on contact — production only when the ball is put in play.";
+            case "xwOBAcon": return "Expected wOBA on contact — expected production on batted balls based on contact quality.";
+            case "gbPct": case "teamGbPct": return "Ground-ball % — share of batted balls hit on the ground.";
+            case "fbPct": case "teamFbPct": return "Fly-ball % — share of batted balls hit in the air.";
+            case "ldPct": case "teamLdPct": return "Line-drive % — share of batted balls hit as line drives.";
+            case "pullPct": case "teamPullPct": return "Pull % — share of batted balls hit to the pull side.";
+            case "oppoPct": case "teamOppoPct": return "Opposite-field % — share of batted balls hit the other way.";
+            case "bbMinusKPct": case "teamBBMinusKPct": return "BB-K % — walk rate minus strikeout rate. Quick plate discipline read.";
+            case "whiffPct": case "teamWhiffPct": return "Whiff % — share of swings that miss.";
+            case "swingPct": case "teamSwingPct": return "Swing % — share of pitches where the batter swings.";
+            case "chasePct": case "teamChasePct": return "Chase % — swings at pitches outside the strike zone.";
+            case "zoneContactPct": case "teamZoneContactPct": return "Zone Contact % — contact rate on pitches in the strike zone.";
+            case "sprintSpeed": return "Sprint Speed — Statcast running speed in feet per second.";
+            case "teamWinPct": return "Win % — team wins divided by games played.";
+            case "teamRunsScored": return "Runs scored — total runs scored.";
+            case "teamRunsAllowed": return "Runs allowed — total runs allowed.";
+            case "teamRunDiff": return "Run differential — runs scored minus runs allowed.";
+            case "teamRPG": return "Runs per game — average runs scored per game.";
+            case "teamRAPG": return "Runs allowed per game — average runs allowed per game.";
+            case "pitchKPct": case "teamPitchKPct": return "Pitching K % — share of batters struck out.";
+            case "pitchBBPct": case "teamPitchBBPct": return "Pitching BB % — share of batters walked.";
+            case "pitchKMinusBBPct": case "teamPitchKMinusBBPct": return "K-BB % — strikeout rate minus walk rate.";
+            case "pHitsAllowed": case "teamHitsAllowed": return "Hits allowed — total hits allowed by pitchers.";
+            case "pHrAllowed": case "teamHrAllowed": return "Home runs allowed — total home runs allowed.";
+            case "pOppAvg": case "teamOppAvg": return "Opponent AVG — batting average allowed.";
+            case "pOppOps": case "teamOppOps": return "Opponent OPS — on-base plus slugging allowed.";
+            case "pxBA": case "teamPXBA": return "Expected AVG allowed — expected batting average allowed from contact quality.";
+            case "pxSLG": case "teamPXSLG": return "Expected SLG allowed — expected slugging allowed from contact quality.";
+            case "pwOBA": case "teamPWOBA": return "wOBA allowed — weighted on-base average allowed.";
+            case "pxwOBA": case "teamPXWOBA": return "Expected wOBA allowed — expected weighted on-base average allowed.";
+            case "pAvgEV": case "teamPAvgEV": return "Average exit velocity allowed — average contact speed allowed.";
+            case "pHardHitPct": case "teamPHardHitPct": return "Hard-Hit % allowed — share of allowed batted balls hit 95+ mph.";
+            case "pBarrelPct": case "teamPBarrelPct": return "Barrel % allowed — share of allowed batted balls barreled.";
+            case "pWhiffPct": case "teamPWhiffPct": return "Pitching Whiff % — share of swings that miss.";
+            case "pChasePct": case "teamPChasePct": return "Pitching Chase % — how often hitters chase pitches out of the zone.";
+            case "pFirstStrikePct": case "teamPFirstStrikePct": return "First Strike % — how often pitchers start plate appearances with strike one.";
+            case "pZonePct": case "teamPZonePct": return "Zone % — share of pitches thrown in the strike zone.";
+            case "pGbPct": case "teamPGbPct": return "Ground-ball % allowed — share of allowed batted balls on the ground.";
+            case "pFbPct": case "teamPFbPct": return "Fly-ball % allowed — share of allowed batted balls in the air.";
+            case "pLdPct": case "teamPLdPct": return "Line-drive % allowed — share of allowed batted balls hit as line drives.";
+            default:       return genericMetricDescription(key);
         }
     }
+
+
+    private String genericMetricDescription(String key) {
+        Metric metric = metricByKey(key);
+        if (metric == null) return "Stat used for comparison and trend context.";
+        String direction = metric.higherGood == null ? "Use it as context." : (metric.higherGood ? "Higher is generally better." : "Lower is generally better.");
+        return metric.label + " — " + (metric.group == null ? "Stat" : metric.group) + " metric. " + direction;
+    }
+
 
     // ── Sparkline (season trend) ─────────────────────────────────────────────────────────────────
 
@@ -14496,6 +14765,24 @@ public class MainActivity extends Activity {
             pts.add(new TrendPoint(String.valueOf(y), v));
         }
         renderTrendPointRow(parent, "Trend · seasons", pts, m, palette, "years");
+    }
+
+
+    private String shortTrendLabel(String raw) {
+        String v = safe(raw).trim();
+        if (v.isEmpty()) return "";
+        try {
+            String normalized = v.replace("/", "-");
+            if (normalized.matches("\\d{4}-\\d{2}-\\d{2}")) {
+                String[] p = normalized.split("-");
+                int month = Integer.parseInt(p[1]);
+                int day = Integer.parseInt(p[2]);
+                String[] months = new String[] { "", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+                if (month >= 1 && month <= 12) return months[month] + " " + day;
+            }
+        } catch (Exception ignored) {}
+        if (v.length() > 10 && v.charAt(4) == '-') return v.substring(5, 10);
+        return v;
     }
 
     class SparklineView extends View {
@@ -14518,7 +14805,7 @@ public class MainActivity extends Activity {
             int n = values.size();
             if (n < 2) return;
             float w = getWidth(), h = getHeight();
-            float padL = dp(8), padR = dp(54), padT = dp(12), padB = dp(20);
+            float padL = dp(8), padR = dp(54), padT = dp(12), padB = dp(24);
 
             double min = Double.MAX_VALUE, max = -Double.MAX_VALUE;
             for (Double v : values) {
@@ -14588,13 +14875,13 @@ public class MainActivity extends Activity {
 
             // No point markers: the line represents a continuous rolling/cumulative trend.
 
-            paint.setTextSize(dp(10));
+            paint.setTextSize(dp(11));
             paint.setTypeface(tfBold);  // v29
-            paint.setColor(Color.rgb(196, 208, 226));
+            paint.setColor(Color.rgb(218, 228, 242));
             paint.setTextAlign(Paint.Align.LEFT);
-            if (labels != null && !labels.isEmpty()) canvas.drawText(safe(labels.get(0)), padL, h - dp(2), paint);
+            if (labels != null && !labels.isEmpty()) canvas.drawText(shortTrendLabel(labels.get(0)), padL, h - dp(3), paint);
             paint.setTextAlign(Paint.Align.RIGHT);
-            if (labels != null && !labels.isEmpty()) canvas.drawText(safe(labels.get(labels.size() - 1)), padL + plotW, h - dp(2), paint);
+            if (labels != null && !labels.isEmpty()) canvas.drawText(shortTrendLabel(labels.get(labels.size() - 1)), padL + plotW, h - dp(3), paint);
         }
     }
 
