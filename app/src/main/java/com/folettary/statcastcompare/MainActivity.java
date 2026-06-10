@@ -528,7 +528,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v145", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v146", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -5225,16 +5225,17 @@ public class MainActivity extends Activity {
         titleCol.addView(miniPills, matchWrap());
 
         addBaseballCardSummary(card, c, palette);
+        if (!c.isTeam) addPlayerLensSummaryCard(card, c, palette);
 
         LinearLayout sectionRow = new LinearLayout(this);
         sectionRow.setOrientation(LinearLayout.HORIZONTAL);
         sectionRow.setGravity(Gravity.CENTER_VERTICAL);
         sectionRow.setPadding(0, dp(9), 0, dp(3));
-        TextView tableTitle = text("Profile comparison", 18, Color.rgb(214, 225, 242), true);
+        TextView tableTitle = text(c.isTeam ? "Profile comparison" : "Lens vs league average", 18, Color.rgb(214, 225, 242), true);
         sectionRow.addView(tableTitle, new LinearLayout.LayoutParams(0, -2, 1));
-        sectionRow.addView(comparisonLegend(c.thirdLabelShort(), palette));
+        sectionRow.addView(c.isTeam ? comparisonLegend(c.thirdLabelShort(), palette) : profileSparkLegend());
         metricBox.addView(sectionRow, matchWrap());
-        TextView scaleHint = text("Bar position = league percentile: 0% left · 50% midpoint · 100% right.", 10, Color.rgb(132, 146, 166), false);
+        TextView scaleHint = text(c.isTeam ? "Bar position = league percentile: 0% left · 50% midpoint · 100% right." : "Spark center = league average. Right is better, left is worse. Color shows good / average / below avg.", 10, Color.rgb(132, 146, 166), false);
         scaleHint.setPadding(dp(1), 0, dp(1), dp(8));
         metricBox.addView(scaleHint, matchWrap());
 
@@ -5266,6 +5267,164 @@ public class MainActivity extends Activity {
         else scrollToResultsTop();
     }
 
+
+    private void addPlayerLensSummaryCard(LinearLayout card, Comparison c, TeamPalette palette) {
+        if (card == null || c == null || c.isTeam) return;
+        ArrayList<Metric> lensMetrics = scorableLensMetricsForProfile(c);
+        PlayerLensSummaryView lensCard = new PlayerLensSummaryView(this, c, lensMetrics, palette);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(172));
+        lp.setMargins(0, dp(10), 0, 0);
+        card.addView(lensCard, lp);
+    }
+
+    private View profileSparkLegend() {
+        LinearLayout legend = new LinearLayout(this);
+        legend.setOrientation(LinearLayout.VERTICAL);
+        legend.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        legend.addView(legendMini("Better", profilePositiveColor()));
+        legend.addView(legendMini("League avg", Color.rgb(190, 202, 222)));
+        legend.addView(legendMini("Below avg", profileNegativeColor()));
+        return legend;
+    }
+
+    private ArrayList<Metric> scorableLensMetricsForProfile(Comparison c) {
+        ArrayList<Metric> out = new ArrayList<>();
+        if (c == null || c.seasonStats == null || c.leagueStats == null) return out;
+        for (Metric m : selectedMetricsForRows()) {
+            if (m == null || m.higherGood == null) continue;
+            if (!hasComparisonMetricValue(c, m)) continue;
+            Double value = c.seasonStats.get(m.key);
+            Double league = c.leagueStats.get(m.key);
+            if (value == null || league == null || Double.isNaN(value) || Double.isNaN(league)) continue;
+            out.add(m);
+        }
+        return out;
+    }
+
+    private Double averageLensPercentile(Comparison c, ArrayList<Metric> lensMetrics) {
+        if (c == null || c.percentile == null || lensMetrics == null || lensMetrics.isEmpty()) return null;
+        double total = 0d;
+        int count = 0;
+        for (Metric m : lensMetrics) {
+            Double pct = c.percentile.get(m.key);
+            if (pct == null || Double.isNaN(pct)) continue;
+            total += Math.max(0d, Math.min(100d, pct));
+            count++;
+        }
+        return count == 0 ? null : total / count;
+    }
+
+    private double averageLensSignedEdge(Comparison c, ArrayList<Metric> lensMetrics) {
+        if (c == null || c.seasonStats == null || c.leagueStats == null || lensMetrics == null || lensMetrics.isEmpty()) return 0d;
+        double total = 0d;
+        int count = 0;
+        for (Metric m : lensMetrics) {
+            Double value = c.seasonStats.get(m.key);
+            Double league = c.leagueStats.get(m.key);
+            Double signed = signedLeagueEdge(value, league, m);
+            if (signed == null || Double.isNaN(signed)) continue;
+            total += Math.max(-1d, Math.min(1d, signed));
+            count++;
+        }
+        return count == 0 ? 0d : total / count;
+    }
+
+    private Double signedLeagueEdge(Double value, Double league, Metric m) {
+        if (value == null || league == null || m == null || m.higherGood == null || Double.isNaN(value) || Double.isNaN(league)) return null;
+        double raw = value - league;
+        double goodDirection = m.higherGood ? raw : -raw;
+        double dead = profileStatDeadZone(m);
+        if (Math.abs(goodDirection) <= dead) return 0d;
+        double benchmark = profileMeaningfulGapBenchmark(m);
+        if (benchmark <= 0d) return 0d;
+        double mag = Math.min(1d, (Math.abs(goodDirection) - dead) / benchmark);
+        double eased = 1d - Math.pow(1d - mag, 1.20d);
+        return goodDirection > 0 ? eased : -eased;
+    }
+
+    private String leagueDeltaLabel(Double value, Double league, Metric m) {
+        if (value == null || league == null || m == null || Double.isNaN(value) || Double.isNaN(league)) return "";
+        Double signedEdge = signedLeagueEdge(value, league, m);
+        Double raw = value - league;
+        if (signedEdge == null || Math.abs(signedEdge) < 0.035d) return "even vs avg";
+        return signedFormat(raw, m) + " vs avg · " + (signedEdge > 0 ? "better" : "below");
+    }
+
+    private int profilePositiveColor() { return Color.rgb(78, 229, 235); }
+    private int profileNegativeColor() { return Color.rgb(255, 135, 112); }
+    private int profileNeutralColor() { return Color.rgb(210, 220, 235); }
+
+    private int profileSparkColor(Double signedEdge) {
+        if (signedEdge == null || Double.isNaN(signedEdge) || Math.abs(signedEdge) < 0.08d) return profileNeutralColor();
+        return signedEdge > 0 ? profilePositiveColor() : profileNegativeColor();
+    }
+
+    private double profileStatDeadZone(Metric m) {
+        if (m == null) return 0d;
+        if (m.decimals <= 0) return 0.000001d;
+        return 0.5d * Math.pow(10d, -m.decimals);
+    }
+
+    private double profileMeaningfulGapBenchmark(Metric m) {
+        if (m == null || m.key == null) return 0.10d;
+        switch (m.key) {
+            case "avg": return 0.045d;
+            case "obp": return 0.035d;
+            case "slg": return 0.080d;
+            case "ops": return 0.075d;
+            case "wOBA": return 0.055d;
+            case "xwOBA": return 0.065d;
+            case "xBA": return 0.040d;
+            case "xOBP": return 0.040d;
+            case "xSLG": return 0.080d;
+            case "xISO": return 0.060d;
+            case "wOBAcon":
+            case "xwOBAcon": return 0.070d;
+            case "hr": return 12d;
+            case "xbh": return 18d;
+            case "rbi":
+            case "r": return 20d;
+            case "sb": return 10d;
+            case "bbPct":
+            case "kPct":
+            case "bbMinusKPct":
+            case "barrelPct":
+            case "hardHitPct":
+            case "whiffPct":
+            case "chasePct":
+            case "zoneContactPct":
+            case "sweetSpotPct": return 5d;
+            case "avgEV": return 4.5d;
+            case "sprintSpeed": return 1.8d;
+            case "era": return 1.35d;
+            case "whip": return 0.38d;
+            case "k9": return 4.00d;
+            case "bb9": return 1.75d;
+            case "kbb": return 1.50d;
+            case "pitchKPct":
+            case "pitchBBPct":
+            case "pitchKMinusBBPct":
+            case "pWhiffPct":
+            case "pChasePct":
+            case "pHardHitPct":
+            case "pBarrelPct": return 5d;
+            case "pxwOBA":
+            case "pwOBA": return 0.065d;
+            case "pxBA": return 0.040d;
+            case "pxSLG": return 0.080d;
+            case "pAvgEV": return 4.5d;
+            case "pOppAvg": return 0.045d;
+            case "pOppOps": return 0.075d;
+            case "ip": return 45d;
+            case "pitchK": return 40d;
+            case "pitchBB": return 12d;
+            case "saves": return 10d;
+            default:
+                if (m.unit != null && m.unit.equals("%")) return 5d;
+                if (m.isCount()) return 20d;
+                return 0.10d;
+        }
+    }
 
     private String currentLensNameForUi() {
         return metricPresetNameForRole(selectedMetricKeys, allowedMetricRoleForCurrentContext());
@@ -8688,19 +8847,26 @@ public class MainActivity extends Activity {
 
         String rankLabel = rankTypeLabel(c.isTeam);
         String rankLine = rank == null ? rankLabel + " unavailable for this stat" : rankLabel + ": " + displayRankLabel(rank, total, c.isTeam);
+        String leagueDelta = leagueDeltaLabel(seasonValue, leagueValue, m);
+        if (!c.isTeam && !leagueDelta.isEmpty()) rankLine += " · " + leagueDelta;
         TextView rankTv = text(rankLine, 11, Color.rgb(146, 160, 182), false);
         rankTv.setPadding(0, dp(5), 0, 0);
         row.addView(rankTv);
 
-        ComparisonBarView bar = new ComparisonBarView(this, m,
-                new Double[] { seasonValue, leagueValue, careerValue },
-                new Double[] { pct, 50.0, thirdPct },
-                c.thirdLabelShort(), palette, c.isTeam ? c.meta : c.name);
-        LinearLayout.LayoutParams barLp = new LinearLayout.LayoutParams(-1, dp(72));
+        View bar;
+        if (!c.isTeam) {
+            bar = new LeagueSparkBarView(this, m, seasonValue, leagueValue, pct, palette);
+        } else {
+            ComparisonBarView comparisonBar = new ComparisonBarView(this, m,
+                    new Double[] { seasonValue, leagueValue, careerValue },
+                    new Double[] { pct, 50.0, thirdPct },
+                    c.thirdLabelShort(), palette, c.isTeam ? c.meta : c.name);
+            loadTeamLogoBitmap(c.team, comparisonBar::setCurrentIcon);
+            bar = comparisonBar;
+        }
+        LinearLayout.LayoutParams barLp = new LinearLayout.LayoutParams(-1, dp(c.isTeam ? 72 : 64));
         barLp.setMargins(0, dp(5), 0, 0);
         row.addView(bar, barLp);
-        if (c.isTeam) loadTeamLogoBitmap(c.team, bar::setCurrentIcon);
-        else loadPlayerImageBitmap(c.mlbId, bar::setCurrentIcon);
 
         LinearLayout valueLine = new LinearLayout(this);
         valueLine.setOrientation(LinearLayout.HORIZONTAL);
@@ -11347,6 +11513,271 @@ public class MainActivity extends Activity {
             canvas.drawRoundRect(new RectF(cx - dp(1.15f), cy - dp(12), cx + dp(1.15f), cy + dp(12)), dp(2), dp(2), paint);
             paint.setColor(Color.argb(80, 255, 255, 255));
             canvas.drawCircle(cx, cy, dp(3.2f), paint);
+        }
+    }
+
+
+    class PlayerLensSummaryView extends View {
+        final Comparison c;
+        final ArrayList<Metric> lensMetrics;
+        final TeamPalette palette;
+        final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG);
+        private float animProgress = 0f;
+        private boolean animStarted = false;
+
+        PlayerLensSummaryView(Context context, Comparison c, ArrayList<Metric> lensMetrics, TeamPalette palette) {
+            super(context);
+            this.c = c;
+            this.lensMetrics = lensMetrics == null ? new ArrayList<>() : lensMetrics;
+            this.palette = palette == null ? defaultPalette() : palette;
+            setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+        }
+
+        @Override protected void onAttachedToWindow() {
+            super.onAttachedToWindow();
+            if (!animStarted) {
+                animStarted = true;
+                ValueAnimator anim = ValueAnimator.ofFloat(0f, 1f);
+                anim.setDuration(540);
+                anim.setInterpolator(new DecelerateInterpolator(2.0f));
+                anim.addUpdateListener(a -> { animProgress = (float)a.getAnimatedValue(); invalidate(); });
+                anim.start();
+            }
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            float w = getWidth();
+            float h = getHeight();
+            RectF card = new RectF(dp(1), dp(1), w - dp(1), h - dp(1));
+            int teamAccent = boostNeonColor(readableTeamColor(palette.primary, palette.secondary, true), 1.12f, 1.04f);
+
+            paint.setStyle(Paint.Style.FILL);
+            paint.setShader(new LinearGradient(card.left, card.top, card.right, card.bottom,
+                    new int[] {
+                            Color.rgb(5, 9, 17),
+                            mixColor(teamAccent, Color.rgb(6, 10, 18), 0.76f),
+                            Color.rgb(5, 9, 17)
+                    }, null, Shader.TileMode.CLAMP));
+            paint.setShadowLayer(dp(5), 0, dp(2), Color.argb(48, 0, 0, 0));
+            canvas.drawRoundRect(card, dp(22), dp(22), paint);
+            paint.clearShadowLayer();
+            paint.setShader(null);
+
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(dp(1));
+            paint.setColor(Color.argb(86, Color.red(teamAccent), Color.green(teamAccent), Color.blue(teamAccent)));
+            canvas.drawRoundRect(card, dp(22), dp(22), paint);
+            paint.setStyle(Paint.Style.FILL);
+
+            Double pct = averageLensPercentile(c, lensMetrics);
+            double signed = averageLensSignedEdge(c, lensMetrics);
+            int sparkColor = profileSparkColor(signed);
+            String lensName = currentLensNameForUi();
+            String score = pct == null ? "—" : Math.round(Math.max(0, Math.min(100, pct))) + "%";
+            String tier = pct == null ? "League context" : percentileTierLabel(pct);
+
+            drawSmallText(canvas, "PLAYER LENS", card.left + dp(16), card.top + dp(24), dp(10), softColor(teamAccent, 0.18f), true, Paint.Align.LEFT);
+            drawSmallText(canvas, lensName + " · vs league average", card.left + dp(16), card.top + dp(45), dp(15), Color.WHITE, true, Paint.Align.LEFT);
+            drawSmallText(canvas, lensMetrics.size() + " scored stats", card.left + dp(16), card.top + dp(66), dp(10), Color.rgb(170, 186, 208), false, Paint.Align.LEFT);
+
+            drawSmallText(canvas, score, card.right - dp(18), card.top + dp(41), dp(28), sparkColor, true, Paint.Align.RIGHT);
+            drawSmallText(canvas, tier, card.right - dp(18), card.top + dp(63), dp(11), Color.rgb(220, 229, 242), true, Paint.Align.RIGHT);
+
+            float railLeft = card.left + dp(18);
+            float railRight = card.right - dp(18);
+            float railY = card.top + dp(104);
+            drawCenteredSparkRail(canvas, railLeft, railRight, railY, signed, sparkColor, true);
+
+            drawSmallText(canvas, "Below avg", railLeft, railY + dp(30), dp(9), Color.rgb(163, 177, 198), false, Paint.Align.LEFT);
+            drawSmallText(canvas, "League avg", (railLeft + railRight) / 2f, railY + dp(30), dp(9), Color.rgb(190, 202, 222), true, Paint.Align.CENTER);
+            drawSmallText(canvas, "Better", railRight, railY + dp(30), dp(9), profilePositiveColor(), true, Paint.Align.RIGHT);
+        }
+
+        private void drawCenteredSparkRail(Canvas canvas, float left, float right, float y, double signed, int sparkColor, boolean large) {
+            float cx = (left + right) / 2f;
+            float travel = (right - left) / 2f - dp(12);
+            float norm = (float)Math.max(-1d, Math.min(1d, signed));
+            float sparkX = cx + travel * norm * animProgress;
+            float abs = Math.abs(norm) * animProgress;
+
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeCap(Paint.Cap.ROUND);
+            paint.setStrokeWidth(dp(large ? 8.0f : 6.4f));
+            paint.setShader(new LinearGradient(left, y, right, y,
+                    new int[] {
+                            Color.argb(82, Color.red(profileNegativeColor()), Color.green(profileNegativeColor()), Color.blue(profileNegativeColor())),
+                            Color.argb(76, 224, 232, 244),
+                            Color.argb(82, Color.red(profilePositiveColor()), Color.green(profilePositiveColor()), Color.blue(profilePositiveColor()))
+                    }, new float[] {0f, 0.50f, 1f}, Shader.TileMode.CLAMP));
+            canvas.drawLine(left, y, right, y, paint);
+            paint.setShader(null);
+
+            paint.setStrokeWidth(dp(1.2f));
+            paint.setColor(Color.argb(178, 234, 240, 248));
+            canvas.drawLine(cx, y - dp(13), cx, y + dp(13), paint);
+
+            if (Math.abs(sparkX - cx) > dp(1.2f)) {
+                paint.setStrokeWidth(dp(large ? 5.4f : 4.4f));
+                paint.setShader(new LinearGradient(cx, y, sparkX, y,
+                        new int[] {
+                                Color.argb(52, Color.red(sparkColor), Color.green(sparkColor), Color.blue(sparkColor)),
+                                Color.argb((int)(128 + 96 * abs), Color.red(sparkColor), Color.green(sparkColor), Color.blue(sparkColor)),
+                                Color.argb((int)(196 + 42 * abs), Color.red(sparkColor), Color.green(sparkColor), Color.blue(sparkColor))
+                        }, new float[] {0f, 0.55f, 1f}, Shader.TileMode.CLAMP));
+                paint.setShadowLayer(dp(3 + 3 * abs), 0, 0, Color.argb((int)(82 + 66 * abs), Color.red(sparkColor), Color.green(sparkColor), Color.blue(sparkColor)));
+                canvas.drawLine(cx, y, sparkX, y, paint);
+                paint.clearShadowLayer();
+                paint.setShader(null);
+            }
+
+            drawSpark(canvas, sparkX, y, sparkColor, Math.max(0.18f, abs));
+            paint.setStrokeCap(Paint.Cap.BUTT);
+        }
+
+        private void drawSpark(Canvas canvas, float x, float y, int color, float strength) {
+            int hot = mixColor(Color.WHITE, color, 0.12f);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setShader(new RadialGradient(x, y, dp(18 + 8 * strength),
+                    new int[] {
+                            Color.argb((int)(168 + 52 * strength), Color.red(color), Color.green(color), Color.blue(color)),
+                            Color.argb((int)(58 + 40 * strength), Color.red(color), Color.green(color), Color.blue(color)),
+                            Color.TRANSPARENT
+                    }, new float[] {0f, 0.42f, 1f}, Shader.TileMode.CLAMP));
+            canvas.drawCircle(x, y, dp(18 + 8 * strength), paint);
+            paint.setShader(null);
+            paint.setColor(Color.rgb(6, 10, 18));
+            canvas.drawCircle(x, y, dp(6.4f), paint);
+            paint.setColor(hot);
+            canvas.drawCircle(x, y, dp(4.4f), paint);
+            paint.setColor(Color.WHITE);
+            canvas.drawCircle(x - dp(1.2f), y - dp(1.2f), dp(1.25f), paint);
+        }
+
+        private void drawSmallText(Canvas canvas, String text, float x, float y, float size, int color, boolean bold, Paint.Align align) {
+            paint.setShader(null);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(color);
+            paint.setTextSize(size);
+            paint.setTypeface(bold ? tfBold : tfMedium);
+            paint.setTextAlign(align);
+            paint.setFontFeatureSettings("'tnum' 1");
+            canvas.drawText(text == null ? "" : text, x, y, paint);
+        }
+    }
+
+    class LeagueSparkBarView extends View {
+        final Metric metric;
+        final Double value;
+        final Double league;
+        final Double percentile;
+        final TeamPalette palette;
+        final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG);
+        private float animProgress = 0f;
+        private boolean animStarted = false;
+
+        LeagueSparkBarView(Context context, Metric metric, Double value, Double league, Double percentile, TeamPalette palette) {
+            super(context);
+            this.metric = metric;
+            this.value = value;
+            this.league = league;
+            this.percentile = percentile;
+            this.palette = palette == null ? defaultPalette() : palette;
+            setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+        }
+
+        @Override protected void onAttachedToWindow() {
+            super.onAttachedToWindow();
+            if (!animStarted) {
+                animStarted = true;
+                ValueAnimator anim = ValueAnimator.ofFloat(0f, 1f);
+                anim.setDuration(430);
+                anim.setInterpolator(new DecelerateInterpolator(2.0f));
+                anim.addUpdateListener(a -> { animProgress = (float)a.getAnimatedValue(); invalidate(); });
+                anim.start();
+            }
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            float left = dp(16);
+            float right = getWidth() - dp(16);
+            float y = dp(26);
+            Double signedEdge = signedLeagueEdge(value, league, metric);
+            if (signedEdge == null && percentile != null) signedEdge = (Math.max(0d, Math.min(100d, percentile)) - 50d) / 50d;
+            if (signedEdge == null) signedEdge = 0d;
+            int sparkColor = profileSparkColor(signedEdge);
+            drawCenteredSparkRail(canvas, left, right, y, signedEdge, sparkColor);
+
+            paint.setShader(null);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setTypeface(tfBold);
+            paint.setTextSize(dp(8));
+            paint.setFontFeatureSettings("'tnum' 1");
+            paint.setTextAlign(Paint.Align.LEFT);
+            paint.setColor(Color.rgb(155, 169, 191));
+            canvas.drawText("Worse", left, y + dp(28), paint);
+            paint.setTextAlign(Paint.Align.CENTER);
+            paint.setColor(Color.rgb(196, 208, 226));
+            canvas.drawText("Avg", (left + right) / 2f, y + dp(28), paint);
+            paint.setTextAlign(Paint.Align.RIGHT);
+            paint.setColor(profilePositiveColor());
+            canvas.drawText("Better", right, y + dp(28), paint);
+        }
+
+        private void drawCenteredSparkRail(Canvas canvas, float left, float right, float y, double signedEdge, int sparkColor) {
+            float cx = (left + right) / 2f;
+            float travel = (right - left) / 2f - dp(11);
+            float norm = (float)Math.max(-1d, Math.min(1d, signedEdge));
+            float sparkX = cx + travel * norm * animProgress;
+            float abs = Math.abs(norm) * animProgress;
+            int negative = profileNegativeColor();
+            int positive = profilePositiveColor();
+
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeCap(Paint.Cap.ROUND);
+            paint.setStrokeWidth(dp(5.6f));
+            paint.setShader(new LinearGradient(left, y, right, y,
+                    new int[] {
+                            Color.argb(66, Color.red(negative), Color.green(negative), Color.blue(negative)),
+                            Color.argb(72, 222, 231, 244),
+                            Color.argb(66, Color.red(positive), Color.green(positive), Color.blue(positive))
+                    }, new float[] {0f, 0.50f, 1f}, Shader.TileMode.CLAMP));
+            canvas.drawLine(left, y, right, y, paint);
+            paint.setShader(null);
+
+            paint.setStrokeWidth(dp(1.1f));
+            paint.setColor(Color.argb(170, 235, 242, 250));
+            canvas.drawLine(cx, y - dp(10), cx, y + dp(10), paint);
+
+            if (Math.abs(sparkX - cx) > dp(1.2f)) {
+                paint.setStrokeWidth(dp(4.4f));
+                paint.setShader(new LinearGradient(cx, y, sparkX, y,
+                        new int[] {
+                                Color.argb(36, Color.red(sparkColor), Color.green(sparkColor), Color.blue(sparkColor)),
+                                Color.argb((int)(126 + 84 * abs), Color.red(sparkColor), Color.green(sparkColor), Color.blue(sparkColor)),
+                                Color.argb((int)(190 + 36 * abs), Color.red(sparkColor), Color.green(sparkColor), Color.blue(sparkColor))
+                        }, new float[] {0f, 0.58f, 1f}, Shader.TileMode.CLAMP));
+                paint.setShadowLayer(dp(2.8f + 3.0f * abs), 0, 0, Color.argb((int)(72 + 70 * abs), Color.red(sparkColor), Color.green(sparkColor), Color.blue(sparkColor)));
+                canvas.drawLine(cx, y, sparkX, y, paint);
+                paint.clearShadowLayer();
+                paint.setShader(null);
+            }
+
+            paint.setStyle(Paint.Style.FILL);
+            paint.setShader(new RadialGradient(sparkX, y, dp(13 + 6 * abs),
+                    new int[] {
+                            Color.argb((int)(150 + 62 * abs), Color.red(sparkColor), Color.green(sparkColor), Color.blue(sparkColor)),
+                            Color.argb((int)(52 + 42 * abs), Color.red(sparkColor), Color.green(sparkColor), Color.blue(sparkColor)),
+                            Color.TRANSPARENT
+                    }, new float[] {0f, 0.44f, 1f}, Shader.TileMode.CLAMP));
+            canvas.drawCircle(sparkX, y, dp(13 + 6 * abs), paint);
+            paint.setShader(null);
+            paint.setColor(Color.rgb(6, 10, 18));
+            canvas.drawCircle(sparkX, y, dp(5.5f), paint);
+            paint.setColor(mixColor(Color.WHITE, sparkColor, 0.12f));
+            canvas.drawCircle(sparkX, y, dp(3.8f), paint);
+            paint.setStrokeCap(Paint.Cap.BUTT);
         }
     }
 
