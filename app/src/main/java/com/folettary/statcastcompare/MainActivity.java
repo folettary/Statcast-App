@@ -92,10 +92,15 @@ public class MainActivity extends Activity {
     private final Map<String, ArrayList<BitmapCallback>> preparedTeamLogoWaiters = Collections.synchronizedMap(new HashMap<>());
     private final Map<Integer, ArrayList<LeaderboardEntry>> leaderboardCache = Collections.synchronizedMap(new HashMap<>());
     private final Map<Integer, ArrayList<LeaderboardEntry>> pitchingLeaderboardCache = Collections.synchronizedMap(new HashMap<>());
+    // v149: stat QA pass - official team games are now used for team record/rate repair.
     // v139: align stat browsing categories with comparison presets.
     // v138: cache full 30-team season stat maps so team ranks/quality percentiles are
     // computed against the league instead of the partial player-leaderboard pool.
     private final Map<String, Map<String, Stats>> leagueTeamStatsCache = Collections.synchronizedMap(new HashMap<>());
+    // v148/v149: official standings cache so team record-derived stats come from MLB standings,
+    // not team batting/pitching stat splits. v149 also uses official games for RPG/RAPG.
+    private final Map<Integer, Map<String, Double>> officialTeamWinPctCache = Collections.synchronizedMap(new HashMap<>());
+    private final Map<Integer, Map<String, Integer>> officialTeamGamesCache = Collections.synchronizedMap(new HashMap<>());
     private final Map<String, ArrayList<GameLogEntry>> gameLogCache = Collections.synchronizedMap(new HashMap<>());
 
     private LinearLayout root;
@@ -528,7 +533,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v147", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v149", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -5272,7 +5277,7 @@ public class MainActivity extends Activity {
         if (card == null || c == null || c.isTeam) return;
         ArrayList<Metric> lensMetrics = scorableLensMetricsForProfile(c);
         PlayerLeagueMatchupCardView lensCard = new PlayerLeagueMatchupCardView(this, c, lensMetrics, palette);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(760));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(640));
         lp.setMargins(0, dp(10), 0, 0);
         card.addView(lensCard, lp);
     }
@@ -9598,6 +9603,7 @@ public class MainActivity extends Activity {
             Stats s = out.get(t.key());
             if (s != null && s.anyValue()) ordered.put(t.key(), s);
         }
+        applyOfficialTeamWinPct(ordered, season);
         leagueTeamStatsCache.put(cacheKey, new LinkedHashMap<>(ordered));
         return ordered;
     }
@@ -9614,7 +9620,127 @@ public class MainActivity extends Activity {
             if (pitch != null && pitch.anyValue()) merged.mergeFrom(pitch);
         }
         repairTeamDerivedStats(merged);
+        applyOfficialTeamWinPct(merged, team, season);
         return merged.anyValue() ? merged : (aggregateSeed == null ? new Stats() : copyStats(aggregateSeed));
+    }
+
+    private void applyOfficialTeamWinPct(Map<String, Stats> teamStats, int season) {
+        if (teamStats == null || teamStats.isEmpty()) return;
+        // v149: apply all record-derived QA fixes together. Win %, Runs/Game and RA/Game
+        // must use the standings game count, never a summed player split game count.
+        fetchOfficialTeamWinPctMap(season);
+        for (Team t : allTeams) {
+            if (t == null) continue;
+            Stats s = teamStats.get(t.key());
+            if (s == null) continue;
+            applyOfficialTeamRecordStats(s, t.key(), season);
+        }
+    }
+
+    private void applyOfficialTeamWinPct(Stats s, Team team, int season) {
+        if (s == null || team == null) return;
+        applyOfficialTeamRecordStats(s, team.key(), season);
+    }
+
+    private void applyOfficialTeamRecordStats(Stats s, String teamKey, int season) {
+        if (s == null || teamKey == null || teamKey.isEmpty()) return;
+        Map<String, Double> winPct = fetchOfficialTeamWinPctMap(season);
+        Map<String, Integer> gamesMap = fetchOfficialTeamGamesMap(season);
+
+        Double pct = winPct == null ? null : winPct.get(teamKey);
+        if (pct != null && !Double.isNaN(pct)) s.put("teamWinPct", normalizeWinPct(pct));
+        else s.remove("teamWinPct");
+
+        Integer games = gamesMap == null ? null : gamesMap.get(teamKey);
+        if (games != null && games > 0) {
+            Double rs = s.get("teamRunsScored");
+            Double ra = s.get("teamRunsAllowed");
+            if (rs != null && !Double.isNaN(rs)) s.put("teamRPG", rs / games);
+            if (ra != null && !Double.isNaN(ra)) s.put("teamRAPG", ra / games);
+            if (rs != null && ra != null && !Double.isNaN(rs) && !Double.isNaN(ra)) s.put("teamRunDiff", rs - ra);
+        }
+        sanitizeTeamStats(s);
+    }
+
+    private Double officialTeamWinPct(Team team, int season) {
+        if (team == null) return null;
+        Map<String, Double> official = fetchOfficialTeamWinPctMap(season);
+        if (official == null || official.isEmpty()) return null;
+        return official.get(team.key());
+    }
+
+    private Double normalizeWinPct(Double pct) {
+        if (pct == null || Double.isNaN(pct)) return null;
+        if (pct > 1.0d && pct <= 100.0d) return pct / 100.0d;
+        if (pct < 0d || pct > 1.0d) return null;
+        return pct;
+    }
+
+    private Map<String, Integer> fetchOfficialTeamGamesMap(int season) {
+        Map<String, Integer> cached = officialTeamGamesCache.get(season);
+        if (cached != null && !cached.isEmpty()) return cached;
+        fetchOfficialTeamWinPctMap(season);
+        cached = officialTeamGamesCache.get(season);
+        return cached == null ? new LinkedHashMap<>() : cached;
+    }
+
+    private Map<String, Double> fetchOfficialTeamWinPctMap(int season) {
+        Map<String, Double> cached = officialTeamWinPctCache.get(season);
+        Map<String, Integer> cachedGames = officialTeamGamesCache.get(season);
+        if (cached != null && !cached.isEmpty() && cachedGames != null && !cachedGames.isEmpty()) return cached;
+
+        LinkedHashMap<String, Double> out = new LinkedHashMap<>();
+        LinkedHashMap<String, Integer> gamesOut = new LinkedHashMap<>();
+        try {
+            String url = "https://statsapi.mlb.com/api/v1/standings?leagueId=103,104&season=" + season + "&standingsTypes=regularSeason";
+            JSONObject root = new JSONObject(httpGet(url));
+            JSONArray records = root.optJSONArray("records");
+            if (records != null) {
+                for (int i = 0; i < records.length(); i++) {
+                    JSONObject division = records.optJSONObject(i);
+                    if (division == null) continue;
+                    JSONArray teams = division.optJSONArray("teamRecords");
+                    if (teams == null) continue;
+                    for (int j = 0; j < teams.length(); j++) {
+                        JSONObject rec = teams.optJSONObject(j);
+                        if (rec == null) continue;
+                        JSONObject teamObj = rec.optJSONObject("team");
+                        int teamId = teamObj == null ? 0 : teamObj.optInt("id", 0);
+                        String key = keyForTeamId(teamId);
+                        if (key.isEmpty() && teamObj != null) key = safe(teamObj.optString("abbreviation", teamObj.optString("teamCode", ""))).toUpperCase(Locale.US);
+                        if (key.isEmpty()) continue;
+
+                        Double pct = numFromJsonAny(rec, "winningPercentage", "winPercentage", "winPct", "pct");
+                        JSONObject leagueRecord = rec.optJSONObject("leagueRecord");
+                        if ((pct == null || Double.isNaN(pct)) && leagueRecord != null) pct = numFromJsonAny(leagueRecord, "pct", "winningPercentage", "winPercentage", "winPct");
+
+                        int wins = intFromJsonAny(rec, "wins", "w", "W");
+                        int losses = intFromJsonAny(rec, "losses", "l", "L");
+                        if ((wins + losses) <= 0 && leagueRecord != null) {
+                            wins = intFromJsonAny(leagueRecord, "wins", "w", "W");
+                            losses = intFromJsonAny(leagueRecord, "losses", "l", "L");
+                        }
+                        int games = wins + losses;
+                        if ((pct == null || Double.isNaN(pct)) && games > 0) pct = wins / (double) games;
+                        pct = normalizeWinPct(pct);
+                        if (pct != null && !Double.isNaN(pct)) out.put(key, pct);
+                        if (games > 0) gamesOut.put(key, games);
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+
+        officialTeamWinPctCache.put(season, out);
+        officialTeamGamesCache.put(season, gamesOut);
+        return out;
+    }
+
+    private String keyForTeamId(int teamId) {
+        if (teamId <= 0 || allTeams == null) return "";
+        for (Team t : allTeams) {
+            if (t != null && t.id == teamId) return t.key();
+        }
+        return "";
     }
 
     private void repairTeamDerivedStats(Stats s) {
@@ -9626,10 +9752,20 @@ public class MainActivity extends Activity {
         Double rs = s.get("teamRunsScored");
         Double ra = s.get("teamRunsAllowed");
         if (rs != null && ra != null) s.put("teamRunDiff", rs - ra);
-        Double games = s.vals.get("__games");
-        if (games != null && games > 0 && rs != null) s.put("teamRPG", rs / games);
-        Double pgames = s.vals.get("__pgames");
-        if (pgames != null && pgames > 0 && ra != null) s.put("teamRAPG", ra / pgames);
+        // v149: Do not derive teamRPG/teamRAPG from __games/__pgames here.
+        // Those fields can be summed player split games, not team games. Official standings
+        // game count is applied later in applyOfficialTeamRecordStats().
+        sanitizeTeamStats(s);
+    }
+
+    private void sanitizeTeamStats(Stats s) {
+        if (s == null) return;
+        Double pct = s.vals.get("teamWinPct");
+        Double normalizedPct = normalizeWinPct(pct);
+        if (normalizedPct == null) s.remove("teamWinPct");
+        else if (!normalizedPct.equals(pct)) s.put("teamWinPct", normalizedPct);
+        Double rs = s.get("teamRunsScored"), ra = s.get("teamRunsAllowed");
+        if (rs != null && ra != null && !Double.isNaN(rs) && !Double.isNaN(ra)) s.put("teamRunDiff", rs - ra);
     }
 
     private Stats fetchDirectPlayerSeasonStats(Player player, int season, boolean pitching) {
@@ -11556,7 +11692,7 @@ public class MainActivity extends Activity {
         @Override protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
             int w = MeasureSpec.getSize(widthMeasureSpec);
             if (w <= 0) w = dp(360);
-            int h = Math.max(dp(760), Math.round(w * 1.94f));
+            int h = Math.max(dp(626), Math.round(w * 1.62f));
             setMeasuredDimension(w, h);
         }
 
@@ -13604,6 +13740,10 @@ public class MainActivity extends Activity {
             if (key == null || key.isEmpty()) return;
             if (value == null || Double.isNaN(value)) return;
             vals.put(key, value);
+        }
+        void remove(String key) {
+            if (key == null || key.isEmpty()) return;
+            vals.remove(key);
         }
         void mergeFrom(Stats other) {
             if (other == null) return;
