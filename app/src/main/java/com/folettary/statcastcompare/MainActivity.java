@@ -465,7 +465,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        // v190: bullpen usage matrix + scouting structure; phone-first portrait app. Prevent rotation recreation from dumping the user
+        // v191: bullpen usage matrix + scouting structure; phone-first portrait app. Prevent rotation recreation from dumping the user
         // back to Home while browsing a profile or matchup.
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
         getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
@@ -660,7 +660,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v190", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v191", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -16881,8 +16881,28 @@ private View liveGameCard(LiveGame game) {
 
         private void drawBullpenHeader(Canvas canvas, RectF card) {
             drawTextFit(canvas, "2026 STATCAST MATCHUP", card.centerX(), card.top + dp(29), card.width() - dp(72), dp(10), Color.rgb(204, 215, 230), true, Paint.Align.CENTER, 0.12f);
-            drawPill(canvas, "BULLPEN INTELLIGENCE", card.centerX(), card.top + dp(54), Math.min(card.width() - dp(70), dp(210)), dp(25),
+            drawHeroPill(canvas, "BULLPEN INTELLIGENCE", card.centerX(), card.top + dp(54), Math.min(card.width() - dp(70), dp(210)), dp(25),
                     Color.argb(38, 255, 255, 255), Color.argb(78, 255, 255, 255), Color.rgb(220, 230, 244), dp(9));
+        }
+
+
+        private void drawHeroPill(Canvas canvas, String label, float cx, float cy, float width, float height,
+                                  int fillColor, int strokeColor, int textColor, float textSize) {
+            RectF pill = new RectF(cx - width / 2f, cy - height / 2f, cx + width / 2f, cy + height / 2f);
+            p.setStyle(Paint.Style.FILL);
+            p.setShader(new LinearGradient(pill.left, pill.top, pill.right, pill.bottom,
+                    new int[] { fillColor, Color.argb(Math.min(255, Color.alpha(fillColor) + 20), 255, 255, 255), fillColor },
+                    new float[] { 0f, 0.50f, 1f },
+                    Shader.TileMode.CLAMP));
+            canvas.drawRoundRect(pill, height / 2f, height / 2f, p);
+            p.setShader(null);
+
+            stroke.setStyle(Paint.Style.STROKE);
+            stroke.setStrokeWidth(dp(1f));
+            stroke.setColor(strokeColor);
+            canvas.drawRoundRect(pill, height / 2f, height / 2f, stroke);
+
+            drawTextFit(canvas, label, cx, cy + textSize * 0.36f, width - dp(18), textSize, textColor, true, Paint.Align.CENTER, 0.10f);
         }
 
         private void drawLogoOrb(Canvas canvas, Bitmap logo, String fallback, float cx, float cy, float rr, int color) {
