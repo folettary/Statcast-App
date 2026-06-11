@@ -465,7 +465,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        // v191: bullpen usage matrix + scouting structure; phone-first portrait app. Prevent rotation recreation from dumping the user
+        // v192: bullpen usage matrix + scouting structure; phone-first portrait app. Prevent rotation recreation from dumping the user
         // back to Home while browsing a profile or matchup.
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
         getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
@@ -660,7 +660,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v191", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v192", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -7297,6 +7297,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
     private String matchupLensNameForUi(HeadToHeadComparison h) {
         if (h == null) return currentLensNameForUi();
+        if (isBullpenHeroComparison(h)) return "Bullpen";
         String role = h.isTeam ? "both" : roleForScope(h.scope);
         return metricPresetNameForRole(selectedMetricKeys, role);
     }
@@ -9622,6 +9623,17 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
     private ArrayList<Metric> collectHeadToHeadMetrics(HeadToHeadComparison h, int max, boolean keyEdgeOnly) {
         ArrayList<Metric> ordered = new ArrayList<>();
+        if (h != null) {
+            ArrayList<Metric> snapshot = keyEdgeOnly ? h.keyEdgeMetricsSnapshot : h.selectedMetricsSnapshot;
+            if (snapshot != null && !snapshot.isEmpty()) {
+                for (Metric m : snapshot) {
+                    if (m == null || ordered.contains(m)) continue;
+                    ordered.add(m);
+                    if (ordered.size() >= max) return ordered;
+                }
+                return ordered;
+            }
+        }
         String role = h == null ? allowedMetricRoleForCurrentContext() : roleForScope(h.scope);
         LinkedHashSet<String> sourceKeys = keyEdgeOnly ? keyEdgeMetricKeys : selectedMetricKeys;
         if (sourceKeys == null || sourceKeys.isEmpty()) sourceKeys = selectedMetricKeys;
@@ -16450,6 +16462,7 @@ private View liveGameCard(LiveGame game) {
 
 
 
+
     private LinearLayout bullpenEdgeHeroCards(BullpenReport away, BullpenReport home, int awayColor, int homeColor) {
         LinearLayout wrap = new LinearLayout(this);
         wrap.setOrientation(LinearLayout.VERTICAL);
@@ -16457,10 +16470,11 @@ private View liveGameCard(LiveGame game) {
         wrapLp.setMargins(0, dp(10), 0, dp(8));
         wrap.setLayoutParams(wrapLp);
 
-        BullpenPremiumHeroView hero = new BullpenPremiumHeroView(this, away, home, awayColor, homeColor);
-        wrap.addView(hero, new LinearLayout.LayoutParams(-1, dp(500)));
+        PremiumShareCardView card = bullpenPremiumShareCardView(away, home, awayColor, homeColor);
+        wrap.addView(card, matchWrap());
         return wrap;
     }
+
 
 
 
@@ -16596,6 +16610,160 @@ private View liveGameCard(LiveGame game) {
     private String bullpenFreshnessHeroValue(BullpenReport r) {
         if (r == null) return "—";
         return bullpenIpFmt(r.last2NonStarterIp()) + " staff · " + r.b2bArms + " B2B";
+    }
+
+
+    private PremiumShareCardView bullpenPremiumShareCardView(BullpenReport away, BullpenReport home, int awayColor, int homeColor) {
+        HeadToHeadComparison h = bullpenHeadToHeadComparison(away, home);
+        TeamPalette awayPalette = paletteForBullpenReport(away, awayColor);
+        TeamPalette homePalette = paletteForBullpenReport(home, homeColor);
+        PremiumShareCardView card = new PremiumShareCardView(this, h, awayPalette, homePalette);
+        // Keep the true matchup card renderer, but avoid opening the global lens picker from this
+        // bullpen-specific card; details live below the hero.
+        card.setClickable(false);
+        return card;
+    }
+
+    private HeadToHeadComparison bullpenHeadToHeadComparison(BullpenReport away, BullpenReport home) {
+        Team awayTeam = teamForBullpenReport(away);
+        Team homeTeam = teamForBullpenReport(home);
+
+        Stats a = new Stats();
+        Stats b = new Stats();
+        a.pa = b.pa = 500;
+        a.ip = away == null ? 0.0d : Math.max(1.0d, away.seasonIp);
+        b.ip = home == null ? 0.0d : Math.max(1.0d, home.seasonIp);
+
+        putBullpenHeroStats(a, away);
+        putBullpenHeroStats(b, home);
+
+        ArrayList<Metric> metrics = bullpenHeroMetrics();
+        HashMap<String, Double> pctA = new HashMap<>();
+        HashMap<String, Double> pctB = new HashMap<>();
+        putBullpenHeroPercentiles(pctA, pctB, metrics, a, b);
+
+        return new HeadToHeadComparison(
+                true,
+                away == null ? "AWAY" : away.abbr,
+                home == null ? "HOME" : home.abbr,
+                "BULLPEN",
+                "BULLPEN",
+                awayTeam == null ? 0 : awayTeam.id,
+                homeTeam == null ? 0 : homeTeam.id,
+                selectedSeasonValue,
+                a,
+                b,
+                new Stats(),
+                null,
+                null,
+                awayTeam,
+                homeTeam,
+                new HashMap<>(),
+                new HashMap<>(),
+                new HashMap<>(),
+                new HashMap<>(),
+                pctA,
+                pctB,
+                StatScope.PITCH_ONLY,
+                new ArrayList<>(metrics),
+                new ArrayList<>(metrics)
+        );
+    }
+
+    private Team teamForBullpenReport(BullpenReport report) {
+        if (report == null) return null;
+        Team found = findTeamByName(report.abbr);
+        if (found != null) return found;
+        return new Team(0, safe(report.name).isEmpty() ? report.abbr : report.name, report.abbr);
+    }
+
+    private TeamPalette paletteForBullpenReport(BullpenReport report, int fallback) {
+        Team team = teamForBullpenReport(report);
+        if (team != null && team.id > 0) return paletteForTeam(team);
+        String abbr = report == null ? "" : report.abbr;
+        TeamPalette p = paletteForAbbr(abbr);
+        if (p != null) return p;
+        return new TeamPalette(fallback, darkColor(fallback, 0.58f));
+    }
+
+    private ArrayList<Metric> bullpenHeroMetrics() {
+        ArrayList<Metric> out = new ArrayList<>();
+        out.add(new Metric("bpQualityScore", "Quality", "", 0, true, "rate", "Bullpen", "pitch"));
+        out.add(new Metric("bpFreshnessScore", "Freshness", "", 0, true, "rate", "Bullpen", "pitch"));
+        out.add(new Metric("bpERA", "ERA", "", 2, false, "rate", "Bullpen", "pitch"));
+        out.add(new Metric("bpWHIP", "WHIP", "", 2, false, "rate", "Bullpen", "pitch"));
+        out.add(new Metric("bpKMinusBB", "K-BB %", "%", 1, true, "rate", "Bullpen", "pitch"));
+        out.add(new Metric("bpStaffIP", "Staff IP", "", 1, false, "rate", "Bullpen", "pitch"));
+        out.add(new Metric("bpB2B", "B2B Arms", "", 0, false, "count", "Bullpen", "pitch"));
+        return out;
+    }
+
+    private void putBullpenHeroStats(Stats s, BullpenReport r) {
+        if (s == null) return;
+        double quality = bullpenHeroQualityScore(r);
+        double freshness = bullpenHeroFreshnessScore(r);
+        s.put("bpQualityScore", quality);
+        s.put("bpFreshnessScore", freshness);
+        s.put("bpERA", r == null ? null : r.era());
+        s.put("bpWHIP", r == null ? null : r.whip());
+        s.put("bpKMinusBB", r == null ? null : r.kMinusBbPct());
+        s.put("bpStaffIP", r == null ? null : r.last2NonStarterIp());
+        s.put("bpB2B", r == null ? null : (double) r.b2bArms);
+    }
+
+    private double bullpenHeroQualityScore(BullpenReport r) {
+        if (r == null) return 50.0d;
+        double era = clampDouble(r.era(), 0.0d, 8.0d);
+        double whip = clampDouble(r.whip(), 0.70d, 2.20d);
+        double kbb = clampDouble(r.kMinusBbPct(), -5.0d, 32.0d);
+        double hr9 = clampDouble(r.hr9(), 0.0d, 2.4d);
+        double eraScore = 100.0d - (era / 8.0d) * 100.0d;
+        double whipScore = 100.0d - ((whip - 0.70d) / 1.50d) * 100.0d;
+        double kbbScore = ((kbb + 5.0d) / 37.0d) * 100.0d;
+        double hrScore = 100.0d - (hr9 / 2.4d) * 100.0d;
+        return clampDouble(eraScore * 0.42d + whipScore * 0.22d + kbbScore * 0.28d + hrScore * 0.08d, 0.0d, 100.0d);
+    }
+
+    private double bullpenHeroFreshnessScore(BullpenReport r) {
+        if (r == null) return 50.0d;
+        double score = bullpenFreshnessScore(r);
+        if (Double.isNaN(score)) return 50.0d;
+        return clampDouble(score, 0.0d, 100.0d);
+    }
+
+    private void putBullpenHeroPercentiles(Map<String, Double> pctA, Map<String, Double> pctB, ArrayList<Metric> metrics, Stats a, Stats b) {
+        if (pctA == null || pctB == null || metrics == null || a == null || b == null) return;
+        for (Metric m : metrics) {
+            if (m == null) continue;
+            Double av = a.get(m.key);
+            Double bv = b.get(m.key);
+            double[] pair = bullpenPairPercentiles(av, bv, m.higherGood);
+            pctA.put(m.key, pair[0]);
+            pctB.put(m.key, pair[1]);
+        }
+    }
+
+    private double[] bullpenPairPercentiles(Double a, Double b, Boolean higherGood) {
+        if (a == null || b == null || Double.isNaN(a) || Double.isNaN(b)) return new double[] { 50.0d, 50.0d };
+        double gap = Math.abs(a - b);
+        double denom = Math.max(1.0d, Math.max(Math.abs(a), Math.abs(b)));
+        double strength = clampDouble(gap / denom, 0.0d, 1.0d);
+        double edge = 18.0d + 30.0d * strength;
+        int winner = 0;
+        if (Math.abs(a - b) > 0.0000001d) {
+            boolean aBetter = higherGood == null ? a > b : (higherGood ? a > b : a < b);
+            winner = aBetter ? -1 : 1;
+        }
+        if (winner == 0) return new double[] { 50.0d, 50.0d };
+        return winner < 0 ? new double[] { 50.0d + edge, 50.0d - edge } : new double[] { 50.0d - edge, 50.0d + edge };
+    }
+
+    private boolean isBullpenHeroComparison(HeadToHeadComparison h) {
+        if (h == null || h.selectedMetricsSnapshot == null || h.selectedMetricsSnapshot.isEmpty()) return false;
+        for (Metric m : h.selectedMetricsSnapshot) {
+            if (m != null && safe(m.key).startsWith("bp")) return true;
+        }
+        return false;
     }
 
     private TextView bullpenWhyCard(BullpenReport away, BullpenReport home) {
