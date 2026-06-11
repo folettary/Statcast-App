@@ -465,7 +465,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        // v178: bullpen intelligence; phone-first portrait app. Prevent rotation recreation from dumping the user
+        // v180: appearance-based bullpen engine; phone-first portrait app. Prevent rotation recreation from dumping the user
         // back to Home while browsing a profile or matchup.
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
         getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
@@ -660,7 +660,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v178", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v180", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -12512,6 +12512,15 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         try { return Integer.parseInt(obj.optString(key, "0").replace(",", "")); } catch (Exception e) { return obj.optInt(key, 0); }
     }
 
+
+    private boolean jsonHasAny(JSONObject obj, String... keys) {
+        if (obj == null || keys == null) return false;
+        for (String key : keys) {
+            if (key != null && !key.isEmpty() && obj.has(key) && !safe(obj.optString(key, "")).isEmpty() && !safe(obj.optString(key, "")).equals("-")) return true;
+        }
+        return false;
+    }
+
     private int intFromJsonAny(JSONObject obj, String... keys) {
         if (obj == null || keys == null) return 0;
         for (String key : keys) {
@@ -16289,8 +16298,9 @@ private View liveGameCard(LiveGame game) {
             try {
                 Team away = teamForLiveGame(game.awayTeamId, game.awayName, game.awayAbbr);
                 Team home = teamForLiveGame(game.homeTeamId, game.homeName, game.homeAbbr);
-                BullpenReport awayReport = fetchBullpenReport(away, currentSeason(), game.gamePk);
+                Future<BullpenReport> awayFuture = fanout.submit(() -> fetchBullpenReport(away, currentSeason(), game.gamePk));
                 BullpenReport homeReport = fetchBullpenReport(home, currentSeason(), game.gamePk);
+                BullpenReport awayReport = awayFuture.get();
                 main.post(() -> {
                     if (!isCurrentScreenRequest(requestToken) || activePrimaryTab != TAB_MATCHUP || !matchupResultMode) return;
                     renderBullpenReport(game, awayReport, homeReport);
@@ -16312,7 +16322,7 @@ private View liveGameCard(LiveGame game) {
         title.setGravity(Gravity.CENTER);
         title.setPadding(0, dp(6), 0, 0);
         panel.addView(title, matchWrap());
-        TextView sub = text("Loading reliever quality, recent usage, and fatigue signals…", 12, Color.rgb(190, 207, 229), false);
+        TextView sub = text("Building appearance-level bullpen quality and recent availability…", 12, Color.rgb(190, 207, 229), false);
         sub.setGravity(Gravity.CENTER);
         sub.setPadding(0, dp(8), 0, dp(10));
         panel.addView(sub, matchWrap());
@@ -16407,20 +16417,24 @@ private View liveGameCard(LiveGame game) {
 
         panel.addView(bullpenTeamSummaryRow(away, home, awayColor, homeColor), matchWrap());
 
-        bullpenSectionTitle(panel, "SEASON QUALITY", "Reliever-only proxy: pitchers with 0 starts");
+        bullpenSectionTitle(panel, "SEASON QUALITY", "Appearance-based relief only; starter/openers excluded and bulk split out");
         bullpenCompareRow(panel, "ERA", bullpenFmt(away.era(), 2), bullpenFmt(home.era(), 2), compareLower(away.era(), home.era()), awayColor, homeColor);
         bullpenCompareRow(panel, "WHIP", bullpenFmt(away.whip(), 2), bullpenFmt(home.whip(), 2), compareLower(away.whip(), home.whip()), awayColor, homeColor);
         bullpenCompareRow(panel, "K-BB%", bullpenFmt(away.kMinusBbPct(), 1) + "%", bullpenFmt(home.kMinusBbPct(), 1) + "%", compareHigher(away.kMinusBbPct(), home.kMinusBbPct()), awayColor, homeColor);
         bullpenCompareRow(panel, "HR/9", bullpenFmt(away.hr9(), 2), bullpenFmt(home.hr9(), 2), compareLower(away.hr9(), home.hr9()), awayColor, homeColor);
+        bullpenCompareRow(panel, "Last 30d ERA", bullpenFmt(away.recent30Era(), 2), bullpenFmt(home.recent30Era(), 2), compareLower(away.recent30Era(), home.recent30Era()), awayColor, homeColor);
+        bullpenCompareRow(panel, "Last 14d K-BB%", bullpenFmt(away.recent14KMinusBbPct(), 1) + "%", bullpenFmt(home.recent14KMinusBbPct(), 1) + "%", compareHigher(away.recent14KMinusBbPct(), home.recent14KMinusBbPct()), awayColor, homeColor);
 
-        bullpenSectionTitle(panel, "RECENT USAGE / FATIGUE", "Boxscore bullpen appearances; current game excluded");
-        bullpenCompareRow(panel, "Today IP / pitches", bullpenIpPitches(away.todayIp, away.todayPitches), bullpenIpPitches(home.todayIp, home.todayPitches), compareLower(away.todayIp, home.todayIp), awayColor, homeColor);
-        bullpenCompareRow(panel, "Yesterday IP / pitches", bullpenIpPitches(away.yesterdayIp, away.yesterdayPitches), bullpenIpPitches(home.yesterdayIp, home.yesterdayPitches), compareLower(away.yesterdayIp, home.yesterdayIp), awayColor, homeColor);
-        bullpenCompareRow(panel, "Last 2d IP", bullpenFmt(away.last2Ip, 1), bullpenFmt(home.last2Ip, 1), compareLower(away.last2Ip, home.last2Ip), awayColor, homeColor);
+        bullpenSectionTitle(panel, "RECENT USAGE / FATIGUE", "Prior two calendar days; current game, starters/openers excluded");
+        bullpenCompareRow(panel, "Yest BP IP / pitches", bullpenIpPitches(away.yesterdayIp, away.yesterdayPitches), bullpenIpPitches(home.yesterdayIp, home.yesterdayPitches), compareLower(away.yesterdayIp, home.yesterdayIp), awayColor, homeColor);
+        bullpenCompareRow(panel, "Yest bulk IP / pitches", bullpenIpPitches(away.yesterdayBulkIp, away.yesterdayBulkPitches), bullpenIpPitches(home.yesterdayBulkIp, home.yesterdayBulkPitches), compareLower(away.yesterdayBulkIp, home.yesterdayBulkIp), awayColor, homeColor);
+        bullpenCompareRow(panel, "2d ago BP / pitches", bullpenIpPitches(away.twoDaysAgoIp, away.twoDaysAgoPitches), bullpenIpPitches(home.twoDaysAgoIp, home.twoDaysAgoPitches), compareLower(away.twoDaysAgoIp, home.twoDaysAgoIp), awayColor, homeColor);
+        bullpenCompareRow(panel, "Prior 2d BP IP", bullpenFmt(away.last2Ip, 1), bullpenFmt(home.last2Ip, 1), compareLower(away.last2Ip, home.last2Ip), awayColor, homeColor);
+        bullpenCompareRow(panel, "Prior 2d bulk IP", bullpenFmt(away.last2BulkIp, 1), bullpenFmt(home.last2BulkIp, 1), compareLower(away.last2BulkIp, home.last2BulkIp), awayColor, homeColor);
         bullpenCompareRow(panel, "B2B arms", String.valueOf(away.b2bArms), String.valueOf(home.b2bArms), compareLower(away.b2bArms, home.b2bArms), awayColor, homeColor);
         bullpenCompareRow(panel, "Fatigue read", away.fatigueLabel(), home.fatigueLabel(), compareLower(away.fatiguePenalty(), home.fatiguePenalty()), awayColor, homeColor);
 
-        TextView foot = text("Quality is season reliever performance. Fatigue uses recent boxscores: IP, pitches, relievers used today/yesterday, and back-to-back usage.", 10, Color.rgb(168, 185, 207), false);
+        TextView foot = text("Quality is built from actual boxscore relief appearances. Bulk outings are separated so opener games do not inflate normal bullpen usage.", 10, Color.rgb(168, 185, 207), false);
         foot.setGravity(Gravity.CENTER);
         foot.setPadding(dp(2), dp(10), dp(2), 0);
         panel.addView(foot, matchWrap());
@@ -16455,7 +16469,7 @@ private View liveGameCard(LiveGame game) {
         era.setGravity(Gravity.CENTER);
         era.setSingleLine(true);
         card.addView(era, matchWrap());
-        TextView usage = text(r.fatigueLabel() + " · " + bullpenFmt(r.last2Ip, 1) + " IP last 2d", 9, Color.rgb(176, 196, 219), false);
+        TextView usage = text(r.fatigueLabel() + " · " + bullpenFmt(r.last2Ip, 1) + " BP IP" + (r.last2BulkIp > 0 ? " + " + bullpenFmt(r.last2BulkIp, 1) + " bulk" : ""), 9, Color.rgb(176, 196, 219), false);
         usage.setGravity(Gravity.CENTER);
         usage.setSingleLine(true);
         usage.setEllipsize(TextUtils.TruncateAt.END);
@@ -16516,7 +16530,10 @@ private View liveGameCard(LiveGame game) {
         double whip = safeMetric(r.whip(), 1.35d);
         double kbb = safeMetric(r.kMinusBbPct(), 11.0d);
         double hr9 = safeMetric(r.hr9(), 1.10d);
-        return 100.0d - (era * 6.0d) - (whip * 8.0d) + (kbb * 1.15d) - (hr9 * 4.0d) - (r.fatiguePenalty() * 2.0d);
+        double recentEra = safeMetric(r.recent30Era(), era);
+        double recentKbb = safeMetric(r.recent14KMinusBbPct(), kbb);
+        return 100.0d - (era * 4.5d) - (whip * 7.0d) + (kbb * 0.85d) - (hr9 * 3.0d)
+                - (recentEra * 2.2d) + (recentKbb * 0.55d) - (r.fatiguePenalty() * 2.0d);
     }
 
     private double safeMetric(double v, double fallback) {
@@ -16544,48 +16561,205 @@ private View liveGameCard(LiveGame game) {
         return left + " / " + pitches;
     }
 
+
     private BullpenReport fetchBullpenReport(Team team, int season, int excludeGamePk) {
         if (team == null) return new BullpenReport("—", "Unknown");
         BullpenReport report = new BullpenReport(team.abbr, team.name);
-        mergeBullpenSeasonQuality(report, team, season);
-        mergeRecentBullpenUsage(report, team, excludeGamePk);
+        mergeAppearanceBullpenFromSchedule(report, team, season, excludeGamePk);
+        if (!report.qualityAvailable()) {
+            report.qualitySource = "Reliever proxy fallback";
+            mergeBullpenSeasonQuality(report, team, season);
+        }
         report.finalizeFatigue();
         return report;
     }
 
-    private void mergeBullpenSeasonQuality(BullpenReport report, Team team, int season) {
-        if (report == null || team == null) return;
+
+
+
+    private void mergeAppearanceBullpenFromSchedule(BullpenReport report, Team team, int season, int excludeGamePk) {
+        if (report == null || team == null || team.id <= 0) return;
         try {
-            ArrayList<LeaderboardEntry> entries = fetchStandardLeaderboard(season, true);
-            for (LeaderboardEntry e : entries) {
-                if (e == null || e.stats == null) continue;
-                String key = teamKeyFromEntry(e);
-                if (!team.key().equals(key)) continue;
-                int starts = intVal(e.stats.vals.get("__gs"));
-                if (starts > 0) continue; // clean first pass: pure reliever-season lines only
-                double ip = valueOrZero(e.stats.vals.get("__pip"));
-                if (ip <= 0.0d) continue;
-                report.addSeason(
-                        ip,
-                        valueOrZero(e.stats.vals.get("__er")),
-                        valueOrZero(e.stats.vals.get("__ph")),
-                        valueOrZero(e.stats.vals.get("__pbb")),
-                        valueOrZero(e.stats.vals.get("__pk")),
-                        valueOrZero(e.stats.vals.get("__bf")),
-                        valueOrZero(e.stats.vals.get("__phr")),
-                        valueOrZero(e.stats.vals.get("__pr")),
-                        intVal(e.stats.vals.get("__pitches"))
-                );
+            String start = bullpenSeasonStartDate(season);
+            String end = bullpenSeasonEndDate(season);
+            ArrayList<ScheduleGameRef> games = fetchCompletedTeamGames(team, start, end, excludeGamePk, true);
+            if (games.isEmpty()) games = fetchCompletedTeamGames(team, start, end, excludeGamePk, false);
+            int startIndex = Math.max(0, games.size() - 90);
+            for (int i = startIndex; i < games.size(); i++) {
+                ScheduleGameRef g = games.get(i);
+                if (g == null) continue;
+                mergeBullpenAppearancesFromBoxscore(report, team, g.gamePk, g.dateKey, daysAgoFromDateKey(g.dateKey));
+            }
+            report.qualitySource = "Appearance-based";
+        } catch (Exception ignored) {}
+    }
+
+    private ArrayList<ScheduleGameRef> fetchCompletedTeamGames(Team team, String start, String end, int excludeGamePk, boolean regularOnly) {
+        ArrayList<ScheduleGameRef> out = new ArrayList<>();
+        if (team == null || team.id <= 0) return out;
+        try {
+            String url = "https://statsapi.mlb.com/api/v1/schedule?sportId=1&teamId=" + team.id
+                    + "&startDate=" + URLEncoder.encode(start, "UTF-8")
+                    + "&endDate=" + URLEncoder.encode(end, "UTF-8")
+                    + (regularOnly ? "&gameTypes=R" : "");
+            JSONObject root = new JSONObject(httpGet(url));
+            JSONArray dates = root.optJSONArray("dates");
+            if (dates == null) return out;
+            for (int d = 0; d < dates.length(); d++) {
+                JSONObject dateObj = dates.optJSONObject(d);
+                if (dateObj == null) continue;
+                String dateKey = safe(dateObj.optString("date", ""));
+                JSONArray games = dateObj.optJSONArray("games");
+                if (games == null) continue;
+                for (int i = 0; i < games.length(); i++) {
+                    JSONObject game = games.optJSONObject(i);
+                    if (game == null) continue;
+                    int gamePk = game.optInt("gamePk", 0);
+                    if (gamePk <= 0 || gamePk == excludeGamePk) continue;
+                    if (!isCompletedGame(game)) continue;
+                    out.add(new ScheduleGameRef(gamePk, dateKey));
+                }
+            }
+        } catch (Exception ignored) {}
+        return out;
+    }
+
+    private boolean isCompletedGame(JSONObject game) {
+        if (game == null) return false;
+        JSONObject status = game.optJSONObject("status");
+        String state = safe(status == null ? "" : status.optString("abstractGameState", "")).toLowerCase(Locale.US);
+        String detail = safe(status == null ? "" : status.optString("detailedState", "")).toLowerCase(Locale.US);
+        return state.contains("final") || detail.contains("final") || detail.contains("completed");
+    }
+
+    private String bullpenSeasonStartDate(int season) {
+        return "03/20/" + Math.max(2015, season);
+    }
+
+    private String bullpenSeasonEndDate(int season) {
+        int current = Calendar.getInstance().get(Calendar.YEAR);
+        if (season >= current) return scheduleDate(addDays(new Date(), -1));
+        return "11/15/" + season;
+    }
+
+    private void mergeBullpenAppearancesFromBoxscore(BullpenReport report, Team team, int gamePk, String dateKey, int daysAgo) {
+        if (report == null || team == null || gamePk <= 0) return;
+        try {
+            JSONObject box = new JSONObject(httpGet("https://statsapi.mlb.com/api/v1/game/" + gamePk + "/boxscore"));
+            JSONObject teamsObj = box.optJSONObject("teams");
+            if (teamsObj == null) return;
+            JSONObject side = null;
+            JSONObject away = teamsObj.optJSONObject("away");
+            JSONObject home = teamsObj.optJSONObject("home");
+            if (away != null && teamMatchesBoxscoreTeam(away.optJSONObject("team"), team)) side = away;
+            else if (home != null && teamMatchesBoxscoreTeam(home.optJSONObject("team"), team)) side = home;
+            if (side == null) return;
+
+            JSONArray pitchers = side.optJSONArray("pitchers");
+            JSONObject players = side.optJSONObject("players");
+            if (pitchers == null || players == null || pitchers.length() == 0) return;
+
+            HashSet<Integer> starterIds = starterPitcherIdsFromBoxscore(pitchers, players);
+            for (int i = 0; i < pitchers.length(); i++) {
+                int pid = pitchers.optInt(i, 0);
+                if (pid <= 0 || starterIds.contains(pid)) continue;
+                JSONObject pObj = players.optJSONObject("ID" + pid);
+                if (pObj == null) continue;
+                JSONObject stats = pObj.optJSONObject("stats");
+                JSONObject pitching = stats == null ? null : stats.optJSONObject("pitching");
+                if (pitching == null) continue;
+
+                double ip = inningsToDouble(pitching.optString("inningsPitched", "0"));
+                int pitches = intFromJsonAny(pitching, "pitchesThrown", "numberOfPitches", "pitches", "NP");
+                if (ip <= 0.0d && pitches <= 0) continue;
+
+                int er = intFromJsonAny(pitching, "earnedRuns", "earnedRunsAllowed", "er", "ER");
+                int hits = intFromJsonAny(pitching, "hits", "hitsAllowed", "h", "H");
+                int bb = intFromJsonAny(pitching, "baseOnBalls", "walks", "bb", "BB");
+                int k = intFromJsonAny(pitching, "strikeOuts", "strikeouts", "so", "SO");
+                int bf = intFromJsonAny(pitching, "battersFaced", "bf", "BF");
+                int hr = intFromJsonAny(pitching, "homeRuns", "homeRunsAllowed", "hr", "HR");
+                int runs = intFromJsonAny(pitching, "runs", "runsAllowed", "r", "R");
+
+                boolean bulk = isBulkReliefAppearance(ip, pitches, i, pitchers.length());
+                report.addAppearance(dateKey, daysAgo, pid, ip, pitches, er, hits, bb, k, bf, hr, runs, bulk);
             }
         } catch (Exception ignored) {}
     }
+
+    private HashSet<Integer> starterPitcherIdsFromBoxscore(JSONArray pitchers, JSONObject players) {
+        HashSet<Integer> starterIds = new HashSet<>();
+        if (pitchers == null || players == null) return starterIds;
+        int firstPitcherId = pitchers.optInt(0, 0);
+        for (int i = 0; i < pitchers.length(); i++) {
+            int pid = pitchers.optInt(i, 0);
+            if (pid <= 0) continue;
+            JSONObject pObj = players.optJSONObject("ID" + pid);
+            if (pObj == null) continue;
+            JSONObject stats = pObj.optJSONObject("stats");
+            JSONObject pitching = stats == null ? null : stats.optJSONObject("pitching");
+            if (pitching == null) continue;
+            int gs = intFromJsonAny(pitching, "gamesStarted", "gamesStartedPitching", "gs", "GS");
+            if (gs > 0) starterIds.add(pid);
+        }
+        if (starterIds.isEmpty() && firstPitcherId > 0) starterIds.add(firstPitcherId);
+        return starterIds;
+    }
+
+    private boolean isBulkReliefAppearance(double ip, int pitches, int orderIndex, int pitcherCount) {
+        if (ip >= 3.0d || pitches >= 50) return true;
+        return orderIndex == 1 && pitcherCount >= 5 && (ip >= 2.0d || pitches >= 35);
+    }
+
+
+    private void mergeBullpenSeasonQuality(BullpenReport report, Team team, int season) {
+        if (report == null || team == null || team.id <= 0) return;
+        try {
+            String url = "https://statsapi.mlb.com/api/v1/stats?stats=season&group=pitching&playerPool=ALL&season="
+                    + season + "&teamId=" + team.id + "&limit=10000";
+            JSONObject root = new JSONObject(httpGet(url));
+            JSONArray statsArr = root.optJSONArray("stats");
+            if (statsArr == null || statsArr.length() == 0) return;
+            JSONArray splits = statsArr.optJSONObject(0) == null ? null : statsArr.optJSONObject(0).optJSONArray("splits");
+            if (splits == null) return;
+
+            for (int i = 0; i < splits.length(); i++) {
+                JSONObject split = splits.optJSONObject(i);
+                if (split == null) continue;
+                JSONObject stat = split.optJSONObject("stat");
+                if (stat == null) continue;
+
+                int starts = intFromJsonAny(stat, "gamesStarted", "gamesStartedPitching", "gs", "GS");
+                if (starts > 0) continue;
+
+                // Do not let partial/summary rows create fake 0.00 ERA or blank baselines.
+                if (!jsonHasAny(stat, "inningsPitched") || !jsonHasAny(stat, "earnedRuns", "runs", "hits", "baseOnBalls", "strikeOuts")) continue;
+
+                double ip = inningsToDouble(stat.optString("inningsPitched", "0"));
+                if (ip <= 0.0d) continue;
+
+                int er = intFromJsonAny(stat, "earnedRuns", "earnedRunsAllowed", "er", "ER");
+                int hits = intFromJsonAny(stat, "hits", "hitsAllowed", "h", "H");
+                int bb = intFromJsonAny(stat, "baseOnBalls", "walks", "bb", "BB");
+                int k = intFromJsonAny(stat, "strikeOuts", "strikeouts", "so", "SO");
+                int bf = intFromJsonAny(stat, "battersFaced", "bf", "BF");
+                int hr = intFromJsonAny(stat, "homeRuns", "homeRunsAllowed", "hr", "HR");
+                int runs = intFromJsonAny(stat, "runs", "runsAllowed", "r", "R");
+                int pitches = intFromJsonAny(stat, "pitchesThrown", "numberOfPitches", "pitches", "NP");
+
+                report.addSeason(ip, er, hits, bb, k, bf, hr, runs, pitches);
+            }
+        } catch (Exception ignored) {}
+    }
+
+
 
     private void mergeRecentBullpenUsage(BullpenReport report, Team team, int excludeGamePk) {
         if (report == null || team == null || team.id <= 0) return;
         try {
             Date now = new Date();
             String start = scheduleDate(addDays(now, -4));
-            String end = scheduleDate(now);
+            String end = scheduleDate(addDays(now, -1));
             String url = "https://statsapi.mlb.com/api/v1/schedule?sportId=1&teamId=" + team.id
                     + "&startDate=" + URLEncoder.encode(start, "UTF-8")
                     + "&endDate=" + URLEncoder.encode(end, "UTF-8");
@@ -16597,7 +16771,7 @@ private View liveGameCard(LiveGame game) {
                 if (dateObj == null) continue;
                 String dateKey = safe(dateObj.optString("date", ""));
                 int daysAgo = daysAgoFromDateKey(dateKey);
-                if (daysAgo < 0 || daysAgo > 3) continue;
+                if (daysAgo < 1 || daysAgo > 3) continue;
                 JSONArray games = dateObj.optJSONArray("games");
                 if (games == null) continue;
                 for (int i = 0; i < games.length(); i++) {
@@ -16615,38 +16789,14 @@ private View liveGameCard(LiveGame game) {
         } catch (Exception ignored) {}
     }
 
-    private void mergeBullpenUsageFromBoxscore(BullpenReport report, Team team, int gamePk, String dateKey, int daysAgo) {
-        if (report == null || team == null || gamePk <= 0) return;
-        try {
-            JSONObject box = new JSONObject(httpGet("https://statsapi.mlb.com/api/v1/game/" + gamePk + "/boxscore"));
-            JSONObject teamsObj = box.optJSONObject("teams");
-            if (teamsObj == null) return;
-            JSONObject side = null;
-            JSONObject away = teamsObj.optJSONObject("away");
-            JSONObject home = teamsObj.optJSONObject("home");
-            if (away != null && teamMatchesBoxscoreTeam(away.optJSONObject("team"), team)) side = away;
-            else if (home != null && teamMatchesBoxscoreTeam(home.optJSONObject("team"), team)) side = home;
-            if (side == null) return;
 
-            JSONArray pitchers = side.optJSONArray("pitchers");
-            JSONObject players = side.optJSONObject("players");
-            if (pitchers == null || players == null || pitchers.length() <= 1) return;
-            int starterId = pitchers.optInt(0, 0);
-            for (int i = 0; i < pitchers.length(); i++) {
-                int pid = pitchers.optInt(i, 0);
-                if (pid <= 0 || pid == starterId) continue;
-                JSONObject pObj = players.optJSONObject("ID" + pid);
-                if (pObj == null) continue;
-                JSONObject stats = pObj.optJSONObject("stats");
-                JSONObject pitching = stats == null ? null : stats.optJSONObject("pitching");
-                if (pitching == null) continue;
-                double ip = inningsToDouble(pitching.optString("inningsPitched", "0"));
-                int pitches = intFromJsonAny(pitching, "pitchesThrown", "numberOfPitches", "pitches", "NP");
-                if (ip <= 0.0d && pitches <= 0) continue;
-                report.addUsage(dateKey, daysAgo, pid, ip, pitches);
-            }
-        } catch (Exception ignored) {}
+
+
+    private void mergeBullpenUsageFromBoxscore(BullpenReport report, Team team, int gamePk, String dateKey, int daysAgo) {
+        mergeBullpenAppearancesFromBoxscore(report, team, gamePk, dateKey, daysAgo);
     }
+
+
 
     private boolean teamMatchesBoxscoreTeam(JSONObject obj, Team team) {
         if (obj == null || team == null) return false;
@@ -16753,8 +16903,8 @@ private View liveGameCard(LiveGame game) {
     }
 
     private void openLiveTopHitterMatchup(LiveGame game) {
-        Team awayTeam = findTeamById(game.awayTeamId);
-        Team homeTeam = findTeamById(game.homeTeamId);
+        Team awayTeam = teamForLiveGame(game.awayTeamId, game.awayName, game.awayAbbr);
+        Team homeTeam = teamForLiveGame(game.homeTeamId, game.homeName, game.homeAbbr);
         if (awayTeam == null || homeTeam == null) {
             Toast.makeText(this, "Could not match game teams to app teams.", Toast.LENGTH_SHORT).show();
             return;
@@ -17512,6 +17662,16 @@ private View liveGameCard(LiveGame game) {
 
     // ─────────────────────────────────────────────────────────────────────────────────────────────
 
+
+    static class ScheduleGameRef {
+        final int gamePk;
+        final String dateKey;
+        ScheduleGameRef(int gamePk, String dateKey) {
+            this.gamePk = gamePk;
+            this.dateKey = dateKey == null ? "" : dateKey;
+        }
+    }
+
     static class LiveGame {
         int gamePk;
         String gameDate = "";
@@ -17794,9 +17954,12 @@ private View liveGameCard(LiveGame game) {
         GameLogEntry(Date date, String label, Stats stats) { this.date = date; this.label = label; this.stats = stats; }
     }
 
+
     static class BullpenReport {
         final String abbr;
         final String name;
+        String qualitySource = "Appearance-based";
+
         double seasonIp = 0.0d;
         double seasonEr = 0.0d;
         double seasonHits = 0.0d;
@@ -17808,18 +17971,35 @@ private View liveGameCard(LiveGame game) {
         int seasonPitches = 0;
         int relieverLines = 0;
 
+        double bulkSeasonIp = 0.0d;
+        int bulkAppearances = 0;
+
+        double recent14Ip = 0.0d, recent14Er = 0.0d, recent14Hits = 0.0d, recent14Walks = 0.0d, recent14K = 0.0d, recent14Bf = 0.0d, recent14Hr = 0.0d;
+        double recent30Ip = 0.0d, recent30Er = 0.0d, recent30Hits = 0.0d, recent30Walks = 0.0d, recent30K = 0.0d, recent30Bf = 0.0d, recent30Hr = 0.0d;
+
         double todayIp = 0.0d;
         int todayPitches = 0;
         int usedToday = 0;
         double yesterdayIp = 0.0d;
         int yesterdayPitches = 0;
         int usedYesterday = 0;
+        double twoDaysAgoIp = 0.0d;
+        int twoDaysAgoPitches = 0;
+        int usedTwoDaysAgo = 0;
         double last2Ip = 0.0d;
         int last2Pitches = 0;
         int usedLast2 = 0;
         double last3Ip = 0.0d;
         int last3Pitches = 0;
         int usedLast3 = 0;
+
+        double yesterdayBulkIp = 0.0d;
+        int yesterdayBulkPitches = 0;
+        double twoDaysAgoBulkIp = 0.0d;
+        int twoDaysAgoBulkPitches = 0;
+        double last2BulkIp = 0.0d;
+        int last2BulkPitches = 0;
+
         int b2bArms = 0;
         int threeInFourArms = 0;
         final Map<Integer, Set<Integer>> pitcherDayOffsets = new HashMap<>();
@@ -17830,6 +18010,17 @@ private View liveGameCard(LiveGame game) {
         }
 
         void addSeason(double ip, double er, double hits, double walks, double k, double bf, double hr, double runs, int pitches) {
+            addQuality(ip, er, hits, walks, k, bf, hr, runs, pitches, 99);
+        }
+
+        void addAppearance(String dateKey, int daysAgo, int pitcherId, double ip, int pitches, double er, double hits, double walks, double k, double bf, double hr, double runs, boolean bulk) {
+            if (bulk) addBulk(ip, pitches, daysAgo);
+            else addQuality(ip, er, hits, walks, k, bf, hr, runs, pitches, daysAgo);
+            addUsage(dateKey, daysAgo, pitcherId, ip, pitches, bulk);
+        }
+
+        private void addQuality(double ip, double er, double hits, double walks, double k, double bf, double hr, double runs, int pitches, int daysAgo) {
+            if (ip <= 0.0d) return;
             seasonIp += ip;
             seasonEr += er;
             seasonHits += hits;
@@ -17840,26 +18031,54 @@ private View liveGameCard(LiveGame game) {
             seasonRuns += runs;
             seasonPitches += Math.max(0, pitches);
             relieverLines++;
+            if (daysAgo >= 0 && daysAgo <= 30) {
+                recent30Ip += ip; recent30Er += er; recent30Hits += hits; recent30Walks += walks; recent30K += k; recent30Bf += bf; recent30Hr += hr;
+            }
+            if (daysAgo >= 0 && daysAgo <= 14) {
+                recent14Ip += ip; recent14Er += er; recent14Hits += hits; recent14Walks += walks; recent14K += k; recent14Bf += bf; recent14Hr += hr;
+            }
+        }
+
+        private void addBulk(double ip, int pitches, int daysAgo) {
+            if (ip <= 0.0d && pitches <= 0) return;
+            bulkSeasonIp += Math.max(0.0d, ip);
+            bulkAppearances++;
+            if (daysAgo == 1) {
+                yesterdayBulkIp += ip;
+                yesterdayBulkPitches += Math.max(0, pitches);
+            }
+            if (daysAgo == 2) {
+                twoDaysAgoBulkIp += ip;
+                twoDaysAgoBulkPitches += Math.max(0, pitches);
+            }
+            if (daysAgo == 1 || daysAgo == 2) {
+                last2BulkIp += ip;
+                last2BulkPitches += Math.max(0, pitches);
+            }
         }
 
         void addUsage(String dateKey, int daysAgo, int pitcherId, double ip, int pitches) {
-            if (daysAgo < 0 || daysAgo > 3) return;
-            if (daysAgo == 0) {
-                todayIp += ip;
-                todayPitches += Math.max(0, pitches);
-                usedToday++;
-            }
+            addUsage(dateKey, daysAgo, pitcherId, ip, pitches, false);
+        }
+
+        void addUsage(String dateKey, int daysAgo, int pitcherId, double ip, int pitches, boolean bulk) {
+            if (daysAgo < 1 || daysAgo > 3 || bulk) return;
             if (daysAgo == 1) {
                 yesterdayIp += ip;
                 yesterdayPitches += Math.max(0, pitches);
                 usedYesterday++;
             }
-            if (daysAgo <= 1) {
+            if (daysAgo == 2) {
+                twoDaysAgoIp += ip;
+                twoDaysAgoPitches += Math.max(0, pitches);
+                usedTwoDaysAgo++;
+            }
+            if (daysAgo == 1 || daysAgo == 2) {
                 last2Ip += ip;
                 last2Pitches += Math.max(0, pitches);
                 usedLast2++;
             }
-            if (daysAgo <= 2) {
+            if (daysAgo <= 3) {
                 last3Ip += ip;
                 last3Pitches += Math.max(0, pitches);
                 usedLast3++;
@@ -17879,7 +18098,7 @@ private View liveGameCard(LiveGame game) {
             int three = 0;
             for (Set<Integer> days : pitcherDayOffsets.values()) {
                 if (days == null || days.isEmpty()) continue;
-                if ((days.contains(0) && days.contains(1)) || (days.contains(1) && days.contains(2)) || (days.contains(2) && days.contains(3))) b2b++;
+                if (days.contains(1) && days.contains(2)) b2b++;
                 if (days.size() >= 3) three++;
             }
             b2bArms = b2b;
@@ -17899,15 +18118,22 @@ private View liveGameCard(LiveGame game) {
         double hr9() { return seasonIp > 0.0d ? seasonHr * 9.0d / seasonIp : Double.NaN; }
         double ra9() { return seasonIp > 0.0d ? seasonRuns * 9.0d / seasonIp : Double.NaN; }
 
+        double recent30Era() { return recent30Ip > 0.0d ? recent30Er * 9.0d / recent30Ip : Double.NaN; }
+        double recent14KMinusBbPct() {
+            if (recent14Bf <= 0.0d) return Double.NaN;
+            return (recent14K - recent14Walks) * 100.0d / recent14Bf;
+        }
+
         double fatiguePenalty() {
-            return (todayIp * 1.15d) + (yesterdayIp * 0.85d) + (last2Ip * 0.42d) + (b2bArms * 1.65d)
-                    + (threeInFourArms * 1.85d) + (usedToday * 0.45d) + (usedYesterday * 0.35d) + (last2Pitches / 70.0d);
+            return (yesterdayIp * 0.95d) + (twoDaysAgoIp * 0.62d) + (last2Ip * 0.45d)
+                    + (last2BulkIp * 0.25d) + (b2bArms * 1.85d) + (threeInFourArms * 1.85d)
+                    + (usedYesterday * 0.42d) + (usedTwoDaysAgo * 0.28d) + (last2Pitches / 70.0d) + (last2BulkPitches / 125.0d);
         }
 
         String fatigueLabel() {
             double p = fatiguePenalty();
             if (p >= 12.0d || b2bArms >= 4 || last2Ip >= 9.0d || last2Pitches >= 150) return "Heavy";
-            if (p >= 6.5d || b2bArms >= 2 || last2Ip >= 5.0d || usedYesterday >= 4) return "Moderate";
+            if (p >= 6.5d || b2bArms >= 2 || last2Ip >= 5.0d || usedYesterday >= 4 || usedTwoDaysAgo >= 4 || last2BulkIp >= 4.0d) return "Moderate";
             return "Rested";
         }
 
@@ -17915,9 +18141,11 @@ private View liveGameCard(LiveGame game) {
             String fatigue = fatigueLabel();
             if ("Rested".equals(fatigue) && qualityAvailable()) return "quality + rested";
             if ("Heavy".equals(fatigue)) return "quality despite usage";
+            if (bulkAppearances > 0) return "quality + bulk split";
             return qualityAvailable() ? "quality edge" : "usage edge";
         }
     }
+
 
     static class WeightedStatsBuilder {
         final Metric[] metrics; final boolean sumCounts; int pa = 0; int bbe = 0; double ip = 0; final Map<String, Double> sums = new HashMap<>(); final Map<String, Double> weights = new HashMap<>();
