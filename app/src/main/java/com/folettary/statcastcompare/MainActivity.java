@@ -465,7 +465,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        // v196: bullpen usage matrix + scouting structure; phone-first portrait app. Prevent rotation recreation from dumping the user
+        // v197: bullpen usage matrix + scouting structure; phone-first portrait app. Prevent rotation recreation from dumping the user
         // back to Home while browsing a profile or matchup.
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
         getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
@@ -660,7 +660,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v196", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v197", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -7995,7 +7995,9 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         @Override protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
             int w = MeasureSpec.getSize(widthMeasureSpec);
             if (w <= 0) w = dp(360);
-            int hPx = Math.max(dp(720), Math.round(w * 1.94f));
+            int hPx = isBullpenHeroComparison(h)
+                    ? Math.max(dp(790), Math.round(w * 2.14f))
+                    : Math.max(dp(720), Math.round(w * 1.94f));
             setMeasuredDimension(w, hPx);
         }
 
@@ -9018,14 +9020,14 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             canvas.drawRoundRect(panel, dp(16), dp(16), strokePaint);
 
             float totalUnits = 0f;
-            for (Metric m : shareMetrics) totalUnits += isBullpenSectionMetric(m) ? 0.48f : 1.0f;
+            for (Metric m : shareMetrics) totalUnits += isBullpenSectionMetric(m) ? 0.62f : 1.0f;
             if (totalUnits <= 0f) totalUnits = 1f;
             float unitH = panel.height() / totalUnits;
             float cursor = panel.top;
             for (int i = 0; i < shareMetrics.size(); i++) {
                 Metric m = shareMetrics.get(i);
                 boolean section = isBullpenSectionMetric(m);
-                float rowH = unitH * (section ? 0.48f : 1.0f);
+                float rowH = unitH * (section ? 0.62f : 1.0f);
                 float top = cursor;
                 float bottom = top + rowH;
                 if (i > 0 && !section) {
@@ -9934,7 +9936,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         double bScore = qb * 0.70d + fb * 0.30d;
         double gap = aScore - bScore;
 
-        // v196: bullpen edge share is a softened weighted-gap read, not winner-take-all.
+        // v197: bullpen edge share is a softened weighted-gap read, not winner-take-all.
         // A 15 point category-score gap should feel like a clear edge, not 100-0 domination.
         double pctA = 50.0d + clampDouble(gap * 0.92d, -38.0d, 38.0d);
         if (Math.abs(gap) < 1.5d) {
@@ -10080,6 +10082,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
     private boolean isVolumeSensitiveMetric(Metric m) {
         if (m == null) return false;
+        if (safe(m.key).startsWith("bp")) return false;
         if (m.isCount()) return true;
         return "ip".equals(m.key);
     }
@@ -16985,7 +16988,6 @@ private View liveGameCard(LiveGame game) {
         out.add(new Metric("bpERA", "ERA", "", 2, false, "rate", "Bullpen", "pitch"));
         out.add(new Metric("bpWHIP", "WHIP", "", 2, false, "rate", "Bullpen", "pitch"));
         out.add(new Metric("bpKMinusBB", "K-BB %", "%", 1, true, "rate", "Bullpen", "pitch"));
-        out.add(new Metric("bpHR9", "HR/9", "", 2, false, "rate", "Bullpen", "pitch"));
         out.add(new Metric("bpSectionFreshness", "FRESHNESS · 30% OF EDGE", "", 0, null, "section", "Bullpen", "pitch"));
         out.add(new Metric("bpFreshnessScore", "Freshness Score", "", 0, true, "rate", "Bullpen", "pitch"));
         out.add(new Metric("bpStaffIP", "IP Last 2d", "", 1, false, "rate", "Bullpen", "pitch"));
