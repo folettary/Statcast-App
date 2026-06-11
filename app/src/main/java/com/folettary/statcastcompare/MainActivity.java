@@ -97,6 +97,8 @@ public class MainActivity extends Activity {
     private final Set<String> refreshingUrls = Collections.synchronizedSet(new HashSet<>());
     // v172: per-key locks so concurrent leaderboard requests for the same season download once.
     private final ConcurrentHashMap<String, Object> leaderboardFetchLocks = new ConcurrentHashMap<>();
+    // v175: per-URL locks so concurrent requests for the same URL download once.
+    private final ConcurrentHashMap<String, Object> httpLocks = new ConcurrentHashMap<>();
     // v172: short backoff after an image fails on every URL, so scrolling doesn't re-fire the
     // whole serial URL/timeout chain for the same broken image over and over.
     private final Map<String, Long> imageFailureUntil = Collections.synchronizedMap(new HashMap<>());
@@ -618,7 +620,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v173", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v175", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -5440,21 +5442,48 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 HashMap<String, Integer> ranks = computePlayerRankMap(entries, season, player.id, rankMetrics);
                 HashMap<String, Integer> totals = computePlayerRankTotalMap(entries, season, rankMetrics);
                 HashMap<String, Double> percentiles = percentileMap(ranks, totals);
-                Stats careerStats = careerFuture.get();
-                LinkedHashMap<Integer, Stats> recentSeasons = recentSeasonsFuture.get();
-                Object[] logDerived = logsFuture.get();
-                @SuppressWarnings("unchecked") LinkedHashMap<String, Stats> recentWindows = (LinkedHashMap<String, Stats>) logDerived[0];
-                @SuppressWarnings("unchecked") Map<String, ArrayList<TrendPoint>> seasonTrends = (Map<String, ArrayList<TrendPoint>>) logDerived[1];
-                HashMap<String, Double> careerPercentiles = valuePercentileMapForPlayerEntries(entries, season, careerStats, rankMetrics);
-                Comparison complete = new Comparison(false, player.fullName, player.teamAbbr, player.position, player.id, season, seasonStats, careerStats, leagueStats, new Date(), "Career", player, null, ranks, totals, percentiles, careerPercentiles, recentSeasons, seasonTrends, recentWindows);
+                // v175: progressive render. The core profile (season + MLB avg + ranks) is ready
+                // long before the multi-season branches, but the screen previously sat on the
+                // skeleton until the SLOWEST branch (career = every Statcast-era season) finished.
+                // Render the core immediately; career, recent seasons, windows, and trends fill in
+                // when their futures land.
+                Comparison initial = new Comparison(false, player.fullName, player.teamAbbr, player.position, player.id, season, seasonStats, new Stats(), leagueStats, new Date(), "Career", player, null, ranks, totals, percentiles, new HashMap<>(), new LinkedHashMap<>(), new LinkedHashMap<>(), new LinkedHashMap<>());
                 main.post(() -> {
-                    if (!teamMode && selectedPlayer != null && selectedPlayer.id == player.id && currentSeason() == season) {
-                        lastComparison = complete;
-                        if (expectedMode) renderExpectedComparison(complete); else renderComparison(complete);
+                    if (!teamMode && selectedPlayer != null && selectedPlayer.id == player.id && currentSeason() == season && lastComparison == null) {
+                        lastComparison = initial;
+                        if (expectedMode) renderExpectedComparison(initial); else renderComparison(initial);
                         setBusy(false, null);
-                        statusView.setText(expectedMode ? "Complete · actual vs expected loaded" : "Complete · season, league, and career loaded");
+                        statusView.setText("Season + league loaded · career and trends loading…");
                     }
                 });
+                try {
+                    Stats careerStats = careerFuture.get();
+                    LinkedHashMap<Integer, Stats> recentSeasons = recentSeasonsFuture.get();
+                    Object[] logDerived = logsFuture.get();
+                    @SuppressWarnings("unchecked") LinkedHashMap<String, Stats> recentWindows = (LinkedHashMap<String, Stats>) logDerived[0];
+                    @SuppressWarnings("unchecked") Map<String, ArrayList<TrendPoint>> seasonTrends = (Map<String, ArrayList<TrendPoint>>) logDerived[1];
+                    HashMap<String, Double> careerPercentiles = valuePercentileMapForPlayerEntries(entries, season, careerStats, rankMetrics);
+                    Comparison complete = new Comparison(false, player.fullName, player.teamAbbr, player.position, player.id, season, seasonStats, careerStats, leagueStats, new Date(), "Career", player, null, ranks, totals, percentiles, careerPercentiles, recentSeasons, seasonTrends, recentWindows);
+                    main.post(() -> {
+                        if (!teamMode && selectedPlayer != null && selectedPlayer.id == player.id && currentSeason() == season) {
+                            lastComparison = complete;
+                            // Keep the user's place when the full sections swap in.
+                            int keepScrollY = mainScroll == null ? 0 : mainScroll.getScrollY();
+                            if (expectedMode) renderExpectedComparison(complete); else renderComparison(complete);
+                            if (mainScroll != null && keepScrollY > 0) mainScroll.post(() -> mainScroll.scrollTo(0, keepScrollY));
+                            setBusy(false, null);
+                            statusView.setText(expectedMode ? "Complete · actual vs expected loaded" : "Complete · season, league, and career loaded");
+                        }
+                    });
+                } catch (Exception sectionFailure) {
+                    // v175: the core profile is already on screen; don't replace it with an error
+                    // page just because a history/trend branch failed.
+                    main.post(() -> {
+                        if (!teamMode && selectedPlayer != null && selectedPlayer.id == player.id && currentSeason() == season) {
+                            statusView.setText("Loaded · career and trend sections unavailable right now");
+                        }
+                    });
+                }
             } catch (Exception e) {
                 main.post(() -> {
                     setBusy(false, null);
@@ -5494,19 +5523,41 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 HashMap<String, Integer> ranks = computeTeamRankMap(teamStatsMap, team.key(), rankMetrics);
                 HashMap<String, Integer> totals = computeTeamRankTotalMap(teamStatsMap, rankMetrics);
                 HashMap<String, Double> percentiles = percentileMap(ranks, totals);
-                Stats historyStats = historyFuture.get();
-                LinkedHashMap<Integer, Stats> recentSeasons = recentSeasonsFuture.get();
-                Map<String, ArrayList<TrendPoint>> seasonTrends = trendsFuture.get();
-                HashMap<String, Double> historyPercentiles = valuePercentileMapForTeams(teamStatsMap, historyStats, rankMetrics);
-                Comparison complete = new Comparison(true, team.name, team.abbr, "Team", 0, season, teamStats, historyStats, leagueStats, new Date(), "2015–" + season + " team avg", null, team, ranks, totals, percentiles, historyPercentiles, recentSeasons, seasonTrends, new LinkedHashMap<>());
+                // v175: progressive render, mirroring the player profile. The 2015+ history
+                // branch builds every Statcast-era season and was the wall-time of the whole
+                // screen; the core team profile now renders as soon as the season data is in.
+                Comparison initial = new Comparison(true, team.name, team.abbr, "Team", 0, season, teamStats, new Stats(), leagueStats, new Date(), "2015–" + season + " team avg", null, team, ranks, totals, percentiles, new HashMap<>(), new LinkedHashMap<>(), new LinkedHashMap<>(), new LinkedHashMap<>());
                 main.post(() -> {
-                    if (teamMode && selectedTeam != null && selectedTeam.key().equals(team.key()) && currentSeason() == season) {
-                        lastComparison = complete;
-                        if (expectedMode) renderExpectedComparison(complete); else renderComparison(complete);
+                    if (teamMode && selectedTeam != null && selectedTeam.key().equals(team.key()) && currentSeason() == season && lastComparison == null) {
+                        lastComparison = initial;
+                        if (expectedMode) renderExpectedComparison(initial); else renderComparison(initial);
                         setBusy(false, null);
-                        statusView.setText(expectedMode ? "Complete · actual vs expected loaded" : "Complete · season, league, and team history loaded");
+                        statusView.setText("Season + league loaded · 2015+ history and trends loading…");
                     }
                 });
+                try {
+                    Stats historyStats = historyFuture.get();
+                    LinkedHashMap<Integer, Stats> recentSeasons = recentSeasonsFuture.get();
+                    Map<String, ArrayList<TrendPoint>> seasonTrends = trendsFuture.get();
+                    HashMap<String, Double> historyPercentiles = valuePercentileMapForTeams(teamStatsMap, historyStats, rankMetrics);
+                    Comparison complete = new Comparison(true, team.name, team.abbr, "Team", 0, season, teamStats, historyStats, leagueStats, new Date(), "2015–" + season + " team avg", null, team, ranks, totals, percentiles, historyPercentiles, recentSeasons, seasonTrends, new LinkedHashMap<>());
+                    main.post(() -> {
+                        if (teamMode && selectedTeam != null && selectedTeam.key().equals(team.key()) && currentSeason() == season) {
+                            lastComparison = complete;
+                            int keepScrollY = mainScroll == null ? 0 : mainScroll.getScrollY();
+                            if (expectedMode) renderExpectedComparison(complete); else renderComparison(complete);
+                            if (mainScroll != null && keepScrollY > 0) mainScroll.post(() -> mainScroll.scrollTo(0, keepScrollY));
+                            setBusy(false, null);
+                            statusView.setText(expectedMode ? "Complete · actual vs expected loaded" : "Complete · season, league, and team history loaded");
+                        }
+                    });
+                } catch (Exception sectionFailure) {
+                    main.post(() -> {
+                        if (teamMode && selectedTeam != null && selectedTeam.key().equals(team.key()) && currentSeason() == season) {
+                            statusView.setText("Loaded · history and trend sections unavailable right now");
+                        }
+                    });
+                }
             } catch (Exception e) {
                 main.post(() -> {
                     setBusy(false, null);
@@ -11664,8 +11715,36 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             if (rs != null && !Double.isNaN(rs)) s.put("teamRPG", rs / games);
             if (ra != null && !Double.isNaN(ra)) s.put("teamRAPG", ra / games);
             if (rs != null && ra != null && !Double.isNaN(rs) && !Double.isNaN(ra)) s.put("teamRunDiff", rs - ra);
+        } else {
+            // v174: with no official record, any teamRPG/teamRAPG on this object came from an
+            // untrusted game count. Show nothing rather than a wrong number.
+            s.remove("teamRPG");
+            s.remove("teamRAPG");
         }
+        // v174: v149 fixed the VALUES from standings but left the raw __games/__pgames keys on
+        // the object. Any later WeightedStatsBuilder pass over team stats (the MLB-avg-from-teams
+        // and 2015+ averaging added in v173) re-derived teamRPG/teamRAPG from those raws and the
+        // builder's raw-precedence kept the bad result, which is why those two stats survived the
+        // v173 fix. Stripping the raws here means downstream builders fall through to averaging
+        // the official per-team/per-year values instead.
+        stripUntrustedTeamGameCounts(s, false);
         sanitizeTeamStats(s);
+    }
+
+    // v174: enforce the v149 invariant ("never use summed player split game counts as team
+    // games") at the data level. Team-season Stats can be assembled from player splits, so their
+    // __games/__pgames raws are untrustworthy; remove them so no WeightedStatsBuilder downstream
+    // can re-derive per-game rates from them. When dropDerivedRates is true (sources that are
+    // KNOWN to be player-split rollups), the builder-derived teamRPG/teamRAPG values are dropped
+    // too — the official standings repair is the only legitimate source for those.
+    private void stripUntrustedTeamGameCounts(Stats s, boolean dropDerivedRates) {
+        if (s == null) return;
+        s.remove("__games");
+        s.remove("__pgames");
+        if (dropDerivedRates) {
+            s.remove("teamRPG");
+            s.remove("teamRAPG");
+        }
     }
 
     private Double officialTeamWinPct(Team team, int season) {
@@ -11851,6 +11930,11 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         }
         if (teamBuilder != null) {
             Stats built = teamBuilder.build();
+            // v174: the playerPool route returns the team as a rollup of PLAYER splits, so the
+            // summed __games/__pgames are appearances, not team games (the exact case the v149
+            // comment warns about). Strip them and the derived per-game rates; the official
+            // standings repair in applyOfficialTeamRecordStats is the only trusted source.
+            stripUntrustedTeamGameCounts(built, true);
             return built.anyValue() ? built : null;
         }
         return null;
@@ -12404,10 +12488,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         LinkedHashMap<Integer, Future<Stats>> futures = new LinkedHashMap<>();
         for (int y = throughSeason; y >= first; y--) {
             final int year = y;
-            futures.put(year, fanout.submit(() -> {
-                LeaderboardEntry e = findPlayerEntry(fetchLeaderboardForPlayer(player, year), player);
-                return e == null ? null : e.stats;
-            }));
+            futures.put(year, fanout.submit(() -> fetchPlayerSeasonEntryStats(player, year)));
         }
         for (Map.Entry<Integer, Future<Stats>> entry : futures.entrySet()) {
             try {
@@ -12445,12 +12526,9 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         ArrayList<Future<Stats>> futures = new ArrayList<>();
         for (int y = STATCAST_START_YEAR; y <= throughSeason; y++) {
             final int year = y;
-            futures.add(pool.submit(() -> {
-                try {
-                    LeaderboardEntry e = findPlayerEntry(fetchLeaderboardForPlayer(player, year), player);
-                    return e == null ? null : e.stats;
-                } catch (Exception ignored) { return null; }
-            }));
+            // v175: completed-season values come from the tiny computed-stats cache after the
+            // first build, skipping the per-year leaderboard download + parse entirely.
+            futures.add(pool.submit(() -> fetchPlayerSeasonEntryStats(player, year)));
         }
         for (Future<Stats> f : futures) {
             try { b.add(f.get()); } catch (Exception ignored) {}
@@ -12467,12 +12545,23 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     // aggregate, so per-year team counts could be mis-attributed (traded players) and
     // teamRPG/teamRAPG were derived from summed player game appearances.
     private Stats fetchOfficialTeamSeasonStats(Team team, int season) {
+        // v175: completed team-seasons are served from the computed-stats cache; a full team's
+        // 2015+ history then costs ~11 tiny JSON reads instead of ~11 leaderboard CSV builds.
+        // A null result is never cached: unlike a player, a team always has data for a season,
+        // so null can only mean a transient failure.
+        String cacheKey = "team_" + cacheSafe(team.key()) + "_" + season;
+        boolean cacheable = isCompletedSeason(season);
+        if (cacheable) {
+            Stats cached = loadCachedSeasonStats(cacheKey);
+            if (cached != null && cached.anyValue()) return cached;
+        }
         Stats seed = null;
         try { seed = aggregateTeamStats(fetchLeaderboardForScope(season, StatScope.BOTH)).get(team.key()); }
         catch (Exception ignored) {}
         Stats s = fetchTeamStatsForScope(team, season, StatScope.BOTH, seed);
-        if (s != null && s.anyValue()) return s;
-        return seed == null ? null : copyStats(seed);
+        Stats out = (s != null && s.anyValue()) ? s : (seed == null ? null : copyStats(seed));
+        if (cacheable && out != null && out.anyValue()) saveCachedSeasonStats(cacheKey, out);
+        return out;
     }
 
     private Stats fetchTeamHistoryStats(Team team, int throughSeason) {
@@ -12739,7 +12828,14 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             b.add(e.stats);
         }
         LinkedHashMap<String, Stats> out = new LinkedHashMap<>();
-        for (Map.Entry<String, WeightedStatsBuilder> e : builders.entrySet()) out.put(e.getKey(), e.getValue().build());
+        for (Map.Entry<String, WeightedStatsBuilder> e : builders.entrySet()) {
+            Stats built = e.getValue().build();
+            // v174: these are player rows summed into a team, so __games is the count of player
+            // game APPEARANCES (~13x team games) and the builder's derived teamRPG/teamRAPG are
+            // meaningless. Strip both so they can never reach a screen or a downstream average.
+            stripUntrustedTeamGameCounts(built, true);
+            out.put(e.getKey(), built);
+        }
         return out;
     }
 
@@ -13289,11 +13385,14 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                     textCache.put(urlString, diskText);
                     return diskText;
                 }
-            } else if (age < ttl * 4) {
+            } else if (age < ttl * 4 || (ttl >= 6L * 60L * 60L * 1000L && age < ttl + 7L * 24L * 60L * 60L * 1000L)) {
                 // v172: stale-while-revalidate. If the cache is expired but not ancient, serve it
                 // immediately so the screen builds instantly, and refresh disk + memory caches in
                 // the background so the next build of that screen is fresh. Previously an expired
                 // cache meant the user sat on the skeleton waiting for the full network round trip.
+                // v175: the window is extended to expiry+7d for non-live data, so even a user who
+                // opens the app after a week away renders instantly off the last data while it
+                // refreshes. Live (short-TTL) URLs keep the tight 4x window.
                 String staleText = readCacheFile(cacheFile);
                 if (staleText != null && !staleText.isEmpty()) {
                     textCache.put(urlString, staleText);
@@ -13303,10 +13402,18 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             }
         }
 
-        String text = httpFetchNetwork(urlString);
-        textCache.put(urlString, text);
-        writeCacheFile(cacheFile, text);
-        return text;
+        // v175: per-URL in-flight dedup. Parallel comparison branches can request the same URL
+        // (e.g. the recent-seasons branch and the main season branch both needing this season's
+        // team stats); previously both downloaded it because textCache only fills on completion.
+        Object lock = httpLocks.computeIfAbsent(urlString, k -> new Object());
+        synchronized (lock) {
+            String winner = textCache.get(urlString);
+            if (winner != null) return winner;
+            String text = httpFetchNetwork(urlString);
+            textCache.put(urlString, text);
+            writeCacheFile(cacheFile, text);
+            return text;
+        }
     }
 
     private void scheduleHttpRefresh(String urlString, File cacheFile) {
@@ -13366,10 +13473,102 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
     private long cacheTtlMs(String urlString) {
         int currentYear = Calendar.getInstance().get(Calendar.YEAR);
-        String currentYearText = "year=" + currentYear;
+        // v175: the live slate URL is date-keyed but game states change minute to minute; the
+        // old fall-through gave it the long TTL, freezing live status for the rest of the day.
+        if (urlString.contains("/schedule")) return 60L * 1000L;
         if (urlString.contains("/roster/") || urlString.contains("/sports/1/players") || urlString.contains("/teams?")) return 12L * 60L * 60L * 1000L;
-        if (urlString.contains(currentYearText)) return 6L * 60L * 60L * 1000L;
-        return 21L * 24L * 60L * 60L * 1000L;
+        // v175: the current-season check only matched "year=" (Savant's param), but every
+        // statsapi URL uses "season=" — so current-season standard leaderboards, team stats,
+        // standings, and game logs were silently falling through to the long TTL and could be
+        // weeks stale. Match both parameter styles.
+        if (urlString.contains("year=" + currentYear) || urlString.contains("season=" + currentYear)) return 6L * 60L * 60L * 1000L;
+        // v175: everything else is completed-season data, which is immutable; 21 days forced
+        // periodic re-downloads of the heaviest CSVs in the app for no benefit. 90 days still
+        // picks up Savant's occasional metric restatements.
+        return 90L * 24L * 60L * 60L * 1000L;
+    }
+
+    // v175: persistent cache of COMPUTED per-season stats for completed seasons. Career and
+    // 2015+ columns previously rebuilt every season from the full multi-MB leaderboard CSVs
+    // (download after TTL expiry, then a full re-parse every session). Completed seasons are
+    // immutable, so the finished per-(player, year) and per-(team, year) Stats are stored as
+    // tiny JSON files and those columns assemble in milliseconds with no network or CSV work.
+    // A confirmed "player has no row this season" is cached as an empty sentinel, but transient
+    // fetch failures are never cached.
+    private boolean isCompletedSeason(int season) {
+        return season < Calendar.getInstance().get(Calendar.YEAR);
+    }
+
+    private String cacheSafe(String key) {
+        return key == null ? "" : key.replaceAll("[^A-Za-z0-9_-]", "_");
+    }
+
+    private File seasonStatsCacheFile(String key) {
+        File dir = new File(getCacheDir(), "season_stats");
+        dir.mkdirs();
+        return new File(dir, key + ".json");
+    }
+
+    private Stats loadCachedSeasonStats(String key) {
+        try {
+            File f = seasonStatsCacheFile(key);
+            if (!f.exists()) return null;
+            String text = readCacheFile(f);
+            if (text == null || text.isEmpty()) return null;
+            JSONObject o = new JSONObject(text);
+            if (o.optBoolean("empty", false)) return new Stats();
+            Stats s = new Stats();
+            s.pa = o.optInt("pa", 0);
+            s.bbe = o.optInt("bbe", 0);
+            s.ip = o.optDouble("ip", 0);
+            JSONObject vals = o.optJSONObject("vals");
+            if (vals != null) {
+                Iterator<String> it = vals.keys();
+                while (it.hasNext()) {
+                    String k = it.next();
+                    double v = vals.optDouble(k, Double.NaN);
+                    if (!Double.isNaN(v)) s.put(k, v);
+                }
+            }
+            return s.anyValue() ? s : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void saveCachedSeasonStats(String key, Stats s) {
+        try {
+            JSONObject o = new JSONObject();
+            if (s == null) {
+                o.put("empty", true);
+            } else {
+                if (!s.anyValue()) return;
+                o.put("pa", s.pa);
+                o.put("bbe", s.bbe);
+                o.put("ip", s.ip);
+                JSONObject vals = new JSONObject();
+                for (Map.Entry<String, Double> e : s.vals.entrySet()) {
+                    Double v = e.getValue();
+                    if (v != null && !Double.isNaN(v) && !Double.isInfinite(v)) vals.put(e.getKey(), v.doubleValue());
+                }
+                o.put("vals", vals);
+            }
+            writeCacheFile(seasonStatsCacheFile(key), o.toString());
+        } catch (Exception ignored) {}
+    }
+
+    private Stats fetchPlayerSeasonEntryStats(Player player, int year) throws Exception {
+        boolean cacheable = isCompletedSeason(year) && player != null && player.id > 0;
+        String cacheKey = player == null ? "" : "player_" + player.id + "_" + year;
+        if (cacheable) {
+            Stats cached = loadCachedSeasonStats(cacheKey);
+            if (cached != null) return cached.anyValue() ? cached : null;
+        }
+        // Throws on fetch failure, so a transient outage never gets cached as absence.
+        LeaderboardEntry e = findPlayerEntry(fetchLeaderboardForPlayer(player, year), player);
+        Stats s = e == null ? null : e.stats;
+        if (cacheable) saveCachedSeasonStats(cacheKey, s);
+        return s;
     }
 
     // CSV/format helpers -----------------------------------------------------------------------
