@@ -600,7 +600,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v169", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v170", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -1174,14 +1174,16 @@ public class MainActivity extends Activity {
         inlineLp.setMargins(0, dp(12), 0, 0);
         hero.addView(homeInlineSelectorCard, inlineLp);
 
-        home.addView(hero, matchWrap());
-
-        // v169: Promote Live Matchups with canonical MLB abbreviations and stronger team-gradient cards.
+        // v170: Live Matchups is the homepage lead-in during the season.
         homeLiveMatchupsBox = buildHomeLiveMatchupsBox();
         LinearLayout.LayoutParams liveHomeLp = matchWrap();
-        liveHomeLp.setMargins(0, dp(10), 0, 0);
+        liveHomeLp.setMargins(0, 0, 0, 0);
         home.addView(homeLiveMatchupsBox, liveHomeLp);
         loadHomeLiveMatchups();
+
+        LinearLayout.LayoutParams heroLp = matchWrap();
+        heroLp.setMargins(0, dp(10), 0, 0);
+        home.addView(hero, heroLp);
 
         LinearLayout grid = new LinearLayout(this);
         grid.setOrientation(LinearLayout.VERTICAL);
@@ -1327,26 +1329,32 @@ public class MainActivity extends Activity {
         featuredLp.setMargins(0, dp(10), 0, 0);
         homeLiveMatchupsBox.addView(homeFeaturedLiveGameCard(featured), featuredLp);
 
-        HorizontalScrollView scroll = new HorizontalScrollView(this);
-        scroll.setHorizontalScrollBarEnabled(false);
-        scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        LinearLayout strip = new LinearLayout(this);
-        strip.setOrientation(LinearLayout.HORIZONTAL);
-        strip.setPadding(0, 0, dp(3), 0);
-        scroll.addView(strip, new HorizontalScrollView.LayoutParams(-2, -2));
-
+        LinearLayout miniGrid = new LinearLayout(this);
+        miniGrid.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout currentRow = null;
         int added = 0;
         for (LiveGame game : games) {
-            if (game == null) continue;
-            LinearLayout.LayoutParams tileLp = new LinearLayout.LayoutParams(dp(126), dp(76));
-            if (added > 0) tileLp.setMargins(dp(7), 0, 0, 0);
-            strip.addView(homeMiniLiveGameTile(game), tileLp);
+            if (game == null || game == featured) continue;
+            if (added % 2 == 0) {
+                currentRow = new LinearLayout(this);
+                currentRow.setOrientation(LinearLayout.HORIZONTAL);
+                LinearLayout.LayoutParams rowLp = matchWrap();
+                rowLp.setMargins(0, added == 0 ? dp(9) : dp(7), 0, 0);
+                miniGrid.addView(currentRow, rowLp);
+            }
+            LinearLayout.LayoutParams tileLp = new LinearLayout.LayoutParams(0, dp(86), 1);
+            if (added % 2 == 1) tileLp.setMargins(dp(7), 0, 0, 0);
+            currentRow.addView(homeMiniLiveGameTile(game), tileLp);
             added++;
-            if (added >= 10) break;
+            if (added >= 4) break;
         }
-        LinearLayout.LayoutParams scrollLp = matchWrap();
-        scrollLp.setMargins(0, dp(9), 0, 0);
-        homeLiveMatchupsBox.addView(scroll, scrollLp);
+        if (added == 1 && currentRow != null) {
+            Space spacer = new Space(this);
+            LinearLayout.LayoutParams spacerLp = new LinearLayout.LayoutParams(0, dp(86), 1);
+            spacerLp.setMargins(dp(7), 0, 0, 0);
+            currentRow.addView(spacer, spacerLp);
+        }
+        if (added > 0) homeLiveMatchupsBox.addView(miniGrid, matchWrap());
     }
 
     private void renderHomeLiveMatchupsError(String message) {
@@ -1384,11 +1392,11 @@ public class MainActivity extends Activity {
         card.setPadding(dp(12), dp(10), dp(12), dp(10));
         card.setClickable(game != null);
         card.setForeground(ripple(true));
-        card.setBackground(roundedGradientStroke(new int[] {
-                mixColor(awayPalette.primary, Color.rgb(5, 9, 17), 0.58f),
-                mixColor(awayPalette.secondary, homePalette.secondary, 0.50f),
-                mixColor(homePalette.primary, Color.rgb(5, 9, 17), 0.58f)
-        }, 22, Color.argb(168, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
+        card.setBackground(roundedGradientStroke(
+                guardedDuelGradient(awayPalette, homePalette, true),
+                22,
+                guardedDuelStroke(awayPalette, homePalette, 132),
+                1));
         if (game != null) card.setOnClickListener(v -> openHomeLiveGame(game));
 
         LinearLayout top = new LinearLayout(this);
@@ -1439,16 +1447,17 @@ public class MainActivity extends Activity {
         LinearLayout tile = new LinearLayout(this);
         tile.setOrientation(LinearLayout.VERTICAL);
         tile.setGravity(Gravity.CENTER_VERTICAL);
-        tile.setPadding(dp(8), dp(7), dp(8), dp(7));
+        tile.setPadding(dp(9), dp(8), dp(9), dp(8));
         tile.setClickable(true);
         tile.setForeground(ripple(true));
-        tile.setBackground(roundedGradientStroke(new int[] {
-                mixColor(awayPalette.primary, Color.rgb(5, 9, 17), 0.62f),
-                mixColor(homePalette.primary, Color.rgb(5, 9, 17), 0.62f)
-        }, 18, Color.argb(154, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
+        tile.setBackground(roundedGradientStroke(
+                guardedDuelGradient(awayPalette, homePalette, false),
+                18,
+                guardedDuelStroke(awayPalette, homePalette, 116),
+                1));
         tile.setOnClickListener(v -> openHomeLiveGame(game));
 
-        TextView matchup = text(displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr) + " @ " + displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr), 15, Color.WHITE, true);
+        TextView matchup = text(displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr) + " @ " + displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr), 14, Color.WHITE, true);
         matchup.setGravity(Gravity.CENTER);
         matchup.setSingleLine(true);
         tile.addView(matchup, matchWrap());
@@ -1456,7 +1465,8 @@ public class MainActivity extends Activity {
         TextView status = text(game.statusLabel() + (safe(game.timeLabel()).isEmpty() ? "" : " · " + game.timeLabel()), 8, statusColor(game), true);
         status.setGravity(Gravity.CENTER);
         status.setSingleLine(true);
-        status.setPadding(0, dp(3), 0, 0);
+        status.setEllipsize(TextUtils.TruncateAt.END);
+        status.setPadding(0, dp(4), 0, 0);
         tile.addView(status, matchWrap());
 
         String sp = (safe(game.awayPitcher).isEmpty() ? "TBD" : lastNameOnly(game.awayPitcher))
@@ -1465,6 +1475,7 @@ public class MainActivity extends Activity {
         pitchers.setGravity(Gravity.CENTER);
         pitchers.setSingleLine(true);
         pitchers.setEllipsize(TextUtils.TruncateAt.END);
+        pitchers.setPadding(0, dp(2), 0, 0);
         tile.addView(pitchers, matchWrap());
         return tile;
     }
@@ -15397,15 +15408,15 @@ public class MainActivity extends Activity {
                 rowLp.setMargins(0, dp(6), 0, 0);
                 panel.addView(row, rowLp);
 
-                LinearLayout.LayoutParams leftLp = new LinearLayout.LayoutParams(0, dp(118), 1);
+                LinearLayout.LayoutParams leftLp = new LinearLayout.LayoutParams(0, dp(122), 1);
                 row.addView(liveGameCard(games.get(i)), leftLp);
                 if (i + 1 < games.size()) {
-                    LinearLayout.LayoutParams rightLp = new LinearLayout.LayoutParams(0, dp(118), 1);
+                    LinearLayout.LayoutParams rightLp = new LinearLayout.LayoutParams(0, dp(122), 1);
                     rightLp.setMargins(dp(7), 0, 0, 0);
                     row.addView(liveGameCard(games.get(i + 1)), rightLp);
                 } else {
                     Space spacer = new Space(this);
-                    LinearLayout.LayoutParams rightLp = new LinearLayout.LayoutParams(0, dp(118), 1);
+                    LinearLayout.LayoutParams rightLp = new LinearLayout.LayoutParams(0, dp(122), 1);
                     rightLp.setMargins(dp(7), 0, 0, 0);
                     row.addView(spacer, rightLp);
                 }
@@ -15441,10 +15452,14 @@ public class MainActivity extends Activity {
 
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(8), dp(8), dp(8), dp(8));
+        card.setPadding(dp(9), dp(8), dp(9), dp(8));
         card.setClickable(true);
         card.setForeground(ripple(true));
-        card.setBackground(roundedGradientStroke(new int[] { mixColor(awayPalette.primary, Color.rgb(5, 9, 17), 0.62f), Color.rgb(6, 11, 20), mixColor(homePalette.primary, Color.rgb(5, 9, 17), 0.62f) }, 17, Color.argb(154, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
+        card.setBackground(roundedGradientStroke(
+                guardedDuelGradient(awayPalette, homePalette, false),
+                17,
+                guardedDuelStroke(awayPalette, homePalette, 112),
+                1));
         card.setOnClickListener(v -> renderLiveGameMenu(game));
         card.setLayoutParams(matchWrap());
 
@@ -15498,6 +15513,29 @@ public class MainActivity extends Activity {
         return col;
     }
 
+    private int[] guardedDuelGradient(TeamPalette awayPalette, TeamPalette homePalette, boolean featured) {
+        int dark = Color.rgb(5, 9, 17);
+        int center = Color.rgb(3, 7, 14);
+        int away = boostNeonColor(awayPalette.primary, featured ? 1.12f : 1.08f, featured ? 1.05f : 1.03f);
+        int home = boostNeonColor(homePalette.primary, featured ? 1.12f : 1.08f, featured ? 1.05f : 1.03f);
+        float sideDark = featured ? 0.34f : 0.42f;
+        float fadeDark = featured ? 0.82f : 0.86f;
+        return new int[] {
+                mixColor(away, dark, sideDark),
+                mixColor(away, dark, fadeDark),
+                center,
+                mixColor(home, dark, fadeDark),
+                mixColor(home, dark, sideDark)
+        };
+    }
+
+    private int guardedDuelStroke(TeamPalette awayPalette, TeamPalette homePalette, int alpha) {
+        int away = ensureReadableColor(awayPalette.primary, 126);
+        int home = ensureReadableColor(homePalette.primary, 126);
+        int accent = mixColor(away, home, 0.50f);
+        return Color.argb(alpha, Color.red(accent), Color.green(accent), Color.blue(accent));
+    }
+
     private int statusColor(LiveGame game) {
         String state = safe(game.abstractState).toLowerCase(Locale.US);
         String detail = safe(game.detailedState).toLowerCase(Locale.US);
@@ -15526,11 +15564,11 @@ public class MainActivity extends Activity {
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(dp(12), dp(12), dp(12), dp(12));
-        panel.setBackground(roundedGradientStroke(new int[] {
-                mixColor(awayPalette.primary, Color.rgb(5, 9, 17), 0.60f),
-                Color.rgb(5, 9, 17),
-                mixColor(homePalette.primary, Color.rgb(5, 9, 17), 0.60f)
-        }, 22, Color.argb(166, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
+        panel.setBackground(roundedGradientStroke(
+                guardedDuelGradient(awayPalette, homePalette, true),
+                22,
+                guardedDuelStroke(awayPalette, homePalette, 128),
+                1));
         LinearLayout.LayoutParams panelLp = matchWrap();
         panelLp.setMargins(0, dp(9), 0, dp(8));
         standingsBox.addView(panel, panelLp);
