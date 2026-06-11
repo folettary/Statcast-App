@@ -465,7 +465,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        // v195: bullpen usage matrix + scouting structure; phone-first portrait app. Prevent rotation recreation from dumping the user
+        // v196: bullpen usage matrix + scouting structure; phone-first portrait app. Prevent rotation recreation from dumping the user
         // back to Home while browsing a profile or matchup.
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
         getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
@@ -660,7 +660,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v195", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v196", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -4433,6 +4433,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         top.setOrientation(LinearLayout.HORIZONTAL);
         top.setGravity(Gravity.CENTER_VERTICAL);
         top.setPadding(dp(12), 0, dp(12), 0);
+        top.setPadding(dp(12), 0, dp(12), 0);
         TextView title = text("Custom Lens", 14, Color.rgb(238, 245, 252), true);
         top.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
         TextView badge = text("Edit", 10, Color.rgb(255, 235, 152), true);
@@ -7940,7 +7941,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             this.paletteA = paletteA;
             this.paletteB = paletteB;
             this.allMetrics = collectHeadToHeadMetrics(h, 999, false);
-            this.shareMetrics = collectHeadToHeadMetrics(h, 8, true);
+            this.shareMetrics = collectHeadToHeadMetrics(h, isBullpenHeroComparison(h) ? 12 : 8, true);
             this.keyScore = summarizeHeadToHeadEdges(h, shareMetrics);
             this.overallScore = summarizeHeadToHeadEdges(h, allMetrics);
             int[] keyWins = scoreSummaryToInts(keyScore);
@@ -9016,24 +9017,69 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             strokePaint.setColor(Color.argb(58, 255, 255, 255));
             canvas.drawRoundRect(panel, dp(16), dp(16), strokePaint);
 
-            int rowCount = Math.max(1, shareMetrics.size());
-            float rowH = panel.height() / rowCount;
+            float totalUnits = 0f;
+            for (Metric m : shareMetrics) totalUnits += isBullpenSectionMetric(m) ? 0.48f : 1.0f;
+            if (totalUnits <= 0f) totalUnits = 1f;
+            float unitH = panel.height() / totalUnits;
+            float cursor = panel.top;
             for (int i = 0; i < shareMetrics.size(); i++) {
                 Metric m = shareMetrics.get(i);
-                float top = panel.top + i * rowH;
+                boolean section = isBullpenSectionMetric(m);
+                float rowH = unitH * (section ? 0.48f : 1.0f);
+                float top = cursor;
                 float bottom = top + rowH;
-                if (i > 0) {
+                if (i > 0 && !section) {
                     strokePaint.setStyle(Paint.Style.STROKE);
                     strokePaint.setStrokeWidth(dp(1));
                     strokePaint.setShader(null);
-                    strokePaint.setColor(Color.argb(34, 255, 255, 255));
+                    strokePaint.setColor(Color.argb(30, 255, 255, 255));
                     canvas.drawLine(panel.left + dp(2), top, panel.right - dp(2), top, strokePaint);
                 }
-                drawShareMetric(canvas, m, panel, top, bottom);
+                if (section) drawBullpenSectionHeader(canvas, m, panel, top, bottom);
+                else drawShareMetric(canvas, m, panel, top, bottom);
+                cursor = bottom;
             }
         }
 
 
+
+
+        private boolean isBullpenSectionMetric(Metric m) {
+            return m != null && safe(m.key).startsWith("bpSection");
+        }
+
+        private void drawBullpenSectionHeader(Canvas canvas, Metric m, RectF panel, float top, float bottom) {
+            int aBase = battleTeamColor(paletteA, paletteB, true);
+            int bBase = battleTeamColor(paletteB, paletteA, false);
+            int accent = "bpSectionQuality".equals(m.key)
+                    ? mixColor(boostNeonColor(aBase, 1.22f, 1.08f), Color.rgb(247, 197, 77), 0.44f)
+                    : mixColor(boostNeonColor(bBase, 1.22f, 1.08f), Color.rgb(126, 235, 226), 0.40f);
+            float cy = (top + bottom) / 2f;
+
+            paint.setStyle(Paint.Style.FILL);
+            paint.setShader(new LinearGradient(panel.left, top, panel.right, bottom,
+                    new int[] {
+                            Color.argb(0, Color.red(accent), Color.green(accent), Color.blue(accent)),
+                            Color.argb(34, Color.red(accent), Color.green(accent), Color.blue(accent)),
+                            Color.argb(0, Color.red(accent), Color.green(accent), Color.blue(accent))
+                    },
+                    new float[] {0f, .50f, 1f}, Shader.TileMode.CLAMP));
+            RectF band = new RectF(panel.left + dp(10), top + dp(4), panel.right - dp(10), bottom - dp(3));
+            canvas.drawRoundRect(band, dp(10), dp(10), paint);
+            paint.setShader(null);
+
+            strokePaint.setStyle(Paint.Style.STROKE);
+            strokePaint.setStrokeCap(Paint.Cap.ROUND);
+            strokePaint.setStrokeWidth(dp(1.2f));
+            strokePaint.setColor(Color.argb(104, Color.red(accent), Color.green(accent), Color.blue(accent)));
+            strokePaint.setShadowLayer(dp(4), 0, 0, Color.argb(76, Color.red(accent), Color.green(accent), Color.blue(accent)));
+            canvas.drawLine(panel.left + dp(18), cy, panel.left + dp(92), cy, strokePaint);
+            canvas.drawLine(panel.right - dp(92), cy, panel.right - dp(18), cy, strokePaint);
+            strokePaint.clearShadowLayer();
+            strokePaint.setStrokeCap(Paint.Cap.BUTT);
+
+            drawText(canvas, m.label, panel.centerX(), centeredTextBaseline(cy, dp(8.0f), true), dp(8.0f), Color.rgb(230, 238, 248), true, Paint.Align.CENTER, 0.12f);
+        }
 
         private void drawTextFit(Canvas canvas, String txt, float x, float y, float maxW, float size,
                                  int color, boolean bold, Paint.Align align, float letterSpacing) {
@@ -9163,10 +9209,6 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         }
 
         private void drawShareMetric(Canvas canvas, Metric m, RectF panel, float top, float bottom) {
-            if (isBullpenHeroComparison(h) && isBullpenCategoryMetric(m)) {
-                drawBullpenGroupedShareMetric(canvas, m, panel, top, bottom);
-                return;
-            }
             Double a = h.statsA.get(m.key), b = h.statsB.get(m.key);
             StatEdgeResult edge = statEdgeForMetric(h, m);
             int winner = edge == null ? 0 : edge.winner;
@@ -9892,7 +9934,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         double bScore = qb * 0.70d + fb * 0.30d;
         double gap = aScore - bScore;
 
-        // v195: bullpen edge share is a softened weighted-gap read, not winner-take-all.
+        // v196: bullpen edge share is a softened weighted-gap read, not winner-take-all.
         // A 15 point category-score gap should feel like a clear edge, not 100-0 domination.
         double pctA = 50.0d + clampDouble(gap * 0.92d, -38.0d, 38.0d);
         if (Math.abs(gap) < 1.5d) {
@@ -16554,7 +16596,7 @@ private View liveGameCard(LiveGame game) {
 
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(12), dp(12), dp(12), dp(12));
+        panel.setPadding(0, dp(12), 0, dp(12));
         panel.setBackground(roundedGradientStroke(
                 guardedDuelGradient(awayPalette, homePalette, true),
                 22,
@@ -16938,8 +16980,17 @@ private View liveGameCard(LiveGame game) {
 
     private ArrayList<Metric> bullpenHeroMetrics() {
         ArrayList<Metric> out = new ArrayList<>();
-        out.add(new Metric("bpQualityScore", "Quality", "", 0, true, "rate", "Bullpen", "pitch"));
-        out.add(new Metric("bpFreshnessScore", "Freshness", "", 0, true, "rate", "Bullpen", "pitch"));
+        out.add(new Metric("bpSectionQuality", "QUALITY · 70% OF EDGE", "", 0, null, "section", "Bullpen", "pitch"));
+        out.add(new Metric("bpQualityScore", "Quality Score", "", 0, true, "rate", "Bullpen", "pitch"));
+        out.add(new Metric("bpERA", "ERA", "", 2, false, "rate", "Bullpen", "pitch"));
+        out.add(new Metric("bpWHIP", "WHIP", "", 2, false, "rate", "Bullpen", "pitch"));
+        out.add(new Metric("bpKMinusBB", "K-BB %", "%", 1, true, "rate", "Bullpen", "pitch"));
+        out.add(new Metric("bpHR9", "HR/9", "", 2, false, "rate", "Bullpen", "pitch"));
+        out.add(new Metric("bpSectionFreshness", "FRESHNESS · 30% OF EDGE", "", 0, null, "section", "Bullpen", "pitch"));
+        out.add(new Metric("bpFreshnessScore", "Freshness Score", "", 0, true, "rate", "Bullpen", "pitch"));
+        out.add(new Metric("bpStaffIP", "IP Last 2d", "", 1, false, "rate", "Bullpen", "pitch"));
+        out.add(new Metric("bpB2B", "B2B Arms", "", 0, false, "count", "Bullpen", "pitch"));
+        out.add(new Metric("bpWatchArms", "Watch Arms", "", 0, false, "count", "Bullpen", "pitch"));
         return out;
     }
 
