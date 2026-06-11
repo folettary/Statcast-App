@@ -161,6 +161,7 @@ public class MainActivity extends Activity {
     private LinearLayout controlsCard;
     private ScrollView mainScroll;
     private LinearLayout homeBox;
+    private LinearLayout homeLiveMatchupsBox;
     private FrameLayout homeMatchupPreview;
     private FrameLayout homeCircleAFrame;
     private FrameLayout homeCircleBFrame;
@@ -599,7 +600,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v167", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v168", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -1175,6 +1176,13 @@ public class MainActivity extends Activity {
 
         home.addView(hero, matchWrap());
 
+        // v168: Promote the new Live Matchups flow on Home with a featured game + quick slate strip.
+        homeLiveMatchupsBox = buildHomeLiveMatchupsBox();
+        LinearLayout.LayoutParams liveHomeLp = matchWrap();
+        liveHomeLp.setMargins(0, dp(10), 0, 0);
+        home.addView(homeLiveMatchupsBox, liveHomeLp);
+        loadHomeLiveMatchups();
+
         LinearLayout grid = new LinearLayout(this);
         grid.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams gridLp = matchWrap();
@@ -1221,6 +1229,266 @@ public class MainActivity extends Activity {
         updateHomeMatchupPreview();
         return home;
     }
+
+    private LinearLayout buildHomeLiveMatchupsBox() {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(12), dp(11), dp(12), dp(12));
+        box.setBackground(roundedGradientStroke(new int[] {
+                Color.rgb(5, 9, 17),
+                Color.rgb(8, 18, 34),
+                Color.rgb(6, 31, 42)
+        }, 26, Color.argb(94, 88, 215, 205), 1));
+        renderHomeLiveLoading(box);
+        return box;
+    }
+
+    private void renderHomeLiveHeader(LinearLayout box, String badgeText) {
+        LinearLayout titleRow = new LinearLayout(this);
+        titleRow.setOrientation(LinearLayout.HORIZONTAL);
+        titleRow.setGravity(Gravity.CENTER_VERTICAL);
+        box.addView(titleRow, matchWrap());
+
+        LinearLayout titleCol = new LinearLayout(this);
+        titleCol.setOrientation(LinearLayout.VERTICAL);
+        titleRow.addView(titleCol, new LinearLayout.LayoutParams(0, -2, 1));
+
+        TextView eyebrow = text("LIVE MATCHUPS", 10, Color.rgb(120, 220, 207), true);
+        eyebrow.setLetterSpacing(0.18f);
+        titleCol.addView(eyebrow, matchWrap());
+
+        TextView title = text("Today’s games, instantly comparable", 17, Color.WHITE, true);
+        title.setPadding(0, dp(3), 0, 0);
+        titleCol.addView(title, matchWrap());
+
+        TextView seeAll = text(badgeText, 10, Color.rgb(8, 13, 22), true);
+        seeAll.setGravity(Gravity.CENTER);
+        seeAll.setSingleLine(true);
+        seeAll.setPadding(dp(10), dp(6), dp(10), dp(6));
+        seeAll.setBackground(roundedGradientStroke(new int[] {
+                Color.rgb(235, 255, 252),
+                Color.rgb(145, 236, 225)
+        }, 16, Color.argb(138, 120, 220, 207), 1));
+        seeAll.setForeground(ripple(false));
+        seeAll.setClickable(true);
+        seeAll.setOnClickListener(v -> openLiveMatchupsPath());
+        titleRow.addView(seeAll, new LinearLayout.LayoutParams(-2, dp(34)));
+    }
+
+    private void renderHomeLiveLoading(LinearLayout box) {
+        if (box == null) return;
+        box.removeAllViews();
+        renderHomeLiveHeader(box, "Loading");
+        TextView loading = text("Loading today’s MLB slate…", 11, Color.rgb(193, 209, 229), true);
+        loading.setGravity(Gravity.CENTER);
+        loading.setPadding(dp(10), dp(13), dp(10), dp(13));
+        loading.setBackground(roundedStroke(Color.argb(54, 255, 255, 255), Color.argb(54, 255, 255, 255), 18, 1));
+        LinearLayout.LayoutParams lp = matchWrap();
+        lp.setMargins(0, dp(10), 0, 0);
+        box.addView(loading, lp);
+    }
+
+    private void loadHomeLiveMatchups() {
+        if (homeLiveMatchupsBox == null) return;
+        renderHomeLiveLoading(homeLiveMatchupsBox);
+        io.execute(() -> {
+            try {
+                ArrayList<LiveGame> games = fetchTodayLiveGames();
+                main.post(() -> renderHomeLiveMatchupsGames(games));
+            } catch (Exception e) {
+                main.post(() -> renderHomeLiveMatchupsError(e.getMessage()));
+            }
+        });
+    }
+
+    private void renderHomeLiveMatchupsGames(ArrayList<LiveGame> games) {
+        if (homeLiveMatchupsBox == null) return;
+        homeLiveMatchupsBox.removeAllViews();
+        int count = games == null ? 0 : games.size();
+        renderHomeLiveHeader(homeLiveMatchupsBox, count <= 0 ? "See all" : count + " games");
+
+        TextView sub = text("Jump straight into team, starter, or key-hitter comparisons.", 11, Color.rgb(174, 190, 211), false);
+        sub.setPadding(0, dp(5), 0, 0);
+        homeLiveMatchupsBox.addView(sub, matchWrap());
+
+        if (games == null || games.isEmpty()) {
+            TextView empty = text("No MLB games found for today. The Matchups tab still lets you build your own.", 11, Color.rgb(210, 222, 238), true);
+            empty.setGravity(Gravity.CENTER);
+            empty.setPadding(dp(10), dp(13), dp(10), dp(13));
+            empty.setBackground(roundedStroke(Color.argb(54, 255, 255, 255), Color.argb(54, 255, 255, 255), 18, 1));
+            LinearLayout.LayoutParams emptyLp = matchWrap();
+            emptyLp.setMargins(0, dp(10), 0, 0);
+            homeLiveMatchupsBox.addView(empty, emptyLp);
+            return;
+        }
+
+        LiveGame featured = pickFeaturedHomeGame(games);
+        LinearLayout.LayoutParams featuredLp = new LinearLayout.LayoutParams(-1, dp(126));
+        featuredLp.setMargins(0, dp(10), 0, 0);
+        homeLiveMatchupsBox.addView(homeFeaturedLiveGameCard(featured), featuredLp);
+
+        HorizontalScrollView scroll = new HorizontalScrollView(this);
+        scroll.setHorizontalScrollBarEnabled(false);
+        scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        LinearLayout strip = new LinearLayout(this);
+        strip.setOrientation(LinearLayout.HORIZONTAL);
+        strip.setPadding(0, 0, dp(3), 0);
+        scroll.addView(strip, new HorizontalScrollView.LayoutParams(-2, -2));
+
+        int added = 0;
+        for (LiveGame game : games) {
+            if (game == null) continue;
+            LinearLayout.LayoutParams tileLp = new LinearLayout.LayoutParams(dp(126), dp(76));
+            if (added > 0) tileLp.setMargins(dp(7), 0, 0, 0);
+            strip.addView(homeMiniLiveGameTile(game), tileLp);
+            added++;
+            if (added >= 10) break;
+        }
+        LinearLayout.LayoutParams scrollLp = matchWrap();
+        scrollLp.setMargins(0, dp(9), 0, 0);
+        homeLiveMatchupsBox.addView(scroll, scrollLp);
+    }
+
+    private void renderHomeLiveMatchupsError(String message) {
+        if (homeLiveMatchupsBox == null) return;
+        homeLiveMatchupsBox.removeAllViews();
+        renderHomeLiveHeader(homeLiveMatchupsBox, "Retry");
+        TextView error = text("Could not load live games. Tap See all from the Matchups tab to try again. " + safe(message), 11, Color.rgb(210, 222, 238), false);
+        error.setPadding(dp(10), dp(12), dp(10), dp(12));
+        error.setBackground(roundedStroke(Color.argb(54, 255, 255, 255), Color.argb(54, 255, 255, 255), 18, 1));
+        LinearLayout.LayoutParams lp = matchWrap();
+        lp.setMargins(0, dp(10), 0, 0);
+        homeLiveMatchupsBox.addView(error, lp);
+    }
+
+    private LiveGame pickFeaturedHomeGame(ArrayList<LiveGame> games) {
+        if (games == null || games.isEmpty()) return null;
+        for (LiveGame game : games) {
+            if (game != null && safe(game.abstractState).toLowerCase(Locale.US).contains("live")) return game;
+        }
+        for (LiveGame game : games) {
+            if (game != null && !safe(game.abstractState).toLowerCase(Locale.US).contains("final")) return game;
+        }
+        return games.get(0);
+    }
+
+    private LinearLayout homeFeaturedLiveGameCard(LiveGame game) {
+        Team away = game == null ? null : findTeamById(game.awayTeamId);
+        Team home = game == null ? null : findTeamById(game.homeTeamId);
+        TeamPalette awayPalette = game == null ? paletteForAbbr("MLB") : (away == null ? paletteForAbbr(game.awayAbbr) : paletteForTeam(away));
+        TeamPalette homePalette = game == null ? paletteForAbbr("MLB") : (home == null ? paletteForAbbr(game.homeAbbr) : paletteForTeam(home));
+        int accent = mixColor(awayPalette.primary, homePalette.primary, 0.50f);
+
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(12), dp(10), dp(12), dp(10));
+        card.setClickable(game != null);
+        card.setForeground(ripple(true));
+        card.setBackground(roundedGradientStroke(new int[] {
+                mixColor(awayPalette.primary, Color.rgb(5, 9, 17), 0.80f),
+                Color.rgb(5, 9, 17),
+                mixColor(homePalette.primary, Color.rgb(5, 9, 17), 0.80f)
+        }, 22, Color.argb(118, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
+        if (game != null) card.setOnClickListener(v -> openHomeLiveGame(game));
+
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        TextView label = text("FEATURED GAME", 9, Color.rgb(225, 236, 250), true);
+        label.setLetterSpacing(0.11f);
+        top.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
+        String statusText = game == null ? "MLB" : game.statusLabel() + (safe(game.timeLabel()).isEmpty() ? "" : " · " + game.timeLabel());
+        TextView status = text(statusText, 9, game == null ? Color.rgb(120, 220, 207) : statusColor(game), true);
+        status.setGravity(Gravity.CENTER);
+        status.setPadding(dp(8), dp(4), dp(8), dp(4));
+        int sc = game == null ? Color.rgb(120, 220, 207) : statusColor(game);
+        status.setBackground(roundedStroke(Color.argb(82, 8, 13, 22), Color.argb(116, Color.red(sc), Color.green(sc), Color.blue(sc)), 13, 1));
+        top.addView(status);
+        card.addView(top, matchWrap());
+
+        String title = game == null ? "Live Matchups" : game.awayAbbr + " @ " + game.homeAbbr;
+        TextView gameTitle = text(title, 26, Color.WHITE, true);
+        gameTitle.setGravity(Gravity.CENTER);
+        gameTitle.setLetterSpacing(0.02f);
+        gameTitle.setPadding(0, dp(9), 0, 0);
+        card.addView(gameTitle, matchWrap());
+
+        String pitchers = game == null ? "Open today’s slate" : ((safe(game.awayPitcher).isEmpty() ? "Away SP TBD" : lastNameOnly(game.awayPitcher))
+                + " vs " + (safe(game.homePitcher).isEmpty() ? "Home SP TBD" : lastNameOnly(game.homePitcher)));
+        TextView sub = text(pitchers, 11, Color.rgb(197, 212, 233), true);
+        sub.setGravity(Gravity.CENTER);
+        sub.setSingleLine(true);
+        sub.setEllipsize(TextUtils.TruncateAt.END);
+        sub.setPadding(0, dp(4), 0, 0);
+        card.addView(sub, matchWrap());
+
+        TextView cta = text("Open recommended matchups  ❯", 10, Color.rgb(235, 244, 252), true);
+        cta.setGravity(Gravity.CENTER);
+        cta.setPadding(0, dp(8), 0, 0);
+        card.addView(cta, matchWrap());
+        return card;
+    }
+
+    private LinearLayout homeMiniLiveGameTile(LiveGame game) {
+        Team away = findTeamById(game.awayTeamId);
+        Team home = findTeamById(game.homeTeamId);
+        TeamPalette awayPalette = away == null ? paletteForAbbr(game.awayAbbr) : paletteForTeam(away);
+        TeamPalette homePalette = home == null ? paletteForAbbr(game.homeAbbr) : paletteForTeam(home);
+        int accent = mixColor(awayPalette.primary, homePalette.primary, 0.50f);
+
+        LinearLayout tile = new LinearLayout(this);
+        tile.setOrientation(LinearLayout.VERTICAL);
+        tile.setGravity(Gravity.CENTER_VERTICAL);
+        tile.setPadding(dp(8), dp(7), dp(8), dp(7));
+        tile.setClickable(true);
+        tile.setForeground(ripple(true));
+        tile.setBackground(roundedGradientStroke(new int[] {
+                mixColor(awayPalette.primary, Color.rgb(5, 9, 17), 0.86f),
+                mixColor(homePalette.primary, Color.rgb(5, 9, 17), 0.86f)
+        }, 18, Color.argb(96, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
+        tile.setOnClickListener(v -> openHomeLiveGame(game));
+
+        TextView matchup = text(game.awayAbbr + " @ " + game.homeAbbr, 15, Color.WHITE, true);
+        matchup.setGravity(Gravity.CENTER);
+        matchup.setSingleLine(true);
+        tile.addView(matchup, matchWrap());
+
+        TextView status = text(game.statusLabel() + (safe(game.timeLabel()).isEmpty() ? "" : " · " + game.timeLabel()), 8, statusColor(game), true);
+        status.setGravity(Gravity.CENTER);
+        status.setSingleLine(true);
+        status.setPadding(0, dp(3), 0, 0);
+        tile.addView(status, matchWrap());
+
+        String sp = (safe(game.awayPitcher).isEmpty() ? "TBD" : lastNameOnly(game.awayPitcher))
+                + " / " + (safe(game.homePitcher).isEmpty() ? "TBD" : lastNameOnly(game.homePitcher));
+        TextView pitchers = text(sp, 8, Color.rgb(164, 181, 204), false);
+        pitchers.setGravity(Gravity.CENTER);
+        pitchers.setSingleLine(true);
+        pitchers.setEllipsize(TextUtils.TruncateAt.END);
+        tile.addView(pitchers, matchWrap());
+        return tile;
+    }
+
+    private void openHomeLiveGame(LiveGame game) {
+        if (game == null) return;
+        activePrimaryTab = TAB_MATCHUP;
+        matchupPathMode = MATCHUP_PATH_LIVE;
+        matchupResultMode = false;
+        headToHeadMode = true;
+        rankingsModeActive = false;
+        expectedMode = false;
+        hideKeyboard();
+        if (homeBox != null) homeBox.setVisibility(View.GONE);
+        if (form != null) form.setVisibility(View.GONE);
+        if (resultsBox != null) resultsBox.setVisibility(View.GONE);
+        if (standingsBox != null) standingsBox.setVisibility(View.VISIBLE);
+        updateBottomNavSelection();
+        updateAnalysisModeButtons();
+        refreshMatchupHub();
+        renderLiveGameMenu(game);
+        if (mainScroll != null) mainScroll.post(() -> mainScroll.smoothScrollTo(0, 0));
+    }
+
 
     private FrameLayout buildHomeMatchupPreview() {
         FrameLayout wrap = new FrameLayout(this);
