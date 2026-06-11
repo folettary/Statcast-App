@@ -465,7 +465,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        // v194: bullpen usage matrix + scouting structure; phone-first portrait app. Prevent rotation recreation from dumping the user
+        // v195: bullpen usage matrix + scouting structure; phone-first portrait app. Prevent rotation recreation from dumping the user
         // back to Home while browsing a profile or matchup.
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
         getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
@@ -660,7 +660,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v194", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v195", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -9034,6 +9034,14 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         }
 
 
+
+        private void drawTextFit(Canvas canvas, String txt, float x, float y, float maxW, float size,
+                                 int color, boolean bold, Paint.Align align, float letterSpacing) {
+            if (txt == null) txt = "";
+            float fitted = fitTextSize(paint, txt, size, dp(6.2f), maxW, letterSpacing, bold);
+            drawText(canvas, txt, x, y, fitted, color, bold, align, letterSpacing);
+        }
+
         private boolean isBullpenCategoryMetric(Metric m) {
             return m != null && ("bpQualityScore".equals(m.key) || "bpFreshnessScore".equals(m.key));
         }
@@ -9884,7 +9892,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         double bScore = qb * 0.70d + fb * 0.30d;
         double gap = aScore - bScore;
 
-        // v194: bullpen edge share is a softened weighted-gap read, not winner-take-all.
+        // v195: bullpen edge share is a softened weighted-gap read, not winner-take-all.
         // A 15 point category-score gap should feel like a clear edge, not 100-0 domination.
         double pctA = 50.0d + clampDouble(gap * 0.92d, -38.0d, 38.0d);
         if (Math.abs(gap) < 1.5d) {
