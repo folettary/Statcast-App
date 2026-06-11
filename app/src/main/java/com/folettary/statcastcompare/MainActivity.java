@@ -465,7 +465,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        // v181: bullpen role split fix; phone-first portrait app. Prevent rotation recreation from dumping the user
+        // v182: bullpen usage matrix + scouting structure; phone-first portrait app. Prevent rotation recreation from dumping the user
         // back to Home while browsing a profile or matchup.
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
         getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
@@ -660,7 +660,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v181", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v182", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -16395,7 +16395,7 @@ private View liveGameCard(LiveGame game) {
 
         LinearLayout panel = bullpenPanelShell(game);
 
-        TextView eyebrow = text("BULLPEN INTELLIGENCE", 10, Color.rgb(126, 235, 226), true);
+        TextView eyebrow = text("BULLPEN MATCHUP", 10, Color.rgb(126, 235, 226), true);
         eyebrow.setLetterSpacing(0.12f);
         eyebrow.setGravity(Gravity.CENTER);
         eyebrow.setPadding(0, dp(8), 0, 0);
@@ -16414,10 +16414,30 @@ private View liveGameCard(LiveGame game) {
         LinearLayout.LayoutParams edgeLp = new LinearLayout.LayoutParams(-1, -2);
         edgeLp.setMargins(0, dp(10), 0, dp(8));
         panel.addView(edgePill, edgeLp);
+        panel.addView(bullpenEdgeChipRow(away, home, awayColor, homeColor), matchWrap());
 
+        bullpenSectionTitle(panel, "TONIGHT AVAILABILITY", "Fresh/watch/down count from actual recent pitcher usage");
         panel.addView(bullpenTeamSummaryRow(away, home, awayColor, homeColor), matchWrap());
 
-        bullpenSectionTitle(panel, "SEASON QUALITY", "Appearance-based relief only; starter/openers excluded and bulk split out");
+        bullpenSectionTitle(panel, "RELIEVER USAGE · LAST 5 DAYS", "Pitch counts by arm; role/fatigue status at right");
+        panel.addView(bullpenUsageMatrixCard(away, awayColor), matchWrap());
+        LinearLayout.LayoutParams homeMatrixLp = matchWrap();
+        homeMatrixLp.setMargins(0, dp(8), 0, 0);
+        panel.addView(bullpenUsageMatrixCard(home, homeColor), homeMatrixLp);
+
+        bullpenSectionTitle(panel, "RECENT USAGE TOTALS", "True bullpen, bulk/follower, long relief, and total non-starter workload");
+        bullpenCompareRow(panel, "Yest true BP", bullpenIpPitches(away.yesterdayIp, away.yesterdayPitches), bullpenIpPitches(home.yesterdayIp, home.yesterdayPitches), compareLower(away.yesterdayIp, home.yesterdayIp), awayColor, homeColor);
+        bullpenCompareRow(panel, "Yest bulk/follower", bullpenIpPitches(away.yesterdayBulkIp, away.yesterdayBulkPitches), bullpenIpPitches(home.yesterdayBulkIp, home.yesterdayBulkPitches), compareLower(away.yesterdayBulkIp, home.yesterdayBulkIp), awayColor, homeColor);
+        bullpenCompareRow(panel, "Yest long relief", bullpenIpPitches(away.yesterdayLongIp, away.yesterdayLongPitches), bullpenIpPitches(home.yesterdayLongIp, home.yesterdayLongPitches), compareLower(away.yesterdayLongIp, home.yesterdayLongIp), awayColor, homeColor);
+        bullpenCompareRow(panel, "Yest non-starter", bullpenIpPitches(away.yesterdayNonStarterIp(), away.yesterdayNonStarterPitches()), bullpenIpPitches(home.yesterdayNonStarterIp(), home.yesterdayNonStarterPitches()), compareLower(away.yesterdayNonStarterIp(), home.yesterdayNonStarterIp()), awayColor, homeColor);
+        bullpenCompareRow(panel, "Prior 2d true BP", bullpenIpFmt(away.last2Ip), bullpenIpFmt(home.last2Ip), compareLower(away.last2Ip, home.last2Ip), awayColor, homeColor);
+        bullpenCompareRow(panel, "Prior 2d bulk", bullpenIpFmt(away.last2BulkIp), bullpenIpFmt(home.last2BulkIp), compareLower(away.last2BulkIp, home.last2BulkIp), awayColor, homeColor);
+        bullpenCompareRow(panel, "Prior 2d long", bullpenIpFmt(away.last2LongIp), bullpenIpFmt(home.last2LongIp), compareLower(away.last2LongIp, home.last2LongIp), awayColor, homeColor);
+        bullpenCompareRow(panel, "Prior 2d total", bullpenIpPitches(away.last2NonStarterIp(), away.last2NonStarterPitches()), bullpenIpPitches(home.last2NonStarterIp(), home.last2NonStarterPitches()), compareLower(away.last2NonStarterIp(), home.last2NonStarterIp()), awayColor, homeColor);
+        bullpenCompareRow(panel, "B2B true BP arms", String.valueOf(away.b2bArms), String.valueOf(home.b2bArms), compareLower(away.b2bArms, home.b2bArms), awayColor, homeColor);
+        bullpenCompareRow(panel, "Fatigue read", away.fatigueLabel(), home.fatigueLabel(), compareLower(away.fatiguePenalty(), home.fatiguePenalty()), awayColor, homeColor);
+
+        bullpenSectionTitle(panel, "BULLPEN QUALITY STATS", "Appearance-based true relief; starter/openers, bulk, and long relief separated");
         bullpenCompareRow(panel, "ERA", bullpenFmt(away.era(), 2), bullpenFmt(home.era(), 2), compareLower(away.era(), home.era()), awayColor, homeColor);
         bullpenCompareRow(panel, "WHIP", bullpenFmt(away.whip(), 2), bullpenFmt(home.whip(), 2), compareLower(away.whip(), home.whip()), awayColor, homeColor);
         bullpenCompareRow(panel, "K-BB%", bullpenFmt(away.kMinusBbPct(), 1) + "%", bullpenFmt(home.kMinusBbPct(), 1) + "%", compareHigher(away.kMinusBbPct(), home.kMinusBbPct()), awayColor, homeColor);
@@ -16425,18 +16445,7 @@ private View liveGameCard(LiveGame game) {
         bullpenCompareRow(panel, "Last 30d ERA", bullpenFmt(away.recent30Era(), 2), bullpenFmt(home.recent30Era(), 2), compareLower(away.recent30Era(), home.recent30Era()), awayColor, homeColor);
         bullpenCompareRow(panel, "Last 14d K-BB%", bullpenFmt(away.recent14KMinusBbPct(), 1) + "%", bullpenFmt(home.recent14KMinusBbPct(), 1) + "%", compareHigher(away.recent14KMinusBbPct(), home.recent14KMinusBbPct()), awayColor, homeColor);
 
-        bullpenSectionTitle(panel, "RECENT USAGE / FATIGUE", "Prior two calendar days; opener follower and later long relief split apart");
-        bullpenCompareRow(panel, "Yest BP IP / pitches", bullpenIpPitches(away.yesterdayIp, away.yesterdayPitches), bullpenIpPitches(home.yesterdayIp, home.yesterdayPitches), compareLower(away.yesterdayIp, home.yesterdayIp), awayColor, homeColor);
-        bullpenCompareRow(panel, "Yest bulk/follower", bullpenIpPitches(away.yesterdayBulkIp, away.yesterdayBulkPitches), bullpenIpPitches(home.yesterdayBulkIp, home.yesterdayBulkPitches), compareLower(away.yesterdayBulkIp, home.yesterdayBulkIp), awayColor, homeColor);
-        bullpenCompareRow(panel, "Yest long relief", bullpenIpPitches(away.yesterdayLongIp, away.yesterdayLongPitches), bullpenIpPitches(home.yesterdayLongIp, home.yesterdayLongPitches), compareLower(away.yesterdayLongIp, home.yesterdayLongIp), awayColor, homeColor);
-        bullpenCompareRow(panel, "2d ago BP / pitches", bullpenIpPitches(away.twoDaysAgoIp, away.twoDaysAgoPitches), bullpenIpPitches(home.twoDaysAgoIp, home.twoDaysAgoPitches), compareLower(away.twoDaysAgoIp, home.twoDaysAgoIp), awayColor, homeColor);
-        bullpenCompareRow(panel, "Prior 2d BP IP", bullpenIpFmt(away.last2Ip), bullpenIpFmt(home.last2Ip), compareLower(away.last2Ip, home.last2Ip), awayColor, homeColor);
-        bullpenCompareRow(panel, "Prior 2d bulk IP", bullpenIpFmt(away.last2BulkIp), bullpenIpFmt(home.last2BulkIp), compareLower(away.last2BulkIp, home.last2BulkIp), awayColor, homeColor);
-        bullpenCompareRow(panel, "Prior 2d long IP", bullpenIpFmt(away.last2LongIp), bullpenIpFmt(home.last2LongIp), compareLower(away.last2LongIp, home.last2LongIp), awayColor, homeColor);
-        bullpenCompareRow(panel, "B2B arms", String.valueOf(away.b2bArms), String.valueOf(home.b2bArms), compareLower(away.b2bArms, home.b2bArms), awayColor, homeColor);
-        bullpenCompareRow(panel, "Fatigue read", away.fatigueLabel(), home.fatigueLabel(), compareLower(away.fatiguePenalty(), home.fatiguePenalty()), awayColor, homeColor);
-
-        TextView foot = text("Bulk means the immediate follower after a short opener. Later 3+ inning outings are long relief, not bulk, so opener games do not overstate bullpen usage.", 10, Color.rgb(168, 185, 207), false);
+        TextView foot = text("True BP excludes starters/openers, bulk followers, and later long relief. The usage grid still shows those arms so total workload is transparent.", 10, Color.rgb(168, 185, 207), false);
         foot.setGravity(Gravity.CENTER);
         foot.setPadding(dp(2), dp(10), dp(2), 0);
         panel.addView(foot, matchWrap());
@@ -16444,6 +16453,7 @@ private View liveGameCard(LiveGame game) {
         standingsBox.addView(panel, matchWrap());
         if (mainScroll != null) mainScroll.post(() -> mainScroll.smoothScrollTo(0, 0));
     }
+
 
     private LinearLayout bullpenTeamSummaryRow(BullpenReport away, BullpenReport home, int awayColor, int homeColor) {
         LinearLayout row = new LinearLayout(this);
@@ -16467,17 +16477,211 @@ private View liveGameCard(LiveGame game) {
         TextView name = text(r.abbr, 17, Color.WHITE, true);
         name.setGravity(Gravity.CENTER);
         card.addView(name, matchWrap());
-        TextView era = text("ERA " + bullpenFmt(r.era(), 2) + " · WHIP " + bullpenFmt(r.whip(), 2), 9, Color.rgb(220, 233, 247), true);
-        era.setGravity(Gravity.CENTER);
-        era.setSingleLine(true);
-        card.addView(era, matchWrap());
-        TextView usage = text(r.fatigueLabel() + " · " + bullpenIpFmt(r.last2Ip) + " BP" + (r.last2BulkIp > 0 ? " + " + bullpenIpFmt(r.last2BulkIp) + " bulk" : "") + (r.last2LongIp > 0 ? " + " + bullpenIpFmt(r.last2LongIp) + " long" : ""), 9, Color.rgb(176, 196, 219), false);
+        TextView availability = text(bullpenAvailabilitySummary(r), 9, Color.rgb(220, 233, 247), true);
+        availability.setGravity(Gravity.CENTER);
+        availability.setSingleLine(true);
+        availability.setEllipsize(TextUtils.TruncateAt.END);
+        card.addView(availability, matchWrap());
+        TextView usage = text(r.fatigueLabel() + " · " + bullpenIpFmt(r.last2Ip) + " true BP" + (r.last2NonStarterIp() > r.last2Ip ? " · " + bullpenIpFmt(r.last2NonStarterIp()) + " total" : ""), 9, Color.rgb(176, 196, 219), false);
         usage.setGravity(Gravity.CENTER);
         usage.setSingleLine(true);
         usage.setEllipsize(TextUtils.TruncateAt.END);
         usage.setPadding(0, dp(3), 0, 0);
         card.addView(usage, matchWrap());
         return card;
+    }
+
+
+
+    private LinearLayout bullpenEdgeChipRow(BullpenReport away, BullpenReport home, int awayColor, int homeColor) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER);
+        row.setPadding(0, dp(3), 0, dp(2));
+        row.addView(bullpenSmallChip("Quality: " + bullpenEdgeWinnerLabel(away, home, 0), awayColor, homeColor), new LinearLayout.LayoutParams(0, -2, 1));
+        LinearLayout.LayoutParams lp2 = new LinearLayout.LayoutParams(0, -2, 1);
+        lp2.setMargins(dp(6), 0, dp(6), 0);
+        row.addView(bullpenSmallChip("Recent: " + bullpenEdgeWinnerLabel(away, home, 1), awayColor, homeColor), lp2);
+        row.addView(bullpenSmallChip("Avail: " + bullpenEdgeWinnerLabel(away, home, 2), awayColor, homeColor), new LinearLayout.LayoutParams(0, -2, 1));
+        return row;
+    }
+
+    private TextView bullpenSmallChip(String label, int awayColor, int homeColor) {
+        TextView chip = text(label, 9, Color.rgb(220, 235, 248), true);
+        chip.setGravity(Gravity.CENTER);
+        chip.setSingleLine(true);
+        chip.setEllipsize(TextUtils.TruncateAt.END);
+        chip.setPadding(dp(5), dp(5), dp(5), dp(5));
+        chip.setBackground(roundedGradientStroke(new int[] {
+                Color.argb(54, Color.red(awayColor), Color.green(awayColor), Color.blue(awayColor)),
+                Color.argb(70, 8, 12, 20),
+                Color.argb(54, Color.red(homeColor), Color.green(homeColor), Color.blue(homeColor))
+        }, 16, Color.argb(54, 255, 255, 255), 1));
+        return chip;
+    }
+
+    private String bullpenEdgeWinnerLabel(BullpenReport away, BullpenReport home, int mode) {
+        double a;
+        double h;
+        if (mode == 0) {
+            a = bullpenQualityOnlyScore(away); h = bullpenQualityOnlyScore(home);
+        } else if (mode == 1) {
+            a = bullpenRecentOnlyScore(away); h = bullpenRecentOnlyScore(home);
+        } else {
+            a = -safeMetric(away == null ? Double.NaN : away.fatiguePenalty(), 99.0d);
+            h = -safeMetric(home == null ? Double.NaN : home.fatiguePenalty(), 99.0d);
+        }
+        if (Double.isNaN(a) || Double.isNaN(h) || Math.abs(a - h) < 1.5d) return "Even";
+        return a > h ? away.abbr : home.abbr;
+    }
+
+    private double bullpenQualityOnlyScore(BullpenReport r) {
+        if (r == null || !r.qualityAvailable()) return Double.NaN;
+        return 100.0d - safeMetric(r.era(), 4.50d) * 5.0d - safeMetric(r.whip(), 1.35d) * 7.0d
+                + safeMetric(r.kMinusBbPct(), 11.0d) * 1.0d - safeMetric(r.hr9(), 1.10d) * 3.5d;
+    }
+
+    private double bullpenRecentOnlyScore(BullpenReport r) {
+        if (r == null || !r.qualityAvailable()) return Double.NaN;
+        return 70.0d - safeMetric(r.recent30Era(), safeMetric(r.era(), 4.50d)) * 5.0d
+                + safeMetric(r.recent14KMinusBbPct(), safeMetric(r.kMinusBbPct(), 11.0d)) * 1.1d;
+    }
+
+    private String bullpenAvailabilitySummary(BullpenReport r) {
+        if (r == null) return "No usage";
+        int fresh = 0, available = 0, watch = 0, down = 0;
+        ArrayList<BullpenArmUsage> arms = bullpenTopArms(r, 14);
+        for (BullpenArmUsage a : arms) {
+            if (a == null || !"BP".equals(a.role)) continue;
+            String status = a.status();
+            if ("Fresh".equals(status)) fresh++;
+            else if ("Available".equals(status)) available++;
+            else if ("Watch".equals(status)) watch++;
+            else down++;
+        }
+        if (fresh + available + watch + down == 0) return "No recent BP";
+        return fresh + " fresh · " + available + " avail · " + watch + " watch · " + down + " down";
+    }
+
+    private LinearLayout bullpenUsageMatrixCard(BullpenReport report, int color) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(8), dp(8), dp(8), dp(8));
+        card.setBackground(roundedGradientStroke(new int[] {
+                Color.argb(88, Color.red(color), Color.green(color), Color.blue(color)),
+                Color.rgb(8, 12, 20)
+        }, 18, Color.argb(100, Color.red(color), Color.green(color), Color.blue(color)), 1));
+
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        TextView name = text(report == null ? "Bullpen" : report.abbr + " Usage", 13, Color.WHITE, true);
+        name.setSingleLine(true);
+        header.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView note = text("last 5d", 9, Color.rgb(178, 196, 220), true);
+        note.setGravity(Gravity.RIGHT);
+        header.addView(note);
+        card.addView(header, matchWrap());
+
+        card.addView(bullpenUsageHeaderRow(), matchWrap());
+        ArrayList<BullpenArmUsage> arms = bullpenTopArms(report, 7);
+        if (arms.isEmpty()) {
+            TextView empty = text("No recent bullpen usage found", 10, Color.rgb(172, 188, 210), false);
+            empty.setGravity(Gravity.CENTER);
+            empty.setPadding(0, dp(8), 0, dp(4));
+            card.addView(empty, matchWrap());
+            return card;
+        }
+        for (BullpenArmUsage arm : arms) card.addView(bullpenUsageArmRow(arm, color), matchWrap());
+        return card;
+    }
+
+    private LinearLayout bullpenUsageHeaderRow() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0, dp(7), 0, dp(2));
+        TextView left = text("Arm", 8, Color.rgb(156, 174, 197), true);
+        left.setSingleLine(true);
+        row.addView(left, new LinearLayout.LayoutParams(dp(82), -2));
+        for (int ago = 5; ago >= 1; ago--) {
+            TextView day = text(bpDateLabel(ago), 8, Color.rgb(156, 174, 197), true);
+            day.setGravity(Gravity.CENTER);
+            row.addView(day, new LinearLayout.LayoutParams(0, -2, 1));
+        }
+        TextView status = text("Status", 8, Color.rgb(156, 174, 197), true);
+        status.setGravity(Gravity.RIGHT);
+        row.addView(status, new LinearLayout.LayoutParams(dp(58), -2));
+        return row;
+    }
+
+    private LinearLayout bullpenUsageArmRow(BullpenArmUsage arm, int color) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0, dp(2), 0, dp(2));
+        TextView name = text(arm == null ? "—" : arm.displayName(), 9, Color.rgb(235, 242, 250), true);
+        name.setSingleLine(true);
+        name.setEllipsize(TextUtils.TruncateAt.END);
+        row.addView(name, new LinearLayout.LayoutParams(dp(82), dp(28)));
+        for (int ago = 5; ago >= 1; ago--) row.addView(bullpenPitchCell(arm == null ? 0 : arm.pitchesByAgo[ago], color), new LinearLayout.LayoutParams(0, dp(28), 1));
+        String statusText = arm == null ? "—" : arm.status();
+        TextView status = text(statusText, 8, bullpenStatusColor(statusText), true);
+        status.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        status.setSingleLine(true);
+        status.setEllipsize(TextUtils.TruncateAt.END);
+        row.addView(status, new LinearLayout.LayoutParams(dp(58), dp(28)));
+        return row;
+    }
+
+    private TextView bullpenPitchCell(int pitches, int teamColor) {
+        TextView cell = text(pitches <= 0 ? "—" : String.valueOf(pitches), 8, Color.rgb(235, 242, 250), true);
+        cell.setGravity(Gravity.CENTER);
+        cell.setSingleLine(true);
+        int bg;
+        int stroke;
+        if (pitches >= 35) {
+            bg = Color.argb(150, 235, 76, 76); stroke = Color.argb(156, 255, 120, 120);
+        } else if (pitches >= 25) {
+            bg = Color.argb(132, 255, 137, 58); stroke = Color.argb(150, 255, 176, 95);
+        } else if (pitches >= 15) {
+            bg = Color.argb(108, 247, 197, 77); stroke = Color.argb(135, 247, 197, 77);
+        } else if (pitches > 0) {
+            bg = Color.argb(80, Color.red(teamColor), Color.green(teamColor), Color.blue(teamColor)); stroke = Color.argb(105, Color.red(teamColor), Color.green(teamColor), Color.blue(teamColor));
+        } else {
+            bg = Color.argb(28, 255, 255, 255); stroke = Color.argb(30, 255, 255, 255);
+        }
+        cell.setBackground(roundedStroke(bg, stroke, 9, 1));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(24), 1);
+        lp.setMargins(dp(2), dp(2), dp(2), dp(2));
+        cell.setLayoutParams(lp);
+        return cell;
+    }
+
+    private int bullpenStatusColor(String status) {
+        if ("Likely down".equals(status)) return Color.rgb(255, 116, 116);
+        if ("Watch".equals(status)) return Color.rgb(247, 197, 77);
+        if ("Fresh".equals(status)) return Color.rgb(126, 235, 226);
+        if ("Bulk".equals(status) || "Long".equals(status)) return Color.rgb(177, 196, 224);
+        return Color.rgb(210, 224, 240);
+    }
+
+    private String bpDateLabel(int daysAgo) {
+        try {
+            Date d = addDays(new Date(), -daysAgo);
+            return new SimpleDateFormat("M/d", Locale.US).format(d);
+        } catch (Exception ignored) {
+            return daysAgo + "d";
+        }
+    }
+
+    private ArrayList<BullpenArmUsage> bullpenTopArms(BullpenReport r, int limit) {
+        ArrayList<BullpenArmUsage> out = new ArrayList<>();
+        if (r == null || r.arms == null) return out;
+        out.addAll(r.arms.values());
+        Collections.sort(out, (a, b) -> Double.compare(b.sortScore(), a.sortScore()));
+        if (out.size() > limit) return new ArrayList<>(out.subList(0, limit));
+        return out;
     }
 
     private void bullpenSectionTitle(LinearLayout panel, String title, String subtitle) {
@@ -16681,6 +16885,7 @@ private View liveGameCard(LiveGame game) {
             for (int i = 0; i < pitchers.length(); i++) {
                 int pid = pitchers.optInt(i, 0);
                 if (pid <= 0 || starterIds.contains(pid)) continue;
+                JSONObject pObj = players.optJSONObject("ID" + pid);
                 JSONObject pitching = pitchingLineForPlayer(players, pid);
                 if (pitching == null) continue;
 
@@ -16698,10 +16903,11 @@ private View liveGameCard(LiveGame game) {
 
                 boolean bulk = isBulkReliefAppearance(openerGame, i, ip, pitches);
                 boolean longRelief = isLongReliefAppearance(bulk, ip, pitches);
-                report.addAppearance(dateKey, daysAgo, pid, ip, pitches, er, hits, bb, k, bf, hr, runs, bulk, longRelief);
+                report.addAppearance(dateKey, daysAgo, pid, pitcherNameFromBoxscore(pObj), ip, pitches, er, hits, bb, k, bf, hr, runs, bulk, longRelief);
             }
         } catch (Exception ignored) {}
     }
+
 
 
     private HashSet<Integer> starterPitcherIdsFromBoxscore(JSONArray pitchers, JSONObject players) {
@@ -16730,6 +16936,15 @@ private View liveGameCard(LiveGame game) {
         if (pObj == null) return null;
         JSONObject stats = pObj.optJSONObject("stats");
         return stats == null ? null : stats.optJSONObject("pitching");
+    }
+
+
+    private String pitcherNameFromBoxscore(JSONObject playerObj) {
+        if (playerObj == null) return "";
+        JSONObject person = playerObj.optJSONObject("person");
+        String full = person == null ? "" : safe(person.optString("fullName", ""));
+        if (!full.isEmpty()) return full;
+        return safe(playerObj.optString("fullName", playerObj.optString("lastName", "")));
     }
 
     private boolean isBulkReliefAppearance(boolean openerGame, int orderIndex, double ip, int pitches) {
@@ -18042,6 +18257,7 @@ private View liveGameCard(LiveGame game) {
         int b2bArms = 0;
         int threeInFourArms = 0;
         final Map<Integer, Set<Integer>> pitcherDayOffsets = new HashMap<>();
+        final Map<Integer, BullpenArmUsage> arms = new LinkedHashMap<>();
 
         BullpenReport(String abbr, String name) {
             this.abbr = (abbr == null || abbr.isEmpty()) ? "—" : abbr;
@@ -18052,11 +18268,12 @@ private View liveGameCard(LiveGame game) {
             addQuality(ip, er, hits, walks, k, bf, hr, runs, pitches, 99);
         }
 
-        void addAppearance(String dateKey, int daysAgo, int pitcherId, double ip, int pitches, double er, double hits, double walks, double k, double bf, double hr, double runs, boolean bulk, boolean longRelief) {
+        void addAppearance(String dateKey, int daysAgo, int pitcherId, String pitcherName, double ip, int pitches, double er, double hits, double walks, double k, double bf, double hr, double runs, boolean bulk, boolean longRelief) {
+            String role = bulk ? "Bulk" : (longRelief ? "Long" : "BP");
             if (bulk) addBulk(ip, pitches, daysAgo);
             else if (longRelief) addLongRelief(ip, pitches, daysAgo);
             else addQuality(ip, er, hits, walks, k, bf, hr, runs, pitches, daysAgo);
-            addUsage(dateKey, daysAgo, pitcherId, ip, pitches, bulk || longRelief);
+            addUsage(dateKey, daysAgo, pitcherId, pitcherName, ip, pitches, role);
         }
 
         private void addQuality(double ip, double er, double hits, double walks, double k, double bf, double hr, double runs, int pitches, int daysAgo) {
@@ -18083,71 +18300,40 @@ private View liveGameCard(LiveGame game) {
             if (ip <= 0.0d && pitches <= 0) return;
             bulkSeasonIp += Math.max(0.0d, ip);
             bulkAppearances++;
-            if (daysAgo == 1) {
-                yesterdayBulkIp += ip;
-                yesterdayBulkPitches += Math.max(0, pitches);
-            }
-            if (daysAgo == 2) {
-                twoDaysAgoBulkIp += ip;
-                twoDaysAgoBulkPitches += Math.max(0, pitches);
-            }
-            if (daysAgo == 1 || daysAgo == 2) {
-                last2BulkIp += ip;
-                last2BulkPitches += Math.max(0, pitches);
-            }
+            if (daysAgo == 1) { yesterdayBulkIp += ip; yesterdayBulkPitches += Math.max(0, pitches); }
+            if (daysAgo == 2) { twoDaysAgoBulkIp += ip; twoDaysAgoBulkPitches += Math.max(0, pitches); }
+            if (daysAgo == 1 || daysAgo == 2) { last2BulkIp += ip; last2BulkPitches += Math.max(0, pitches); }
         }
-
 
         private void addLongRelief(double ip, int pitches, int daysAgo) {
             if (ip <= 0.0d && pitches <= 0) return;
             longSeasonIp += Math.max(0.0d, ip);
             longReliefAppearances++;
-            if (daysAgo == 1) {
-                yesterdayLongIp += ip;
-                yesterdayLongPitches += Math.max(0, pitches);
-            }
-            if (daysAgo == 2) {
-                twoDaysAgoLongIp += ip;
-                twoDaysAgoLongPitches += Math.max(0, pitches);
-            }
-            if (daysAgo == 1 || daysAgo == 2) {
-                last2LongIp += ip;
-                last2LongPitches += Math.max(0, pitches);
-            }
+            if (daysAgo == 1) { yesterdayLongIp += ip; yesterdayLongPitches += Math.max(0, pitches); }
+            if (daysAgo == 2) { twoDaysAgoLongIp += ip; twoDaysAgoLongPitches += Math.max(0, pitches); }
+            if (daysAgo == 1 || daysAgo == 2) { last2LongIp += ip; last2LongPitches += Math.max(0, pitches); }
         }
 
         void addUsage(String dateKey, int daysAgo, int pitcherId, double ip, int pitches) {
-            addUsage(dateKey, daysAgo, pitcherId, ip, pitches, false);
+            addUsage(dateKey, daysAgo, pitcherId, "", ip, pitches, "BP");
         }
 
-        void addUsage(String dateKey, int daysAgo, int pitcherId, double ip, int pitches, boolean bulk) {
-            if (daysAgo < 1 || daysAgo > 3 || bulk) return;
-            if (daysAgo == 1) {
-                yesterdayIp += ip;
-                yesterdayPitches += Math.max(0, pitches);
-                usedYesterday++;
+        void addUsage(String dateKey, int daysAgo, int pitcherId, String pitcherName, double ip, int pitches, String role) {
+            if (daysAgo < 1 || daysAgo > 5) return;
+            int key = pitcherId > 0 ? pitcherId : (pitcherName == null ? 0 : pitcherName.hashCode());
+            if (key != 0) {
+                BullpenArmUsage arm = arms.get(key);
+                if (arm == null) { arm = new BullpenArmUsage(key, pitcherName); arms.put(key, arm); }
+                arm.add(daysAgo, ip, pitches, role);
             }
-            if (daysAgo == 2) {
-                twoDaysAgoIp += ip;
-                twoDaysAgoPitches += Math.max(0, pitches);
-                usedTwoDaysAgo++;
-            }
-            if (daysAgo == 1 || daysAgo == 2) {
-                last2Ip += ip;
-                last2Pitches += Math.max(0, pitches);
-                usedLast2++;
-            }
-            if (daysAgo <= 3) {
-                last3Ip += ip;
-                last3Pitches += Math.max(0, pitches);
-                usedLast3++;
-            }
-            if (pitcherId > 0) {
+            if (!"BP".equals(role)) return;
+            if (daysAgo == 1) { yesterdayIp += ip; yesterdayPitches += Math.max(0, pitches); usedYesterday++; }
+            if (daysAgo == 2) { twoDaysAgoIp += ip; twoDaysAgoPitches += Math.max(0, pitches); usedTwoDaysAgo++; }
+            if (daysAgo == 1 || daysAgo == 2) { last2Ip += ip; last2Pitches += Math.max(0, pitches); usedLast2++; }
+            if (daysAgo <= 3) { last3Ip += ip; last3Pitches += Math.max(0, pitches); usedLast3++; }
+            if (pitcherId > 0 && daysAgo <= 4) {
                 Set<Integer> days = pitcherDayOffsets.get(pitcherId);
-                if (days == null) {
-                    days = new HashSet<>();
-                    pitcherDayOffsets.put(pitcherId, days);
-                }
+                if (days == null) { days = new HashSet<>(); pitcherDayOffsets.put(pitcherId, days); }
                 days.add(daysAgo);
             }
         }
@@ -18157,8 +18343,10 @@ private View liveGameCard(LiveGame game) {
             int three = 0;
             for (Set<Integer> days : pitcherDayOffsets.values()) {
                 if (days == null || days.isEmpty()) continue;
-                if (days.contains(1) && days.contains(2)) b2b++;
-                if (days.size() >= 3) three++;
+                if ((days.contains(1) && days.contains(2)) || (days.contains(2) && days.contains(3)) || (days.contains(3) && days.contains(4))) b2b++;
+                int last4 = 0;
+                for (int d = 1; d <= 4; d++) if (days.contains(d)) last4++;
+                if (last4 >= 3) three++;
             }
             b2bArms = b2b;
             threeInFourArms = three;
@@ -18169,19 +18357,16 @@ private View liveGameCard(LiveGame game) {
         double whip() { return seasonIp > 0.0d ? (seasonHits + seasonWalks) / seasonIp : Double.NaN; }
         double kPct() { return seasonBf > 0.0d ? seasonK * 100.0d / seasonBf : Double.NaN; }
         double bbPct() { return seasonBf > 0.0d ? seasonWalks * 100.0d / seasonBf : Double.NaN; }
-        double kMinusBbPct() {
-            double k = kPct();
-            double bb = bbPct();
-            return Double.isNaN(k) || Double.isNaN(bb) ? Double.NaN : k - bb;
-        }
+        double kMinusBbPct() { double k = kPct(); double bb = bbPct(); return Double.isNaN(k) || Double.isNaN(bb) ? Double.NaN : k - bb; }
         double hr9() { return seasonIp > 0.0d ? seasonHr * 9.0d / seasonIp : Double.NaN; }
         double ra9() { return seasonIp > 0.0d ? seasonRuns * 9.0d / seasonIp : Double.NaN; }
-
         double recent30Era() { return recent30Ip > 0.0d ? recent30Er * 9.0d / recent30Ip : Double.NaN; }
-        double recent14KMinusBbPct() {
-            if (recent14Bf <= 0.0d) return Double.NaN;
-            return (recent14K - recent14Walks) * 100.0d / recent14Bf;
-        }
+        double recent14KMinusBbPct() { return recent14Bf <= 0.0d ? Double.NaN : (recent14K - recent14Walks) * 100.0d / recent14Bf; }
+
+        double yesterdayNonStarterIp() { return yesterdayIp + yesterdayBulkIp + yesterdayLongIp; }
+        int yesterdayNonStarterPitches() { return yesterdayPitches + yesterdayBulkPitches + yesterdayLongPitches; }
+        double last2NonStarterIp() { return last2Ip + last2BulkIp + last2LongIp; }
+        int last2NonStarterPitches() { return last2Pitches + last2BulkPitches + last2LongPitches; }
 
         double fatiguePenalty() {
             return (yesterdayIp * 0.95d) + (twoDaysAgoIp * 0.62d) + (last2Ip * 0.45d)
@@ -18204,6 +18389,49 @@ private View liveGameCard(LiveGame game) {
             return qualityAvailable() ? "quality edge" : "usage edge";
         }
     }
+
+    static class BullpenArmUsage {
+        final int id;
+        String name;
+        String role = "BP";
+        final int[] pitchesByAgo = new int[6];
+        final double[] ipByAgo = new double[6];
+        BullpenArmUsage(int id, String name) { this.id = id; this.name = name == null || name.isEmpty() ? "Pitcher" : name; }
+        void add(int daysAgo, double ip, int pitches, String newRole) {
+            if (daysAgo < 1 || daysAgo > 5) return;
+            pitchesByAgo[daysAgo] += Math.max(0, pitches);
+            ipByAgo[daysAgo] += Math.max(0.0d, ip);
+            if ("Bulk".equals(newRole)) role = "Bulk";
+            else if ("Long".equals(newRole) && !"Bulk".equals(role)) role = "Long";
+        }
+        int totalPitches(int first, int last) { int t = 0; for (int d = first; d <= last && d < pitchesByAgo.length; d++) t += pitchesByAgo[d]; return t; }
+        int usedDays(int first, int last) { int n = 0; for (int d = first; d <= last && d < pitchesByAgo.length; d++) if (pitchesByAgo[d] > 0) n++; return n; }
+        double totalIp(int first, int last) { double t = 0.0d; for (int d = first; d <= last && d < ipByAgo.length; d++) t += ipByAgo[d]; return t; }
+        boolean b2b() { return (pitchesByAgo[1] > 0 && pitchesByAgo[2] > 0) || (pitchesByAgo[2] > 0 && pitchesByAgo[3] > 0) || (pitchesByAgo[3] > 0 && pitchesByAgo[4] > 0); }
+        String status() {
+            if ("Bulk".equals(role)) return "Bulk";
+            if ("Long".equals(role)) return "Long";
+            int y = pitchesByAgo[1];
+            int total2 = totalPitches(1, 2);
+            int days4 = usedDays(1, 4);
+            if (y >= 30 || total2 >= 45 || (b2b() && total2 >= 30) || days4 >= 3) return "Likely down";
+            if (y >= 20 || total2 >= 30 || b2b()) return "Watch";
+            if (total2 > 0) return "Available";
+            return "Fresh";
+        }
+        String displayName() {
+            String n = name == null ? "Pitcher" : name.trim();
+            int space = n.lastIndexOf(' ');
+            if (space >= 0 && space + 1 < n.length()) n = n.substring(space + 1);
+            if (!"BP".equals(role)) n += " · " + role.toLowerCase(Locale.US);
+            return n;
+        }
+        double sortScore() {
+            double roleBoost = "BP".equals(role) ? 60.0d : ("Bulk".equals(role) ? 38.0d : 28.0d);
+            return roleBoost + totalPitches(1, 5) + pitchesByAgo[1] * 3.0d + pitchesByAgo[2] * 1.5d + usedDays(1, 5) * 5.0d;
+        }
+    }
+
 
 
     static class WeightedStatsBuilder {
