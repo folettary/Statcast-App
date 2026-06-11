@@ -66,6 +66,7 @@ import java.nio.charset.StandardCharsets;
 import java.text.DecimalFormat;
 import java.text.SimpleDateFormat;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -82,8 +83,23 @@ public class MainActivity extends Activity {
     private Typeface tfRegular, tfMedium, tfBold;
 
     private final ExecutorService io = Executors.newFixedThreadPool(8);
+    // v172: Dedicated image pool. Headshots/logos previously shared the 8-thread io pool with
+    // multi-second leaderboard CSV downloads, so images queued behind data work and popped in
+    // late while scrolling. Images now never wait on stats fetches.
+    private final ExecutorService imgIo = Executors.newFixedThreadPool(6);
+    // v172: Cached pool for fanning out independent data fetches inside one comparison build.
+    // A cached pool grows on demand, so nested blocking fan-outs can't deadlock the way nested
+    // submits into the bounded io pool could.
+    private final ExecutorService fanout = Executors.newCachedThreadPool();
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Map<String, String> textCache = Collections.synchronizedMap(new HashMap<>());
+    // v172: in-flight HTTP cache refreshes (stale-while-revalidate) so each stale URL refreshes once.
+    private final Set<String> refreshingUrls = Collections.synchronizedSet(new HashSet<>());
+    // v172: per-key locks so concurrent leaderboard requests for the same season download once.
+    private final ConcurrentHashMap<String, Object> leaderboardFetchLocks = new ConcurrentHashMap<>();
+    // v172: short backoff after an image fails on every URL, so scrolling doesn't re-fire the
+    // whole serial URL/timeout chain for the same broken image over and over.
+    private final Map<String, Long> imageFailureUntil = Collections.synchronizedMap(new HashMap<>());
     private LruCache<String, Bitmap> imageCache;
     private final Map<String, ArrayList<BitmapCallback>> imageWaiters = Collections.synchronizedMap(new HashMap<>());
     // v137: Cache prepared/tinted team logos separately. Padres/Dodgers all-stats pages
@@ -461,6 +477,8 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         super.onDestroy();
         io.shutdown();
+        imgIo.shutdown();
+        fanout.shutdown();
     }
 
     @Override
@@ -600,7 +618,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v171", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v172", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -5234,6 +5252,15 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         io.execute(() -> {
             try {
                 LoadedData loaded = fetchTeamsAndActivePlayers();
+                // v172: warm the current-season hitting + pitching leaderboards in the background
+                // as soon as rosters are in. These power rankings, profiles, and matchup cards, so
+                // the first screen of the session opens against a hot cache instead of waiting on
+                // the big Savant CSV downloads. Failures are silent; the screens fetch on demand
+                // as before.
+                fanout.execute(() -> {
+                    try { fetchCombinedPlayerLeaderboard(Calendar.getInstance().get(Calendar.YEAR)); }
+                    catch (Exception ignored) {}
+                });
                 main.post(() -> {
                     allTeams.clear(); allTeams.addAll(loaded.teams);
                     allPlayers.clear(); allPlayers.addAll(loaded.players);
@@ -5391,6 +5418,18 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         setBusy(true, "Loading selected season…");
         io.execute(() -> {
             try {
+                // v172: this pipeline was fully serial (leaderboard → career → recent seasons →
+                // recent windows → trends), so the profile waited on the sum of every fetch.
+                // Career stats, recent seasons, and game-log-derived sections don't depend on the
+                // current-season entries, so they now run concurrently; the per-season leaderboard
+                // locks guarantee shared seasons still download only once. Recent windows and
+                // trends share one game-log fetch inside a single task.
+                Future<Stats> careerFuture = fanout.submit(() -> fetchPlayerCareerStats(player, season));
+                Future<LinkedHashMap<Integer, Stats>> recentSeasonsFuture = fanout.submit(() -> fetchPlayerRecentSeasonStats(player, season));
+                Future<Object[]> logsFuture = fanout.submit(() -> new Object[] {
+                        fetchPlayerRecentWindows(player, season),
+                        fetchPlayerSeasonTrendMap(player, season)
+                });
                 ArrayList<LeaderboardEntry> entries = fetchLeaderboardForScope(season, scope);
                 LeaderboardEntry seasonEntry = findPlayerEntry(entries, player);
                 Stats seasonStats = seasonEntry == null ? new Stats() : copyStats(seasonEntry.stats);
@@ -5401,10 +5440,11 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 HashMap<String, Integer> ranks = computePlayerRankMap(entries, season, player.id, rankMetrics);
                 HashMap<String, Integer> totals = computePlayerRankTotalMap(entries, season, rankMetrics);
                 HashMap<String, Double> percentiles = percentileMap(ranks, totals);
-                Stats careerStats = fetchPlayerCareerStats(player, season);
-                LinkedHashMap<Integer, Stats> recentSeasons = fetchPlayerRecentSeasonStats(player, season);
-                LinkedHashMap<String, Stats> recentWindows = fetchPlayerRecentWindows(player, season);
-                Map<String, ArrayList<TrendPoint>> seasonTrends = fetchPlayerSeasonTrendMap(player, season);
+                Stats careerStats = careerFuture.get();
+                LinkedHashMap<Integer, Stats> recentSeasons = recentSeasonsFuture.get();
+                Object[] logDerived = logsFuture.get();
+                @SuppressWarnings("unchecked") LinkedHashMap<String, Stats> recentWindows = (LinkedHashMap<String, Stats>) logDerived[0];
+                @SuppressWarnings("unchecked") Map<String, ArrayList<TrendPoint>> seasonTrends = (Map<String, ArrayList<TrendPoint>>) logDerived[1];
                 HashMap<String, Double> careerPercentiles = valuePercentileMapForPlayerEntries(entries, season, careerStats, rankMetrics);
                 Comparison complete = new Comparison(false, player.fullName, player.teamAbbr, player.position, player.id, season, seasonStats, careerStats, leagueStats, new Date(), "Career", player, null, ranks, totals, percentiles, careerPercentiles, recentSeasons, seasonTrends, recentWindows);
                 main.post(() -> {
@@ -5434,6 +5474,11 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         setBusy(true, "Loading selected season…");
         io.execute(() -> {
             try {
+                // v172: same fan-out treatment as the player profile. Team history, recent
+                // seasons, and game-log trends are independent of the current-season team map.
+                Future<Stats> historyFuture = fanout.submit(() -> fetchTeamHistoryStats(team, season));
+                Future<LinkedHashMap<Integer, Stats>> recentSeasonsFuture = fanout.submit(() -> fetchTeamRecentSeasonStats(team, season));
+                Future<Map<String, ArrayList<TrendPoint>>> trendsFuture = fanout.submit(() -> fetchTeamSeasonTrendMap(team, season));
                 ArrayList<LeaderboardEntry> entries = fetchLeaderboardForScope(season, scope);
                 Map<String, Stats> aggregateSeeds = aggregateTeamStats(entries);
                 Map<String, Stats> teamStatsMap = fetchLeagueTeamStatsForScope(season, scope, aggregateSeeds);
@@ -5449,9 +5494,9 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 HashMap<String, Integer> ranks = computeTeamRankMap(teamStatsMap, team.key(), rankMetrics);
                 HashMap<String, Integer> totals = computeTeamRankTotalMap(teamStatsMap, rankMetrics);
                 HashMap<String, Double> percentiles = percentileMap(ranks, totals);
-                Stats historyStats = fetchTeamHistoryStats(team, season);
-                LinkedHashMap<Integer, Stats> recentSeasons = fetchTeamRecentSeasonStats(team, season);
-                Map<String, ArrayList<TrendPoint>> seasonTrends = fetchTeamSeasonTrendMap(team, season);
+                Stats historyStats = historyFuture.get();
+                LinkedHashMap<Integer, Stats> recentSeasons = recentSeasonsFuture.get();
+                Map<String, ArrayList<TrendPoint>> seasonTrends = trendsFuture.get();
                 HashMap<String, Double> historyPercentiles = valuePercentileMapForTeams(teamStatsMap, historyStats, rankMetrics);
                 Comparison complete = new Comparison(true, team.name, team.abbr, "Team", 0, season, teamStats, historyStats, leagueStats, new Date(), "2015–" + season + " team avg", null, team, ranks, totals, percentiles, historyPercentiles, recentSeasons, seasonTrends, new LinkedHashMap<>());
                 main.post(() -> {
@@ -5486,8 +5531,10 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 LeaderboardEntry entryB = findPlayerEntry(entries, b);
                 Stats statsA = entryA == null ? new Stats() : copyStats(entryA.stats);
                 Stats statsB = entryB == null ? new Stats() : copyStats(entryB.stats);
-                ensureDirectPlayerStatsForScope(a, season, statsA, scope);
+                // v172: each side's direct-stat top-up can hit the network; run A and B in parallel.
+                Future<?> directA = fanout.submit(() -> ensureDirectPlayerStatsForScope(a, season, statsA, scope));
                 ensureDirectPlayerStatsForScope(b, season, statsB, scope);
+                try { directA.get(); } catch (Exception ignored) {}
                 Stats leagueStats = computeLeagueAverage(entries);
                 ArrayList<Metric> displayed = selectedMetricsForScope(scope);
                 ArrayList<Metric> rankMetrics = metricsForRankScope(scope, false);
@@ -11821,8 +11868,10 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     private ArrayList<LeaderboardEntry> fetchCombinedPlayerLeaderboard(int season) throws Exception {
         LinkedHashMap<Integer, LeaderboardEntry> byId = new LinkedHashMap<>();
         ArrayList<LeaderboardEntry> fallback = new ArrayList<>();
+        // v172: hitting and pitching leaderboards are independent; fetch both sides at once.
+        Future<ArrayList<LeaderboardEntry>> pitchingFuture = fanout.submit(() -> fetchPitchingLeaderboard(season));
         addEntriesToCombinedLeaderboard(byId, fallback, fetchLeaderboard(season));
-        addEntriesToCombinedLeaderboard(byId, fallback, fetchPitchingLeaderboard(season));
+        addEntriesToCombinedLeaderboard(byId, fallback, pitchingFuture.get());
         ArrayList<LeaderboardEntry> combined = new ArrayList<>(byId.values());
         combined.addAll(fallback);
         return combined;
@@ -11878,53 +11927,72 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     private ArrayList<LeaderboardEntry> fetchLeaderboard(int season) throws Exception {
         ArrayList<LeaderboardEntry> cached = leaderboardCache.get(season);
         if (cached != null) return cached;
-        String csv;
-        List<Map<String, String>> rows;
-        try {
-            csv = httpGet(customLeaderboardUrl(season, true));
-            rows = parseCsv(csv);
-            if (rows.isEmpty()) throw new Exception("Expanded custom leaderboard returned no rows");
-        } catch (Exception expandedFailed) {
-            csv = httpGet(customLeaderboardUrl(season, false));
-            rows = parseCsv(csv);
-        }
-        if (rows.isEmpty()) throw new Exception("No Baseball Savant leaderboard rows returned for " + season + ".");
-        ArrayList<LeaderboardEntry> entries = new ArrayList<>();
-        for (Map<String, String> row : rows) {
-            int id = intVal(pick(row, "player_id", "playerid", "player id", "batter", "entity_id"));
-            String name = pickString(row, "player_name", "player name", "last_name, first_name", "name", "last_name first_name");
-            if (name.isEmpty()) name = buildNameFromColumns(row);
-            name = normalizePlayerName(name);
-            String teamName = pickString(row, "team_name", "team name", "team", "team_name_alt");
-            String teamAbbr = pickString(row, "team_abbrev", "team abbr", "team_abbreviation", "team_short", "team");
-            if (id > 0) {
-                Player p = playerById(id);
-                if (p != null) {
-                    if (teamName.isEmpty()) teamName = p.teamName;
-                    if (teamAbbr.isEmpty()) teamAbbr = p.teamAbbr;
-                    if (name.isEmpty()) name = p.fullName;
+        // v172: per-season lock so concurrent callers (e.g. career fan-out + the main season
+        // fetch) download each season's CSVs exactly once instead of racing duplicate downloads.
+        Object lock = leaderboardFetchLocks.computeIfAbsent("hit:" + season, k -> new Object());
+        synchronized (lock) {
+            cached = leaderboardCache.get(season);
+            if (cached != null) return cached;
+            // v172: the Savant custom CSV and the MLB standard leaderboard are independent
+            // requests; fetch them in parallel instead of back-to-back.
+            Future<ArrayList<LeaderboardEntry>> standardFuture = fanout.submit(() -> fetchStandardLeaderboard(season, false));
+            String csv;
+            List<Map<String, String>> rows;
+            try {
+                csv = httpGet(customLeaderboardUrl(season, true));
+                rows = parseCsv(csv);
+                if (rows.isEmpty()) throw new Exception("Expanded custom leaderboard returned no rows");
+            } catch (Exception expandedFailed) {
+                csv = httpGet(customLeaderboardUrl(season, false));
+                rows = parseCsv(csv);
+            }
+            if (rows.isEmpty()) throw new Exception("No Baseball Savant leaderboard rows returned for " + season + ".");
+            ArrayList<LeaderboardEntry> entries = new ArrayList<>();
+            for (Map<String, String> row : rows) {
+                int id = intVal(pick(row, "player_id", "playerid", "player id", "batter", "entity_id"));
+                String name = pickString(row, "player_name", "player name", "last_name, first_name", "name", "last_name first_name");
+                if (name.isEmpty()) name = buildNameFromColumns(row);
+                name = normalizePlayerName(name);
+                String teamName = pickString(row, "team_name", "team name", "team", "team_name_alt");
+                String teamAbbr = pickString(row, "team_abbrev", "team abbr", "team_abbreviation", "team_short", "team");
+                if (id > 0) {
+                    Player p = playerById(id);
+                    if (p != null) {
+                        if (teamName.isEmpty()) teamName = p.teamName;
+                        if (teamAbbr.isEmpty()) teamAbbr = p.teamAbbr;
+                        if (name.isEmpty()) name = p.fullName;
+                    }
+                }
+                Stats stats = statsFromLeaderboardRow(row);
+                if ((!name.isEmpty() || id > 0) && (stats.pa > 0 || stats.bbe > 0 || stats.anyValue())) {
+                    entries.add(new LeaderboardEntry(id, name, teamName, teamAbbr, stats));
                 }
             }
-            Stats stats = statsFromLeaderboardRow(row);
-            if ((!name.isEmpty() || id > 0) && (stats.pa > 0 || stats.bbe > 0 || stats.anyValue())) {
-                entries.add(new LeaderboardEntry(id, name, teamName, teamAbbr, stats));
-            }
+            ArrayList<LeaderboardEntry> standard;
+            try { standard = standardFuture.get(); } catch (Exception e) { standard = new ArrayList<>(); }
+            mergeStandardStatsIntoEntries(entries, standard);
+            leaderboardCache.put(season, entries);
+            return entries;
         }
-        mergeStandardStatsIntoEntries(entries, fetchStandardLeaderboard(season, false));
-        leaderboardCache.put(season, entries);
-        return entries;
     }
 
     private ArrayList<LeaderboardEntry> fetchPitchingLeaderboard(int season) throws Exception {
         ArrayList<LeaderboardEntry> cached = pitchingLeaderboardCache.get(season);
         if (cached != null) return cached;
-        ArrayList<LeaderboardEntry> entries = fetchStandardLeaderboard(season, true);
-        try {
-            mergeStandardStatsIntoEntries(entries, fetchPitchingSavantLeaderboard(season));
-        } catch (Exception ignored) {}
-        if (entries.isEmpty()) throw new Exception("No pitching rows returned for " + season + ".");
-        pitchingLeaderboardCache.put(season, entries);
-        return entries;
+        Object lock = leaderboardFetchLocks.computeIfAbsent("pitch:" + season, k -> new Object());
+        synchronized (lock) {
+            cached = pitchingLeaderboardCache.get(season);
+            if (cached != null) return cached;
+            // v172: Savant pitching CSV in parallel with the MLB standard pitching leaderboard.
+            Future<ArrayList<LeaderboardEntry>> savantFuture = fanout.submit(() -> fetchPitchingSavantLeaderboard(season));
+            ArrayList<LeaderboardEntry> entries = fetchStandardLeaderboard(season, true);
+            try {
+                mergeStandardStatsIntoEntries(entries, savantFuture.get());
+            } catch (Exception ignored) {}
+            if (entries.isEmpty()) throw new Exception("No pitching rows returned for " + season + ".");
+            pitchingLeaderboardCache.put(season, entries);
+            return entries;
+        }
     }
 
     private String batterSavantSelections(boolean expanded) {
@@ -12315,10 +12383,20 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     private LinkedHashMap<Integer, Stats> fetchPlayerRecentSeasonStats(Player player, int throughSeason) {
         LinkedHashMap<Integer, Stats> out = new LinkedHashMap<>();
         int first = Math.max(STATCAST_START_YEAR, throughSeason - 3);
+        // v172: the four recent seasons were fetched one after another; now each year fetches in
+        // parallel and results are collected back in display order.
+        LinkedHashMap<Integer, Future<Stats>> futures = new LinkedHashMap<>();
         for (int y = throughSeason; y >= first; y--) {
+            final int year = y;
+            futures.put(year, fanout.submit(() -> {
+                LeaderboardEntry e = findPlayerEntry(fetchLeaderboardForPlayer(player, year), player);
+                return e == null ? null : e.stats;
+            }));
+        }
+        for (Map.Entry<Integer, Future<Stats>> entry : futures.entrySet()) {
             try {
-                LeaderboardEntry e = findPlayerEntry(fetchLeaderboardForPlayer(player, y), player);
-                if (e != null && e.stats != null && e.stats.anyValue()) out.put(y, e.stats);
+                Stats s = entry.getValue().get();
+                if (s != null && s.anyValue()) out.put(entry.getKey(), s);
             } catch (Exception ignored) {}
         }
         return out;
@@ -12327,10 +12405,16 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     private LinkedHashMap<Integer, Stats> fetchTeamRecentSeasonStats(Team team, int throughSeason) {
         LinkedHashMap<Integer, Stats> out = new LinkedHashMap<>();
         int first = Math.max(STATCAST_START_YEAR, throughSeason - 3);
+        // v172: parallel per-year fetches, collected back in display order.
+        LinkedHashMap<Integer, Future<Stats>> futures = new LinkedHashMap<>();
         for (int y = throughSeason; y >= first; y--) {
+            final int year = y;
+            futures.put(year, fanout.submit(() -> aggregateTeamStats(fetchLeaderboardForSelectedMetrics(year)).get(team.key())));
+        }
+        for (Map.Entry<Integer, Future<Stats>> entry : futures.entrySet()) {
             try {
-                Stats s = aggregateTeamStats(fetchLeaderboardForSelectedMetrics(y)).get(team.key());
-                if (s != null && s.anyValue()) out.put(y, s);
+                Stats s = entry.getValue().get();
+                if (s != null && s.anyValue()) out.put(entry.getKey(), s);
             } catch (Exception ignored) {}
         }
         return out;
@@ -12746,16 +12830,39 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             preparedTeamLogoWaiters.put(preparedKey, waiters);
         }
 
-        loadBitmapFromUrls(urls.toArray(new String[0]), rawBitmap -> {
-            // Prepare/tint once off the main thread, then fan out the shared result.
-            io.execute(() -> {
-                Bitmap prepared = prepareTeamLogoBitmap(team, rawBitmap);
-                if (prepared != null) imageCache.put(preparedKey, prepared);
+        // v172: prepared/tinted logos are persisted to disk. The LAD/STL/SD tint is a per-pixel
+        // pass over the full logo bitmap; previously it re-ran every session. Now it runs once
+        // per install and reloads as a cheap downsampled decode.
+        File imgDir = new File(getCacheDir(), "img");
+        imgDir.mkdirs();
+        File preparedFile = new File(imgDir, "img_" + preparedKey + ".webp");
+        imgIo.execute(() -> {
+            Bitmap fromDisk = preparedFile.exists() ? decodeScaledFile(preparedFile) : null;
+            if (fromDisk != null) {
+                imageCache.put(preparedKey, fromDisk);
                 ArrayList<BitmapCallback> callbacks;
                 synchronized (preparedTeamLogoWaiters) { callbacks = preparedTeamLogoWaiters.remove(preparedKey); }
-                if (prepared != null && callbacks != null) {
-                    main.post(() -> { for (BitmapCallback cb : callbacks) cb.onBitmap(prepared); });
+                if (callbacks != null) {
+                    main.post(() -> { for (BitmapCallback cb : callbacks) cb.onBitmap(fromDisk); });
                 }
+                return;
+            }
+            loadBitmapFromUrls(urls.toArray(new String[0]), rawBitmap -> {
+                // Prepare/tint once off the main thread, then fan out the shared result.
+                imgIo.execute(() -> {
+                    Bitmap prepared = prepareTeamLogoBitmap(team, rawBitmap);
+                    if (prepared != null) {
+                        imageCache.put(preparedKey, prepared);
+                        try (FileOutputStream fos = new FileOutputStream(preparedFile)) {
+                            prepared.compress(Bitmap.CompressFormat.WEBP, 90, fos);
+                        } catch (Exception ignored) {}
+                    }
+                    ArrayList<BitmapCallback> callbacks;
+                    synchronized (preparedTeamLogoWaiters) { callbacks = preparedTeamLogoWaiters.remove(preparedKey); }
+                    if (prepared != null && callbacks != null) {
+                        main.post(() -> { for (BitmapCallback cb : callbacks) cb.onBitmap(prepared); });
+                    }
+                });
             });
         });
     }
@@ -12786,6 +12893,13 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         return out;
     }
 
+    // v172: max dimension for decoded headshots/logos. ESPN logos arrive at 500px and some
+    // headshot fallbacks at 720px, but they render in small circles/cards. Downsampling at
+    // decode time makes decodes ~4x cheaper and lets the LruCache hold ~4x more images, which
+    // is what stops pop-in when scrolling back through already-seen rows.
+    private static final int IMAGE_DECODE_TARGET_PX = 360;
+    private static final long IMAGE_FAILURE_BACKOFF_MS = 60_000L;
+
     private void loadBitmapFromUrls(String[] urls, BitmapCallback callback) {
         if (urls == null || urls.length == 0 || callback == null) return;
         for (String url : urls) {
@@ -12793,25 +12907,11 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             if (cached != null) { callback.onBitmap(cached); return; }
         }
         String primary = urls[0];
-        // Check disk cache
-        File imgDir = new File(getCacheDir(), "img");
-        imgDir.mkdirs();
-        String diskKey = "img_" + Integer.toHexString(primary.hashCode()) + ".webp";
-        File diskFile = new File(imgDir, diskKey);
-        if (diskFile.exists()) {
-            io.execute(() -> {
-                BitmapFactory.Options opts = new BitmapFactory.Options();
-                opts.inPreferredConfig = Bitmap.Config.RGB_565;
-                Bitmap b = BitmapFactory.decodeFile(diskFile.getAbsolutePath(), opts);
-                if (b != null) {
-                    for (String url : urls) imageCache.put(url, b);
-                    main.post(() -> callback.onBitmap(b));
-                    return;
-                }
-                fetchAndCacheBitmap(urls, primary, diskFile, callback);
-            });
-            return;
-        }
+        Long failedUntil = imageFailureUntil.get(primary);
+        if (failedUntil != null && System.currentTimeMillis() < failedUntil) return;
+        // v172: every request path (disk decode and network) now registers in imageWaiters.
+        // Previously the disk-hit path skipped dedup, so N concurrent binds of the same image
+        // each ran their own full-size decode.
         synchronized (imageWaiters) {
             ArrayList<BitmapCallback> waiters = imageWaiters.get(primary);
             if (waiters != null) { waiters.add(callback); return; }
@@ -12819,11 +12919,29 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             waiters.add(callback);
             imageWaiters.put(primary, waiters);
         }
-        io.execute(() -> fetchAndCacheBitmap(urls, primary, diskFile, null));
+        File imgDir = new File(getCacheDir(), "img");
+        imgDir.mkdirs();
+        File diskFile = new File(imgDir, "img_" + Integer.toHexString(primary.hashCode()) + ".webp");
+        imgIo.execute(() -> {
+            Bitmap b = null;
+            if (diskFile.exists()) b = decodeScaledFile(diskFile);
+            if (b == null) b = fetchAndCacheBitmap(urls, diskFile);
+            if (b != null) {
+                for (String url : urls) imageCache.put(url, b);
+                imageFailureUntil.remove(primary);
+            } else {
+                imageFailureUntil.put(primary, System.currentTimeMillis() + IMAGE_FAILURE_BACKOFF_MS);
+            }
+            ArrayList<BitmapCallback> callbacks;
+            synchronized (imageWaiters) { callbacks = imageWaiters.remove(primary); }
+            if (b != null && callbacks != null) {
+                Bitmap finalBitmap = b;
+                main.post(() -> { for (BitmapCallback cb : callbacks) cb.onBitmap(finalBitmap); });
+            }
+        });
     }
 
-    private void fetchAndCacheBitmap(String[] urls, String primary, File diskFile, BitmapCallback directCallback) {
-        Bitmap bitmap = null;
+    private Bitmap fetchAndCacheBitmap(String[] urls, File diskFile) {
         for (String url : urls) {
             if (url == null || url.isEmpty()) continue;
             HttpURLConnection conn = null;
@@ -12834,33 +12952,57 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 conn.setUseCaches(true);
                 conn.setInstanceFollowRedirects(true);
                 conn.setRequestProperty("User-Agent", "Mozilla/5.0 Statcast Compare Android");
-                BitmapFactory.Options opts = new BitmapFactory.Options();
-                opts.inPreferredConfig = Bitmap.Config.RGB_565;
-                opts.inDither = true;
-                Bitmap b = BitmapFactory.decodeStream(conn.getInputStream(), null, opts);
+                byte[] data = readAllBytes(conn.getInputStream());
+                Bitmap b = decodeScaledBytes(data);
                 if (b != null) {
-                    bitmap = b;
-                    for (String alt : urls) imageCache.put(alt, b);
                     try (FileOutputStream fos = new FileOutputStream(diskFile)) {
                         b.compress(Bitmap.CompressFormat.WEBP, 82, fos);
                     } catch (Exception ignored) {}
-                    break;
+                    return b;
                 }
             } catch (Exception ignored) {
             } finally {
                 if (conn != null) conn.disconnect();
             }
         }
-        Bitmap finalBitmap = bitmap;
-        if (directCallback != null) {
-            if (finalBitmap != null) main.post(() -> directCallback.onBitmap(finalBitmap));
-            return;
-        }
-        ArrayList<BitmapCallback> callbacks;
-        synchronized (imageWaiters) { callbacks = imageWaiters.remove(primary); }
-        if (finalBitmap != null && callbacks != null) {
-            main.post(() -> { for (BitmapCallback cb : callbacks) cb.onBitmap(finalBitmap); });
-        }
+        return null;
+    }
+
+    private byte[] readAllBytes(InputStream in) throws Exception {
+        java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream(32 * 1024);
+        byte[] chunk = new byte[8 * 1024];
+        int n;
+        while ((n = in.read(chunk)) > 0) buf.write(chunk, 0, n);
+        return buf.toByteArray();
+    }
+
+    private Bitmap decodeScaledBytes(byte[] data) {
+        if (data == null || data.length == 0) return null;
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        BitmapFactory.decodeByteArray(data, 0, data.length, bounds);
+        BitmapFactory.Options opts = scaledDecodeOptions(bounds);
+        return BitmapFactory.decodeByteArray(data, 0, data.length, opts);
+    }
+
+    private Bitmap decodeScaledFile(File f) {
+        if (f == null || !f.exists()) return null;
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        BitmapFactory.decodeFile(f.getAbsolutePath(), bounds);
+        BitmapFactory.Options opts = scaledDecodeOptions(bounds);
+        return BitmapFactory.decodeFile(f.getAbsolutePath(), opts);
+    }
+
+    private BitmapFactory.Options scaledDecodeOptions(BitmapFactory.Options bounds) {
+        BitmapFactory.Options opts = new BitmapFactory.Options();
+        opts.inPreferredConfig = Bitmap.Config.RGB_565; // hint only; decoder keeps alpha images at 8888
+        opts.inDither = true;
+        int largest = Math.max(bounds.outWidth, bounds.outHeight);
+        int sample = 1;
+        while (largest > 0 && largest / (sample * 2) >= IMAGE_DECODE_TARGET_PX) sample *= 2;
+        opts.inSampleSize = sample;
+        return opts;
     }
 
     private String espnTeamCode(Team team) {
@@ -13086,14 +13228,50 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         File cacheFile = new File(getHttpCacheDir(), fileKey);
         long now = System.currentTimeMillis();
         long ttl = cacheTtlMs(urlString);
-        if (cacheFile.exists() && now - cacheFile.lastModified() < ttl) {
-            String diskText = readCacheFile(cacheFile);
-            if (diskText != null && !diskText.isEmpty()) {
-                textCache.put(urlString, diskText);
-                return diskText;
+        if (cacheFile.exists()) {
+            long age = now - cacheFile.lastModified();
+            if (age < ttl) {
+                String diskText = readCacheFile(cacheFile);
+                if (diskText != null && !diskText.isEmpty()) {
+                    textCache.put(urlString, diskText);
+                    return diskText;
+                }
+            } else if (age < ttl * 4) {
+                // v172: stale-while-revalidate. If the cache is expired but not ancient, serve it
+                // immediately so the screen builds instantly, and refresh disk + memory caches in
+                // the background so the next build of that screen is fresh. Previously an expired
+                // cache meant the user sat on the skeleton waiting for the full network round trip.
+                String staleText = readCacheFile(cacheFile);
+                if (staleText != null && !staleText.isEmpty()) {
+                    textCache.put(urlString, staleText);
+                    scheduleHttpRefresh(urlString, cacheFile);
+                    return staleText;
+                }
             }
         }
 
+        String text = httpFetchNetwork(urlString);
+        textCache.put(urlString, text);
+        writeCacheFile(cacheFile, text);
+        return text;
+    }
+
+    private void scheduleHttpRefresh(String urlString, File cacheFile) {
+        if (!refreshingUrls.add(urlString)) return;
+        fanout.execute(() -> {
+            try {
+                String fresh = httpFetchNetwork(urlString);
+                textCache.put(urlString, fresh);
+                writeCacheFile(cacheFile, fresh);
+            } catch (Exception ignored) {
+                // Keep serving the stale copy; it'll retry on a later request.
+            } finally {
+                refreshingUrls.remove(urlString);
+            }
+        });
+    }
+
+    private String httpFetchNetwork(String urlString) throws Exception {
         HttpURLConnection conn = (HttpURLConnection) new URL(urlString).openConnection();
         conn.setConnectTimeout(12000);
         conn.setReadTimeout(25000);
@@ -13108,8 +13286,6 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         while ((line = br.readLine()) != null) sb.append(line).append('\n');
         String text = sb.toString();
         if (code < 200 || code >= 300) throw new Exception("HTTP " + code);
-        textCache.put(urlString, text);
-        writeCacheFile(cacheFile, text);
         return text;
     }
 
