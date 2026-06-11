@@ -465,7 +465,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        // v188: bullpen usage matrix + scouting structure; phone-first portrait app. Prevent rotation recreation from dumping the user
+        // v189: bullpen usage matrix + scouting structure; phone-first portrait app. Prevent rotation recreation from dumping the user
         // back to Home while browsing a profile or matchup.
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
         getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
@@ -660,7 +660,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v188", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v189", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -16407,7 +16407,6 @@ private View liveGameCard(LiveGame game) {
         panel.addView(title, matchWrap());
 
         panel.addView(bullpenEdgeHeroCards(away, home, awayColor, homeColor), matchWrap());
-        panel.addView(bullpenOverallReadCard(away, home), matchWrap());
 
         bullpenSectionTitle(panel, "FRESHNESS DETAILS", "");
         panel.addView(bullpenTeamSummaryRow(away, home, awayColor, homeColor), matchWrap());
@@ -16449,68 +16448,19 @@ private View liveGameCard(LiveGame game) {
 
 
 
+
     private LinearLayout bullpenEdgeHeroCards(BullpenReport away, BullpenReport home, int awayColor, int homeColor) {
-        LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(12), dp(12), dp(12), dp(12));
-        LinearLayout.LayoutParams cardLp = matchWrap();
-        cardLp.setMargins(0, dp(10), 0, dp(5));
-        card.setLayoutParams(cardLp);
-        card.setBackground(roundedGradientStroke(new int[] {
-                Color.argb(120, Color.red(awayColor), Color.green(awayColor), Color.blue(awayColor)),
-                Color.rgb(5, 9, 18),
-                Color.argb(120, Color.red(homeColor), Color.green(homeColor), Color.blue(homeColor))
-        }, 24, Color.argb(108, 255, 255, 255), 1));
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams wrapLp = matchWrap();
+        wrapLp.setMargins(0, dp(10), 0, dp(8));
+        wrap.setLayoutParams(wrapLp);
 
-        LinearLayout header = new LinearLayout(this);
-        header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setGravity(Gravity.CENTER_VERTICAL);
-        TextView left = text((away == null ? "A" : away.abbr) + " BULLPEN", 12, Color.rgb(235, 243, 252), true);
-        left.setSingleLine(true);
-        header.addView(left, new LinearLayout.LayoutParams(0, -2, 1));
-        TextView vs = text("VS", 11, Color.rgb(247, 197, 77), true);
-        vs.setGravity(Gravity.CENTER);
-        vs.setPadding(dp(10), dp(3), dp(10), dp(3));
-        vs.setBackground(roundedStroke(Color.argb(24, 247, 197, 77), Color.argb(92, 247, 197, 77), 999, 1));
-        header.addView(vs);
-        TextView right = text((home == null ? "B" : home.abbr) + " BULLPEN", 12, Color.rgb(235, 243, 252), true);
-        right.setGravity(Gravity.RIGHT);
-        right.setSingleLine(true);
-        header.addView(right, new LinearLayout.LayoutParams(0, -2, 1));
-        card.addView(header, matchWrap());
-
-        LinearLayout.LayoutParams rowLp = matchWrap();
-        rowLp.setMargins(0, dp(10), 0, 0);
-        card.addView(bullpenMatchupEdgeRow(
-                "QUALITY EDGE",
-                bullpenQualitySentence(away, home),
-                bullpenQualityWinnerLabel(away, home),
-                bullpenQualityHeroValue(away),
-                bullpenQualityHeroValue(home),
-                away == null ? "A" : away.abbr,
-                home == null ? "B" : home.abbr,
-                awayColor,
-                homeColor,
-                bullpenWinnerSide(bullpenQualityWinnerLabel(away, home), away, home)
-        ), rowLp);
-
-        LinearLayout.LayoutParams freshLp = matchWrap();
-        freshLp.setMargins(0, dp(8), 0, 0);
-        card.addView(bullpenMatchupEdgeRow(
-                "FRESHNESS EDGE",
-                bullpenFreshnessSentence(away, home),
-                bullpenFreshnessWinnerLabel(away, home),
-                bullpenFreshnessHeroValue(away),
-                bullpenFreshnessHeroValue(home),
-                away == null ? "A" : away.abbr,
-                home == null ? "B" : home.abbr,
-                awayColor,
-                homeColor,
-                bullpenWinnerSide(bullpenFreshnessWinnerLabel(away, home), away, home)
-        ), freshLp);
-
-        return card;
+        BullpenPremiumHeroView hero = new BullpenPremiumHeroView(this, away, home, awayColor, homeColor);
+        wrap.addView(hero, new LinearLayout.LayoutParams(-1, dp(284)));
+        return wrap;
     }
+
 
 
 
@@ -16778,6 +16728,271 @@ private View liveGameCard(LiveGame game) {
         return fresh + " fresh · " + available + " ready · " + watch + " watch · " + down + " down";
     }
 
+
+
+    class BullpenPremiumHeroView extends View {
+        final BullpenReport away;
+        final BullpenReport home;
+        final int awayColor;
+        final int homeColor;
+        final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG);
+        final RectF r = new RectF();
+        float progress = 0f;
+        boolean started = false;
+
+        BullpenPremiumHeroView(Context context, BullpenReport away, BullpenReport home, int awayColor, int homeColor) {
+            super(context);
+            this.away = away;
+            this.home = home;
+            this.awayColor = awayColor;
+            this.homeColor = homeColor;
+            setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+        }
+
+        @Override protected void onAttachedToWindow() {
+            super.onAttachedToWindow();
+            if (!started) {
+                started = true;
+                ValueAnimator anim = ValueAnimator.ofFloat(0f, 1f);
+                anim.setDuration(560);
+                anim.setInterpolator(new DecelerateInterpolator(1.9f));
+                anim.addUpdateListener(a -> {
+                    progress = (float) a.getAnimatedValue();
+                    invalidate();
+                });
+                anim.start();
+            }
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            float w = getWidth();
+            float h = getHeight();
+            if (w <= dp(40) || h <= dp(120)) return;
+
+            float pad = dp(2);
+            r.set(pad, pad, w - pad, h - pad);
+            p.setStyle(Paint.Style.FILL);
+            p.setShader(new LinearGradient(0, 0, w, h,
+                    new int[] {
+                            Color.argb(205, Color.red(awayColor), Color.green(awayColor), Color.blue(awayColor)),
+                            Color.rgb(5, 9, 18),
+                            Color.argb(205, Color.red(homeColor), Color.green(homeColor), Color.blue(homeColor))
+                    },
+                    new float[] { 0f, 0.50f, 1f },
+                    Shader.TileMode.CLAMP));
+            canvas.drawRoundRect(r, dp(28), dp(28), p);
+            p.setShader(null);
+
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeWidth(dp(1.2f));
+            p.setColor(Color.argb(110, 220, 235, 248));
+            canvas.drawRoundRect(r, dp(28), dp(28), p);
+
+            // Subtle team watermarks / glow fields
+            drawWatermark(canvas, safe(away == null ? "" : away.abbr), dp(30), dp(40), awayColor, Paint.Align.LEFT);
+            drawWatermark(canvas, safe(home == null ? "" : home.abbr), w - dp(30), dp(40), homeColor, Paint.Align.RIGHT);
+
+            float headerY = dp(34);
+            drawFit(canvas, (away == null ? "A" : away.abbr) + " BULLPEN", dp(28), headerY, w * 0.34f, dp(12), Color.rgb(237, 245, 252), true, Paint.Align.LEFT);
+            drawFit(canvas, (home == null ? "B" : home.abbr) + " BULLPEN", w - dp(28), headerY, w * 0.34f, dp(12), Color.rgb(237, 245, 252), true, Paint.Align.RIGHT);
+            drawVsBadge(canvas, w / 2f, dp(31));
+
+            float rowTop = dp(58);
+            drawHeroComparison(canvas, rowTop, dp(82), "QUALITY", bullpenQualitySentence(away, home),
+                    bullpenQualityWinnerLabel(away, home),
+                    qualityPrimary(away), qualitySecondary(away),
+                    qualityPrimary(home), qualitySecondary(home),
+                    bullpenWinnerSide(bullpenQualityWinnerLabel(away, home), away, home),
+                    awayColor, homeColor);
+
+            float row2Top = rowTop + dp(90);
+            drawHeroComparison(canvas, row2Top, dp(82), "FRESHNESS", bullpenFreshnessSentence(away, home),
+                    bullpenFreshnessWinnerLabel(away, home),
+                    freshnessPrimary(away), freshnessSecondary(away),
+                    freshnessPrimary(home), freshnessSecondary(home),
+                    bullpenWinnerSide(bullpenFreshnessWinnerLabel(away, home), away, home),
+                    awayColor, homeColor);
+
+            float readTop = h - dp(43);
+            r.set(dp(18), readTop, w - dp(18), h - dp(12));
+            p.setStyle(Paint.Style.FILL);
+            p.setShader(new LinearGradient(r.left, r.top, r.right, r.bottom,
+                    new int[] { Color.argb(96, 255, 255, 255), Color.argb(42, 255, 255, 255) },
+                    null, Shader.TileMode.CLAMP));
+            canvas.drawRoundRect(r, dp(18), dp(18), p);
+            p.setShader(null);
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeWidth(dp(1f));
+            p.setColor(Color.argb(78, 255, 255, 255));
+            canvas.drawRoundRect(r, dp(18), dp(18), p);
+            drawFit(canvas, bullpenOverallReadText(away, home).replace("Overall: ", ""), w / 2f, readTop + dp(21), w - dp(52), dp(11), Color.rgb(228, 238, 250), true, Paint.Align.CENTER);
+        }
+
+        private void drawHeroComparison(Canvas canvas, float top, float height, String label, String sentence, String winner,
+                                        String leftPrimary, String leftSecondary, String rightPrimary, String rightSecondary,
+                                        int winnerSide, int leftColor, int rightColor) {
+            float w = getWidth();
+            float left = dp(18);
+            float right = w - dp(18);
+            int winnerColor = winnerSide < 0 ? leftColor : (winnerSide > 0 ? rightColor : Color.rgb(247, 197, 77));
+
+            r.set(left, top, right, top + height);
+            p.setStyle(Paint.Style.FILL);
+            p.setShader(new LinearGradient(r.left, r.top, r.right, r.bottom,
+                    new int[] {
+                            Color.argb(winnerSide < 0 ? 118 : 42, Color.red(leftColor), Color.green(leftColor), Color.blue(leftColor)),
+                            Color.argb(226, 5, 9, 18),
+                            Color.argb(winnerSide > 0 ? 118 : 42, Color.red(rightColor), Color.green(rightColor), Color.blue(rightColor))
+                    },
+                    new float[] { 0f, 0.52f, 1f },
+                    Shader.TileMode.CLAMP));
+            canvas.drawRoundRect(r, dp(22), dp(22), p);
+            p.setShader(null);
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeWidth(dp(1f));
+            p.setColor(Color.argb(84, Color.red(winnerColor), Color.green(winnerColor), Color.blue(winnerColor)));
+            canvas.drawRoundRect(r, dp(22), dp(22), p);
+
+            drawFit(canvas, label + " EDGE", left + dp(16), top + dp(23), w * 0.32f, dp(10), Color.rgb(247, 197, 77), true, Paint.Align.LEFT);
+            drawFit(canvas, "Even".equals(winner) ? "EVEN" : winner, right - dp(16), top + dp(24), w * 0.24f, dp(18), winnerColor, true, Paint.Align.RIGHT);
+            drawFit(canvas, sentence, w / 2f, top + dp(43), w - dp(82), dp(12), Color.rgb(230, 238, 250), true, Paint.Align.CENTER);
+
+            float railY = top + dp(60);
+            drawPremiumSparkRail(canvas, w * 0.29f, w * 0.71f, railY, winnerSide, leftColor, rightColor);
+
+            float valueY = top + dp(67);
+            float subY = top + dp(78);
+            drawFit(canvas, leftPrimary, left + dp(16), valueY, w * 0.22f, dp(15), winnerSide < 0 ? leftColor : Color.rgb(220, 231, 245), true, Paint.Align.LEFT);
+            drawFit(canvas, leftSecondary, left + dp(16), subY, w * 0.22f, dp(9), Color.rgb(172, 190, 212), true, Paint.Align.LEFT);
+            drawFit(canvas, rightPrimary, right - dp(16), valueY, w * 0.22f, dp(15), winnerSide > 0 ? rightColor : Color.rgb(220, 231, 245), true, Paint.Align.RIGHT);
+            drawFit(canvas, rightSecondary, right - dp(16), subY, w * 0.22f, dp(9), Color.rgb(172, 190, 212), true, Paint.Align.RIGHT);
+        }
+
+        private void drawPremiumSparkRail(Canvas canvas, float left, float right, float y, int winnerSide, int leftColor, int rightColor) {
+            float cx = (left + right) / 2f;
+            int winnerColor = winnerSide < 0 ? leftColor : (winnerSide > 0 ? rightColor : Color.rgb(247, 197, 77));
+            float norm = winnerSide < 0 ? -0.88f : (winnerSide > 0 ? 0.88f : 0f);
+            float sparkX = cx + ((right - left) / 2f - dp(11)) * norm * Math.max(0.18f, progress);
+            float abs = Math.abs(norm) * Math.max(0.18f, progress);
+
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeCap(Paint.Cap.ROUND);
+            p.setStrokeWidth(dp(6.0f));
+            p.setShader(new LinearGradient(left, y, right, y,
+                    new int[] {
+                            Color.argb(92, Color.red(leftColor), Color.green(leftColor), Color.blue(leftColor)),
+                            Color.argb(76, 226, 235, 248),
+                            Color.argb(92, Color.red(rightColor), Color.green(rightColor), Color.blue(rightColor))
+                    },
+                    new float[] { 0f, 0.50f, 1f },
+                    Shader.TileMode.CLAMP));
+            canvas.drawLine(left, y, right, y, p);
+            p.setShader(null);
+
+            p.setStrokeWidth(dp(1.2f));
+            p.setColor(Color.argb(180, 235, 242, 250));
+            canvas.drawLine(cx, y - dp(13), cx, y + dp(13), p);
+
+            if (Math.abs(sparkX - cx) > dp(1.0f)) {
+                p.setStrokeWidth(dp(4.8f));
+                p.setShader(new LinearGradient(cx, y, sparkX, y,
+                        new int[] {
+                                Color.argb(42, Color.red(winnerColor), Color.green(winnerColor), Color.blue(winnerColor)),
+                                Color.argb((int) (128 + 82 * abs), Color.red(winnerColor), Color.green(winnerColor), Color.blue(winnerColor)),
+                                Color.argb((int) (198 + 42 * abs), Color.red(winnerColor), Color.green(winnerColor), Color.blue(winnerColor))
+                        },
+                        new float[] { 0f, 0.58f, 1f },
+                        Shader.TileMode.CLAMP));
+                p.setShadowLayer(dp(3.0f + 4.5f * abs), 0, 0, Color.argb((int) (90 + 70 * abs), Color.red(winnerColor), Color.green(winnerColor), Color.blue(winnerColor)));
+                canvas.drawLine(cx, y, sparkX, y, p);
+                p.clearShadowLayer();
+                p.setShader(null);
+            }
+            drawSparkDot(canvas, sparkX, y, winnerColor, Math.max(0.24f, abs));
+            p.setStrokeCap(Paint.Cap.BUTT);
+        }
+
+        private void drawSparkDot(Canvas canvas, float x, float y, int color, float strength) {
+            int hot = mixColor(Color.WHITE, color, 0.14f);
+            p.setStyle(Paint.Style.FILL);
+            p.setShader(new RadialGradient(x, y, dp(16 + 8 * strength),
+                    new int[] {
+                            Color.argb((int) (170 + 50 * strength), Color.red(color), Color.green(color), Color.blue(color)),
+                            Color.argb((int) (58 + 40 * strength), Color.red(color), Color.green(color), Color.blue(color)),
+                            Color.TRANSPARENT
+                    },
+                    new float[] { 0f, 0.42f, 1f },
+                    Shader.TileMode.CLAMP));
+            canvas.drawCircle(x, y, dp(16 + 8 * strength), p);
+            p.setShader(null);
+            p.setColor(Color.rgb(5, 9, 17));
+            canvas.drawCircle(x, y, dp(5.7f), p);
+            p.setColor(hot);
+            canvas.drawCircle(x, y, dp(3.9f), p);
+            p.setColor(Color.WHITE);
+            canvas.drawCircle(x - dp(1.0f), y - dp(1.0f), dp(1.1f), p);
+        }
+
+        private void drawVsBadge(Canvas canvas, float cx, float cy) {
+            p.setStyle(Paint.Style.FILL);
+            p.setShader(new RadialGradient(cx, cy, dp(34),
+                    new int[] { Color.argb(165, 126, 235, 226), Color.argb(55, 126, 235, 226), Color.TRANSPARENT },
+                    new float[] { 0f, .48f, 1f }, Shader.TileMode.CLAMP));
+            canvas.drawCircle(cx, cy, dp(27), p);
+            p.setShader(null);
+            p.setColor(Color.argb(220, 11, 18, 29));
+            canvas.drawCircle(cx, cy, dp(18), p);
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeWidth(dp(1.3f));
+            p.setColor(Color.argb(160, 126, 235, 226));
+            canvas.drawCircle(cx, cy, dp(18), p);
+            drawFit(canvas, "VS", cx, cy + dp(4), dp(28), dp(11), Color.WHITE, true, Paint.Align.CENTER);
+        }
+
+        private void drawWatermark(Canvas canvas, String txt, float x, float y, int color, Paint.Align align) {
+            if (txt == null || txt.isEmpty()) return;
+            p.setShader(null);
+            p.setStyle(Paint.Style.FILL);
+            p.setColor(Color.argb(22, Color.red(color), Color.green(color), Color.blue(color)));
+            p.setTypeface(Typeface.DEFAULT_BOLD);
+            p.setTextSize(dp(54));
+            p.setTextAlign(align);
+            canvas.drawText(txt, x, y, p);
+        }
+
+        private void drawFit(Canvas canvas, String txt, float x, float y, float maxW, float size, int color, boolean bold, Paint.Align align) {
+            if (txt == null) txt = "";
+            p.setShader(null);
+            p.setStyle(Paint.Style.FILL);
+            p.setColor(color);
+            p.setTypeface(bold ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+            p.setTextAlign(align);
+            float textSize = size;
+            p.setTextSize(textSize);
+            while (p.measureText(txt) > maxW && textSize > dp(7)) {
+                textSize -= dp(0.7f);
+                p.setTextSize(textSize);
+            }
+            canvas.drawText(txt, x, y, p);
+        }
+
+        private String qualityPrimary(BullpenReport r) {
+            return r == null ? "—" : bullpenFmt(r.era(), 2) + " ERA";
+        }
+
+        private String qualitySecondary(BullpenReport r) {
+            return r == null ? "" : bullpenFmt(r.kMinusBbPct(), 1) + "% K-BB";
+        }
+
+        private String freshnessPrimary(BullpenReport r) {
+            return r == null ? "—" : bullpenIpFmt(r.last2NonStarterIp()) + " staff";
+        }
+
+        private String freshnessSecondary(BullpenReport r) {
+            return r == null ? "" : r.b2bArms + " B2B";
+        }
+    }
 
     class BullpenSparkRailView extends View {
         final int winnerSide;
