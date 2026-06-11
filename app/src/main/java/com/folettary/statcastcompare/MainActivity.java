@@ -465,7 +465,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        // v184: bullpen usage matrix + scouting structure; phone-first portrait app. Prevent rotation recreation from dumping the user
+        // v185: bullpen usage matrix + scouting structure; phone-first portrait app. Prevent rotation recreation from dumping the user
         // back to Home while browsing a profile or matchup.
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
         getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
@@ -660,7 +660,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v184", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v185", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -16406,18 +16406,10 @@ private View liveGameCard(LiveGame game) {
         title.setPadding(0, dp(5), 0, 0);
         panel.addView(title, matchWrap());
 
-        String edge = bullpenEdgeLabel(away, home);
-        TextView edgePill = text(edge, 12, Color.rgb(7, 12, 20), true);
-        edgePill.setGravity(Gravity.CENTER);
-        edgePill.setPadding(dp(10), dp(7), dp(10), dp(7));
-        edgePill.setBackground(roundedGradientStroke(new int[] { Color.rgb(255, 255, 255), Color.rgb(126, 235, 226), Color.rgb(247, 197, 77) }, 999, Color.argb(180, 255, 255, 255), 1));
-        LinearLayout.LayoutParams edgeLp = new LinearLayout.LayoutParams(-1, -2);
-        edgeLp.setMargins(0, dp(10), 0, dp(8));
-        panel.addView(edgePill, edgeLp);
-        panel.addView(bullpenEdgeChipRow(away, home, awayColor, homeColor), matchWrap());
-        panel.addView(bullpenWhyCard(away, home), matchWrap());
+        panel.addView(bullpenEdgeHeroCards(away, home, awayColor, homeColor), matchWrap());
+        panel.addView(bullpenOverallReadCard(away, home), matchWrap());
 
-        bullpenSectionTitle(panel, "TONIGHT AVAILABILITY", "");
+        bullpenSectionTitle(panel, "FRESHNESS DETAILS", "");
         panel.addView(bullpenTeamSummaryRow(away, home, awayColor, homeColor), matchWrap());
 
         bullpenSectionTitle(panel, "RELIEVER AVAILABILITY", "Last 5 days by arm");
@@ -16438,9 +16430,9 @@ private View liveGameCard(LiveGame game) {
         bullpenCompareRow(panel, "Long relief", bullpenIpFmt(away.last2LongIp), bullpenIpFmt(home.last2LongIp), compareLower(away.last2LongIp, home.last2LongIp), awayColor, homeColor);
         bullpenCompareRow(panel, "Staff usage", bullpenIpPitches(away.last2NonStarterIp(), away.last2NonStarterPitches()), bullpenIpPitches(home.last2NonStarterIp(), home.last2NonStarterPitches()), compareLower(away.last2NonStarterIp(), home.last2NonStarterIp()), awayColor, homeColor);
         bullpenCompareRow(panel, "B2B relievers", String.valueOf(away.b2bArms), String.valueOf(home.b2bArms), compareLower(away.b2bArms, home.b2bArms), awayColor, homeColor);
-        bullpenCompareRow(panel, "Workload read", away.fatigueLabel(), home.fatigueLabel(), compareLower(away.fatiguePenalty(), home.fatiguePenalty()), awayColor, homeColor);
+        bullpenCompareRow(panel, "Freshness read", away.fatigueLabel(), home.fatigueLabel(), compareLower(away.fatiguePenalty(), home.fatiguePenalty()), awayColor, homeColor);
 
-        bullpenSectionTitle(panel, "BULLPEN QUALITY", "Relief appearances only");
+        bullpenSectionTitle(panel, "QUALITY DETAILS", "Relief appearances only");
         bullpenCompareRow(panel, "ERA", bullpenFmt(away.era(), 2), bullpenFmt(home.era(), 2), compareLower(away.era(), home.era()), awayColor, homeColor);
         bullpenCompareRow(panel, "WHIP", bullpenFmt(away.whip(), 2), bullpenFmt(home.whip(), 2), compareLower(away.whip(), home.whip()), awayColor, homeColor);
         bullpenCompareRow(panel, "K-BB%", bullpenFmt(away.kMinusBbPct(), 1) + "%", bullpenFmt(home.kMinusBbPct(), 1) + "%", compareHigher(away.kMinusBbPct(), home.kMinusBbPct()), awayColor, homeColor);
@@ -16454,6 +16446,173 @@ private View liveGameCard(LiveGame game) {
     }
 
 
+
+
+    private LinearLayout bullpenEdgeHeroCards(BullpenReport away, BullpenReport home, int awayColor, int homeColor) {
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams wrapLp = matchWrap();
+        wrapLp.setMargins(0, dp(10), 0, dp(4));
+        wrap.setLayoutParams(wrapLp);
+
+        wrap.addView(bullpenEdgeHeroCard(
+                "QUALITY EDGE",
+                bullpenQualityWinnerLabel(away, home),
+                bullpenQualitySentence(away, home),
+                bullpenQualityHeroValue(away),
+                bullpenQualityHeroValue(home),
+                away == null ? "A" : away.abbr,
+                home == null ? "B" : home.abbr,
+                awayColor,
+                homeColor,
+                bullpenWinnerSide(bullpenQualityWinnerLabel(away, home), away, home)
+        ), matchWrap());
+
+        LinearLayout.LayoutParams freshLp = matchWrap();
+        freshLp.setMargins(0, dp(8), 0, 0);
+        wrap.addView(bullpenEdgeHeroCard(
+                "FRESHNESS EDGE",
+                bullpenFreshnessWinnerLabel(away, home),
+                bullpenFreshnessSentence(away, home),
+                bullpenFreshnessHeroValue(away),
+                bullpenFreshnessHeroValue(home),
+                away == null ? "A" : away.abbr,
+                home == null ? "B" : home.abbr,
+                awayColor,
+                homeColor,
+                bullpenWinnerSide(bullpenFreshnessWinnerLabel(away, home), away, home)
+        ), freshLp);
+
+        return wrap;
+    }
+
+    private LinearLayout bullpenEdgeHeroCard(String title, String winner, String sentence, String leftValue, String rightValue,
+                                            String awayAbbr, String homeAbbr, int awayColor, int homeColor, int winnerSide) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(12), dp(10), dp(12), dp(10));
+        int winnerColor = winnerSide < 0 ? awayColor : (winnerSide > 0 ? homeColor : Color.rgb(247, 197, 77));
+        card.setBackground(roundedGradientStroke(new int[] {
+                Color.argb(96, Color.red(awayColor), Color.green(awayColor), Color.blue(awayColor)),
+                Color.rgb(7, 11, 20),
+                Color.argb(96, Color.red(homeColor), Color.green(homeColor), Color.blue(homeColor))
+        }, 22, Color.argb(118, Color.red(winnerColor), Color.green(winnerColor), Color.blue(winnerColor)), 1));
+
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        TextView label = text(title, 10, Color.rgb(247, 197, 77), true);
+        label.setLetterSpacing(0.10f);
+        top.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView win = text(winner, 19, winnerColor, true);
+        win.setGravity(Gravity.RIGHT);
+        win.setSingleLine(true);
+        top.addView(win);
+        card.addView(top, matchWrap());
+
+        TextView body = text(sentence, 12, Color.rgb(220, 232, 247), true);
+        body.setPadding(0, dp(3), 0, dp(6));
+        body.setGravity(Gravity.CENTER);
+        card.addView(body, matchWrap());
+
+        LinearLayout vals = new LinearLayout(this);
+        vals.setOrientation(LinearLayout.HORIZONTAL);
+        vals.setGravity(Gravity.CENTER_VERTICAL);
+        TextView left = text(awayAbbr + "  " + leftValue, 11, winnerSide < 0 ? awayColor : Color.rgb(196, 209, 226), true);
+        left.setSingleLine(true);
+        left.setEllipsize(TextUtils.TruncateAt.END);
+        vals.addView(left, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView right = text(rightValue + "  " + homeAbbr, 11, winnerSide > 0 ? homeColor : Color.rgb(196, 209, 226), true);
+        right.setGravity(Gravity.RIGHT);
+        right.setSingleLine(true);
+        right.setEllipsize(TextUtils.TruncateAt.END);
+        vals.addView(right, new LinearLayout.LayoutParams(0, -2, 1));
+        card.addView(vals, matchWrap());
+
+        card.addView(bullpenSparkRail(winnerSide, awayColor, homeColor), new LinearLayout.LayoutParams(-1, dp(25)));
+        return card;
+    }
+
+    private View bullpenSparkRail(int winnerSide, int awayColor, int homeColor) {
+        FrameLayout frame = new FrameLayout(this);
+        TextView rail = text("━━━━━━━━━━━━━━━━━━━━━━━━", 11, Color.argb(95, 218, 230, 245), true);
+        rail.setGravity(Gravity.CENTER);
+        frame.addView(rail, new FrameLayout.LayoutParams(-1, -1));
+
+        TextView spark = text("⚡", 16, winnerSide < 0 ? awayColor : (winnerSide > 0 ? homeColor : Color.rgb(247, 197, 77)), true);
+        spark.setGravity(Gravity.CENTER);
+        FrameLayout.LayoutParams sp = new FrameLayout.LayoutParams(dp(40), -1);
+        sp.gravity = winnerSide < 0 ? (Gravity.START | Gravity.CENTER_VERTICAL) : (winnerSide > 0 ? (Gravity.END | Gravity.CENTER_VERTICAL) : Gravity.CENTER);
+        sp.setMargins(dp(18), 0, dp(18), 0);
+        frame.addView(spark, sp);
+        return frame;
+    }
+
+    private TextView bullpenOverallReadCard(BullpenReport away, BullpenReport home) {
+        TextView read = text(bullpenOverallReadText(away, home), 11, Color.rgb(216, 229, 246), true);
+        read.setGravity(Gravity.CENTER);
+        read.setPadding(dp(10), dp(8), dp(10), dp(8));
+        read.setBackground(roundedStroke(Color.argb(42, 255, 255, 255), Color.argb(50, 255, 255, 255), 18, 1));
+        LinearLayout.LayoutParams lp = matchWrap();
+        lp.setMargins(0, dp(8), 0, dp(4));
+        read.setLayoutParams(lp);
+        return read;
+    }
+
+    private String bullpenOverallReadText(BullpenReport away, BullpenReport home) {
+        String q = bullpenQualityWinnerLabel(away, home);
+        String f = bullpenFreshnessWinnerLabel(away, home);
+        if ("Even".equals(q) && "Even".equals(f)) return "Overall: even quality and similar freshness.";
+        if (q.equals(f)) return "Overall: " + q + " owns both quality and freshness.";
+        if ("Even".equals(q)) return "Overall: quality is close; " + f + " is fresher tonight.";
+        if ("Even".equals(f)) return "Overall: " + q + " has the quality edge; freshness is close.";
+        return "Overall: " + q + " has the better bullpen; " + f + " is fresher tonight.";
+    }
+
+    private String bullpenQualityWinnerLabel(BullpenReport away, BullpenReport home) {
+        return bullpenEdgeWinnerLabel(away, home, 0);
+    }
+
+    private String bullpenFreshnessWinnerLabel(BullpenReport away, BullpenReport home) {
+        double a = bullpenFreshnessScore(away);
+        double h = bullpenFreshnessScore(home);
+        if (Double.isNaN(a) || Double.isNaN(h) || Math.abs(a - h) < 1.5d) return "Even";
+        return a > h ? away.abbr : home.abbr;
+    }
+
+    private double bullpenFreshnessScore(BullpenReport r) {
+        if (r == null) return Double.NaN;
+        return 100.0d - (r.last2NonStarterIp() * 4.0d) - (r.last2Pitches * 0.05d) - (r.last2BulkIp * 1.2d)
+                - (r.last2LongIp * 0.9d) - (r.b2bArms * 4.0d) - (r.fatiguePenalty() * 0.8d);
+    }
+
+    private int bullpenWinnerSide(String winner, BullpenReport away, BullpenReport home) {
+        if (away != null && winner.equals(away.abbr)) return -1;
+        if (home != null && winner.equals(home.abbr)) return 1;
+        return 0;
+    }
+
+    private String bullpenQualitySentence(BullpenReport away, BullpenReport home) {
+        String w = bullpenQualityWinnerLabel(away, home);
+        if ("Even".equals(w)) return "Bullpen quality is close";
+        return w + " bullpen is better";
+    }
+
+    private String bullpenFreshnessSentence(BullpenReport away, BullpenReport home) {
+        String w = bullpenFreshnessWinnerLabel(away, home);
+        if ("Even".equals(w)) return "Bullpen freshness is close";
+        return w + " bullpen is fresher tonight";
+    }
+
+    private String bullpenQualityHeroValue(BullpenReport r) {
+        if (r == null) return "—";
+        return bullpenFmt(r.era(), 2) + " ERA · " + bullpenFmt(r.kMinusBbPct(), 1) + "% K-BB";
+    }
+
+    private String bullpenFreshnessHeroValue(BullpenReport r) {
+        if (r == null) return "—";
+        return bullpenIpFmt(r.last2NonStarterIp()) + " staff · " + r.b2bArms + " B2B";
+    }
 
     private TextView bullpenWhyCard(BullpenReport away, BullpenReport home) {
         TextView why = text(bullpenWhyText(away, home), 10, Color.rgb(216, 229, 246), false);
@@ -16525,8 +16684,8 @@ private View liveGameCard(LiveGame game) {
         row.addView(bullpenSmallChip("Quality: " + bullpenEdgeWinnerLabel(away, home, 0), awayColor, homeColor), new LinearLayout.LayoutParams(0, -2, 1));
         LinearLayout.LayoutParams lp2 = new LinearLayout.LayoutParams(0, -2, 1);
         lp2.setMargins(dp(6), 0, dp(6), 0);
-        row.addView(bullpenSmallChip("Recent: " + bullpenEdgeWinnerLabel(away, home, 1), awayColor, homeColor), lp2);
-        row.addView(bullpenSmallChip("Avail: " + bullpenEdgeWinnerLabel(away, home, 2), awayColor, homeColor), new LinearLayout.LayoutParams(0, -2, 1));
+        row.addView(bullpenSmallChip("Freshness: " + bullpenFreshnessWinnerLabel(away, home), awayColor, homeColor), lp2);
+        row.addView(bullpenSmallChip("Quality form: " + bullpenEdgeWinnerLabel(away, home, 1), awayColor, homeColor), new LinearLayout.LayoutParams(0, -2, 1));
         return row;
     }
 
@@ -16710,12 +16869,122 @@ private View liveGameCard(LiveGame game) {
     }
 
 
+
     private void bullpenSubsectionLabel(LinearLayout panel, String label) {
         TextView t = text(label, 9, Color.rgb(218, 232, 248), true);
         t.setLetterSpacing(0.05f);
         t.setPadding(dp(3), dp(8), 0, dp(1));
         panel.addView(t, matchWrap());
     }
+
+    private void bullpenSectionTitle(LinearLayout panel, String title, String subtitle) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(2), dp(12), 0, dp(2));
+
+        TextView t = text(title, 10, Color.rgb(247, 197, 77), true);
+        t.setLetterSpacing(0.11f);
+        row.addView(t, new LinearLayout.LayoutParams(0, -2, 1));
+
+        String help = bullpenHelpText(title);
+        if (!safe(help).isEmpty()) {
+            TextView info = text("i", 9, Color.rgb(178, 195, 216), true);
+            info.setGravity(Gravity.CENTER);
+            info.setPadding(0, 0, 0, dp(1));
+            info.setBackground(roundedStroke(Color.argb(24, 255, 255, 255), Color.argb(72, 255, 255, 255), 999, 1));
+            info.setForeground(ripple(false));
+            info.setContentDescription("About " + title);
+            info.setOnClickListener(v -> showBullpenInfoSheet(title, help));
+            row.addView(info, new LinearLayout.LayoutParams(dp(22), dp(22)));
+        }
+        panel.addView(row, matchWrap());
+
+        if (!safe(subtitle).isEmpty()) {
+            TextView s = text(subtitle, 9, Color.rgb(156, 174, 197), false);
+            s.setPadding(dp(2), 0, 0, dp(5));
+            panel.addView(s, matchWrap());
+        }
+    }
+
+    private void showBullpenInfoSheet(String title, String bodyText) {
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(18), dp(14), dp(18), dp(16));
+        panel.setBackground(roundedGradientStroke(new int[] {
+                Color.rgb(4, 8, 16),
+                Color.rgb(7, 15, 28),
+                Color.rgb(5, 24, 40)
+        }, 28, Color.argb(96, 96, 228, 222), 1));
+
+        View handle = new View(this);
+        handle.setBackground(rounded(Color.argb(92, 255, 255, 255), 99));
+        LinearLayout.LayoutParams handleLp = new LinearLayout.LayoutParams(dp(44), dp(4));
+        handleLp.gravity = Gravity.CENTER_HORIZONTAL;
+        panel.addView(handle, handleLp);
+
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams topLp = matchWrap();
+        topLp.setMargins(0, dp(12), 0, 0);
+        TextView titleView = text(title, 20, Color.rgb(238, 245, 252), true);
+        top.addView(titleView, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView type = text("Bullpen", 10, Color.rgb(174, 218, 255), true);
+        type.setGravity(Gravity.CENTER);
+        type.setPadding(dp(9), dp(4), dp(9), dp(4));
+        type.setBackground(roundedStroke(Color.argb(24, 110, 190, 255), Color.argb(108, 110, 190, 255), 999, 1));
+        top.addView(type);
+        panel.addView(top, topLp);
+
+        TextView eyebrow = text("HOW TO READ IT", 9, Color.rgb(132, 150, 176), true);
+        eyebrow.setLetterSpacing(0.10f);
+        eyebrow.setPadding(0, dp(14), 0, dp(4));
+        panel.addView(eyebrow, matchWrap());
+
+        TextView body = text(bodyText, 13, Color.rgb(190, 205, 226), false);
+        body.setLineSpacing(dp(3), 1.0f);
+        body.setPadding(0, 0, 0, dp(14));
+        panel.addView(body, matchWrap());
+
+        TextView close = text("Done", 14, Color.rgb(8, 12, 20), true);
+        close.setGravity(Gravity.CENTER);
+        close.setPadding(dp(12), dp(10), dp(12), dp(10));
+        close.setBackground(roundedGradient(new int[] { Color.rgb(255, 247, 174), Color.rgb(246, 198, 68), Color.rgb(226, 151, 28) }, 16));
+        panel.addView(close, matchWrap());
+
+        final AlertDialog dialog = new AlertDialog.Builder(this).create();
+        dialog.setView(panel);
+        close.setOnClickListener(v -> dialog.dismiss());
+        dialog.show();
+        try {
+            android.view.Window w = dialog.getWindow();
+            if (w != null) {
+                w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+                w.setGravity(Gravity.BOTTOM);
+                int maxH = (int) (getResources().getDisplayMetrics().heightPixels * 0.72f);
+                w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, maxH);
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private String bullpenHelpText(String title) {
+        String t = safe(title).toUpperCase(Locale.US);
+        if (t.contains("FRESHNESS DETAILS")) {
+            return "Freshness estimates how rested each bullpen is tonight. It uses recent pitch counts, reliever usage, back-to-back appearances, and total staff workload.";
+        }
+        if (t.contains("RELIEVER")) {
+            return "Each cell is pitches thrown on that date. Ready means used recently but likely fine. Watch means workload concern. Follower is the main arm after an opener; Long is a later extended outing.";
+        }
+        if (t.contains("WORKLOAD")) {
+            return "Relievers are normal relief appearances. Follower is the main arm after an opener. Long relief is a later extended outing. Staff usage combines all non-starter workload.";
+        }
+        if (t.contains("QUALITY")) {
+            return "Quality compares bullpen performance from actual relief appearances. The main rates exclude starters/openers, follower outings, and long relief so the quality edge reflects normal bullpen work.";
+        }
+        return "";
+    }
+
 
     private void bullpenSectionTitle(LinearLayout panel, String title, String subtitle) {
         LinearLayout row = new LinearLayout(this);
@@ -16803,13 +17072,16 @@ private View liveGameCard(LiveGame game) {
     }
 
 
+
     private String bullpenEdgeLabel(BullpenReport away, BullpenReport home) {
-        double a = bullpenOverallScore(away);
-        double h = bullpenOverallScore(home);
-        if (Double.isNaN(a) || Double.isNaN(h) || Math.abs(a - h) < 3.0d) return "Bullpen edge: Even / unclear";
-        BullpenReport leader = a > h ? away : home;
-        return "Bullpen edge: " + leader.abbr + " · " + leader.edgeReason();
+        String q = bullpenQualityWinnerLabel(away, home);
+        String f = bullpenFreshnessWinnerLabel(away, home);
+        if ("Even".equals(q) && "Even".equals(f)) return "Bullpen edge: Even";
+        if (q.equals(f)) return "Bullpen edge: " + q;
+        if (!"Even".equals(q)) return "Quality edge: " + q + " · Freshness edge: " + f;
+        return "Freshness edge: " + f;
     }
+
 
     private double bullpenOverallScore(BullpenReport r) {
         if (r == null || !r.qualityAvailable()) return Double.NaN;
@@ -18472,7 +18744,7 @@ private View liveGameCard(LiveGame game) {
             String fatigue = fatigueLabel();
             if ("Rested".equals(fatigue) && qualityAvailable()) return "quality + rested";
             if ("Heavy".equals(fatigue)) return "quality despite usage";
-            if (bulkAppearances > 0 || longReliefAppearances > 0) return "quality + role split";
+            if (bulkAppearances > 0 || longReliefAppearances > 0) return "quality edge";
             return qualityAvailable() ? "quality edge" : "usage edge";
         }
     }
