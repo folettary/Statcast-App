@@ -10,6 +10,7 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ActivityInfo;
 import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
 import android.net.Uri;
@@ -268,6 +269,10 @@ public class MainActivity extends Activity {
     private String trendWindowMode = "15d";
     private final ArrayDeque<Integer> navTabHistory = new ArrayDeque<>();
     private boolean restoringNavHistory = false;
+    // v176: invalidate async profile/matchup renders when the user changes screens so an old
+    // request cannot bounce the app back to a profile/result after the user navigated away.
+    private int screenRequestToken = 0;
+    private LiveGame activeLiveGameMenu = null;
     // v167: Matchups tab is now a two-path hub: compact live games or manual create.
     private static final int MATCHUP_PATH_LIVE = 0;
     private static final int MATCHUP_PATH_CREATE = 1;
@@ -460,6 +465,9 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        // v176: phone-first portrait app. Prevent rotation recreation from dumping the user
+        // back to Home while browsing a profile or matchup.
+        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
         getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         isDark = false; // v28 uses one polished light theme.
         initColors();
@@ -483,6 +491,16 @@ public class MainActivity extends Activity {
         fanout.shutdown();
     }
 
+    private int nextScreenRequestToken() {
+        screenRequestToken++;
+        return screenRequestToken;
+    }
+
+    private boolean isCurrentScreenRequest(int token) {
+        return token == screenRequestToken;
+    }
+
+    @Override
     @Override
     public void onBackPressed() {
         if (homePickerDialog != null && homePickerDialog.isShowing()) {
@@ -504,13 +522,35 @@ public class MainActivity extends Activity {
             return;
         }
 
+        // v176: Matchups has internal screens. Back moves up one layer before leaving tab.
+        if (activePrimaryTab == TAB_MATCHUP) {
+            if (matchupResultMode) {
+                screenRequestToken++;
+                if (matchupPathMode == MATCHUP_PATH_LIVE) {
+                    if (activeLiveGameMenu != null) renderLiveGameMenu(activeLiveGameMenu);
+                    else openLiveMatchupsPath();
+                } else {
+                    openCreateMatchupPath();
+                }
+                return;
+            }
+            if (activeLiveGameMenu != null && matchupPathMode == MATCHUP_PATH_LIVE) {
+                activeLiveGameMenu = null;
+                openLiveMatchupsPath();
+                return;
+            }
+            if (matchupPathMode == MATCHUP_PATH_CREATE) {
+                openLiveMatchupsPath();
+                return;
+            }
+        }
+
         boolean profileLoaded = activePrimaryTab == TAB_PROFILE && !headToHeadMode && !rankingsModeActive
                 && resultsBox != null && resultsBox.getVisibility() == View.VISIBLE
                 && ((teamMode && selectedTeam != null) || (!teamMode && selectedPlayer != null));
         if (profileLoaded) {
-            if (resultsBox != null) resultsBox.setVisibility(View.GONE);
-            if (headerBox != null) headerBox.removeAllViews();
-            if (metricBox != null) metricBox.removeAllViews();
+            screenRequestToken++;
+            resetProfileSelectionState();
             renderSearchLanding();
             updateBottomNavSelection();
             return;
@@ -533,6 +573,7 @@ public class MainActivity extends Activity {
 
         super.onBackPressed();
     }
+
 
 
     private void initColors() {
@@ -620,7 +661,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v175", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v176", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -1041,6 +1082,8 @@ public class MainActivity extends Activity {
     }
 
     private void openLiveMatchupsPath() {
+        screenRequestToken++;
+        activeLiveGameMenu = null;
         activePrimaryTab = TAB_MATCHUP;
         matchupPathMode = MATCHUP_PATH_LIVE;
         matchupResultMode = false;
@@ -1061,6 +1104,8 @@ public class MainActivity extends Activity {
     }
 
     private void openCreateMatchupPath() {
+        screenRequestToken++;
+        activeLiveGameMenu = null;
         activePrimaryTab = TAB_MATCHUP;
         matchupPathMode = MATCHUP_PATH_CREATE;
         matchupResultMode = false;
@@ -1194,7 +1239,7 @@ public class MainActivity extends Activity {
         inlineLp.setMargins(0, dp(12), 0, 0);
         hero.addView(homeInlineSelectorCard, inlineLp);
 
-        // v171: Live Matchups logo cards on home and live slate.
+        // v176: Live Matchups logo cards render from schedule team ids before roster load.
         homeLiveMatchupsBox = buildHomeLiveMatchupsBox();
         LinearLayout.LayoutParams liveHomeLp = matchWrap();
         liveHomeLp.setMargins(0, 0, 0, 0);
@@ -1401,9 +1446,31 @@ public class MainActivity extends Activity {
     }
 
 
+    private Team teamForLiveGame(int teamId, String name, String abbr) {
+        Team t = findTeamById(teamId);
+        if (t != null) return t;
+        String safeName = safe(name);
+        String safeAbbr = canonicalMlbAbbr(teamId, safeName, safe(abbr));
+        if (teamId > 0 && !safeName.isEmpty()) return new Team(teamId, safeName, safeAbbr);
+        if (!safeAbbr.isEmpty()) return new Team(teamId, safeName.isEmpty() ? safeAbbr : safeName, safeAbbr);
+        return null;
+    }
+
+    private String capLogoFallback(Team team) {
+        if (team == null) return "";
+        String abbr = safe(team.abbr).toUpperCase(Locale.US).replaceAll("[^A-Z]", "");
+        if (abbr.equals("LAD")) return "LA";
+        if (abbr.equals("NYY") || abbr.equals("NYM")) return "NY";
+        if (abbr.equals("BOS")) return "B";
+        if (abbr.equals("CWS")) return "SOX";
+        if (abbr.equals("WSH")) return "W";
+        if (abbr.equals("ATH")) return "A";
+        return abbr;
+    }
+
 private View homeFeaturedLiveGameCard(LiveGame game) {
-    Team away = game == null ? null : findTeamById(game.awayTeamId);
-    Team home = game == null ? null : findTeamById(game.homeTeamId);
+    Team away = game == null ? null : teamForLiveGame(game.awayTeamId, game.awayName, game.awayAbbr);
+    Team home = game == null ? null : teamForLiveGame(game.homeTeamId, game.homeName, game.homeAbbr);
     TeamPalette awayPalette = game == null ? paletteForAbbr("MLB") : (away == null ? paletteForAbbr(game.awayAbbr) : paletteForTeam(away));
     TeamPalette homePalette = game == null ? paletteForAbbr("MLB") : (home == null ? paletteForAbbr(game.homeAbbr) : paletteForTeam(home));
 
@@ -1457,8 +1524,8 @@ private View homeFeaturedLiveGameCard(LiveGame game) {
 
 
 private View homeMiniLiveGameTile(LiveGame game) {
-    Team away = findTeamById(game.awayTeamId);
-    Team home = findTeamById(game.homeTeamId);
+    Team away = teamForLiveGame(game.awayTeamId, game.awayName, game.awayAbbr);
+    Team home = teamForLiveGame(game.homeTeamId, game.homeName, game.homeAbbr);
     TeamPalette awayPalette = away == null ? paletteForAbbr(game.awayAbbr) : paletteForTeam(away);
     TeamPalette homePalette = home == null ? paletteForAbbr(game.homeAbbr) : paletteForTeam(home);
 
@@ -1562,6 +1629,14 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
     int logoSize = dp(featured ? 138 : 74);
     if (away != null) {
+        TextView awayFallback = text(capLogoFallback(away), featured ? 40 : 23, Color.WHITE, true);
+        awayFallback.setGravity(Gravity.CENTER);
+        awayFallback.setAlpha(featured ? 0.18f : 0.14f);
+        FrameLayout.LayoutParams fallbackLp = new FrameLayout.LayoutParams(logoSize, logoSize);
+        fallbackLp.gravity = Gravity.START | Gravity.CENTER_VERTICAL;
+        fallbackLp.setMargins(dp(featured ? 10 : 3), dp(featured ? 18 : 8), 0, 0);
+        shell.addView(awayFallback, fallbackLp);
+
         ImageView awayLogo = new ImageView(this);
         awayLogo.setScaleType(ImageView.ScaleType.FIT_CENTER);
         awayLogo.setAdjustViewBounds(true);
@@ -1573,6 +1648,14 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         loadTeamLogo(away, awayLogo);
     }
     if (home != null) {
+        TextView homeFallback = text(capLogoFallback(home), featured ? 40 : 23, Color.WHITE, true);
+        homeFallback.setGravity(Gravity.CENTER);
+        homeFallback.setAlpha(featured ? 0.18f : 0.14f);
+        FrameLayout.LayoutParams homeFallbackLp = new FrameLayout.LayoutParams(logoSize, logoSize);
+        homeFallbackLp.gravity = Gravity.END | Gravity.CENTER_VERTICAL;
+        homeFallbackLp.setMargins(0, dp(featured ? 18 : 8), dp(featured ? 10 : 3), 0);
+        shell.addView(homeFallback, homeFallbackLp);
+
         ImageView homeLogo = new ImageView(this);
         homeLogo.setScaleType(ImageView.ScaleType.FIT_CENTER);
         homeLogo.setAdjustViewBounds(true);
@@ -1588,6 +1671,8 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
     private void openHomeLiveGame(LiveGame game) {
         if (game == null) return;
+        screenRequestToken++;
+        activeLiveGameMenu = game;
         activePrimaryTab = TAB_MATCHUP;
         matchupPathMode = MATCHUP_PATH_LIVE;
         matchupResultMode = false;
@@ -2895,6 +2980,8 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     }
 
     private void setPrimaryTab(int tab) {
+        screenRequestToken++;
+        activeLiveGameMenu = null;
         if (!restoringNavHistory && activePrimaryTab != tab) {
             navTabHistory.push(activePrimaryTab);
             while (navTabHistory.size() > 12) navTabHistory.removeLast();
@@ -2917,18 +3004,20 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             return;
         } else if (tab == TAB_PROFILE) {
             matchupResultMode = false;
+            activeLiveGameMenu = null;
             if (matchupHubBox != null) matchupHubBox.setVisibility(View.GONE);
             if (form != null) form.setVisibility(View.VISIBLE);
+            // v176: entering Search/Profile from the dock is a fresh landing. Profiles still
+            // open explicitly from search selection, ranking rows, or player/team taps.
+            resetProfileSelectionState();
             headToHeadMode = false;
             rankingsModeActive = false;
             expectedMode = false;
             applyHeadToHeadVisibility();
             updateAnalysisModeButtons();
             updateViewModeButtons();
-            resultsBox.setVisibility(View.GONE);
-            boolean hasSelection = (teamMode && selectedTeam != null) || (!teamMode && selectedPlayer != null);
-            if (hasSelection) openProfileForCurrentSelection();
-            else renderSearchLanding();
+            if (resultsBox != null) resultsBox.setVisibility(View.GONE);
+            renderSearchLanding();
             statusView.setText(teamMode ? "Search · choose a team to open its profile." : "Search · choose a player to open their profile.");
         } else if (tab == TAB_RANKINGS) {
             matchupResultMode = false;
@@ -3754,6 +3843,8 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     }
 
     private void openProfileForCurrentSelection() {
+        screenRequestToken++;
+        activeLiveGameMenu = null;
         activePrimaryTab = TAB_PROFILE;
         if (homeBox != null) homeBox.setVisibility(View.GONE);
         if (form != null) form.setVisibility(View.VISIBLE);
@@ -5274,8 +5365,9 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                     }
                     teamAdapter.notifyDataSetChanged();
                     compareTeamAdapter.notifyDataSetChanged();
-                    selectedTeam = null;
-                    compareTeam = null;
+                    // v176: roster loading should not yank the user out of the screen they are on
+                    // or clear an explicit selection made before the network call returned.
+                    if (activePrimaryTab == TAB_HOME && selectedTeam == null) compareTeam = null;
                     buildTeamChips();
                     updateTeamPickerButtons();
                     statusView.setText(statusTextForMode());
@@ -5418,6 +5510,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         constrainSelectedMetricsToPlayerRole(roleForScope(scope), true);
         showProfileSkeleton();  // v29: skeleton while season data loads
         setBusy(true, "Loading selected season…");
+        final int requestToken = nextScreenRequestToken();
         io.execute(() -> {
             try {
                 // v172: this pipeline was fully serial (leaderboard → career → recent seasons →
@@ -5449,7 +5542,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 // when their futures land.
                 Comparison initial = new Comparison(false, player.fullName, player.teamAbbr, player.position, player.id, season, seasonStats, new Stats(), leagueStats, new Date(), "Career", player, null, ranks, totals, percentiles, new HashMap<>(), new LinkedHashMap<>(), new LinkedHashMap<>(), new LinkedHashMap<>());
                 main.post(() -> {
-                    if (!teamMode && selectedPlayer != null && selectedPlayer.id == player.id && currentSeason() == season && lastComparison == null) {
+                    if (isCurrentScreenRequest(requestToken) && activePrimaryTab == TAB_PROFILE && !teamMode && selectedPlayer != null && selectedPlayer.id == player.id && currentSeason() == season && lastComparison == null) {
                         lastComparison = initial;
                         if (expectedMode) renderExpectedComparison(initial); else renderComparison(initial);
                         setBusy(false, null);
@@ -5465,7 +5558,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                     HashMap<String, Double> careerPercentiles = valuePercentileMapForPlayerEntries(entries, season, careerStats, rankMetrics);
                     Comparison complete = new Comparison(false, player.fullName, player.teamAbbr, player.position, player.id, season, seasonStats, careerStats, leagueStats, new Date(), "Career", player, null, ranks, totals, percentiles, careerPercentiles, recentSeasons, seasonTrends, recentWindows);
                     main.post(() -> {
-                        if (!teamMode && selectedPlayer != null && selectedPlayer.id == player.id && currentSeason() == season) {
+                        if (isCurrentScreenRequest(requestToken) && activePrimaryTab == TAB_PROFILE && !teamMode && selectedPlayer != null && selectedPlayer.id == player.id && currentSeason() == season) {
                             lastComparison = complete;
                             // Keep the user's place when the full sections swap in.
                             int keepScrollY = mainScroll == null ? 0 : mainScroll.getScrollY();
@@ -5479,13 +5572,14 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                     // v175: the core profile is already on screen; don't replace it with an error
                     // page just because a history/trend branch failed.
                     main.post(() -> {
-                        if (!teamMode && selectedPlayer != null && selectedPlayer.id == player.id && currentSeason() == season) {
+                        if (isCurrentScreenRequest(requestToken) && activePrimaryTab == TAB_PROFILE && !teamMode && selectedPlayer != null && selectedPlayer.id == player.id && currentSeason() == season) {
                             statusView.setText("Loaded · career and trend sections unavailable right now");
                         }
                     });
                 }
             } catch (Exception e) {
                 main.post(() -> {
+                    if (!isCurrentScreenRequest(requestToken) || activePrimaryTab != TAB_PROFILE) return;
                     setBusy(false, null);
                     showError("Could not load player comparison. Baseball Savant may be slow/rate-limiting, or this player may have no leaderboard row for the selected season. " + e.getMessage());
                 });
@@ -5501,6 +5595,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         constrainSelectedMetricsToPlayerRole("both", true);
         showProfileSkeleton();  // v29: skeleton while season data loads
         setBusy(true, "Loading selected season…");
+        final int requestToken = nextScreenRequestToken();
         io.execute(() -> {
             try {
                 // v172: same fan-out treatment as the player profile. Team history, recent
@@ -5528,7 +5623,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 // screen; the core team profile now renders as soon as the season data is in.
                 Comparison initial = new Comparison(true, team.name, team.abbr, "Team", 0, season, teamStats, new Stats(), leagueStats, new Date(), "2015–" + season + " team avg", null, team, ranks, totals, percentiles, new HashMap<>(), new LinkedHashMap<>(), new LinkedHashMap<>(), new LinkedHashMap<>());
                 main.post(() -> {
-                    if (teamMode && selectedTeam != null && selectedTeam.key().equals(team.key()) && currentSeason() == season && lastComparison == null) {
+                    if (isCurrentScreenRequest(requestToken) && activePrimaryTab == TAB_PROFILE && teamMode && selectedTeam != null && selectedTeam.key().equals(team.key()) && currentSeason() == season && lastComparison == null) {
                         lastComparison = initial;
                         if (expectedMode) renderExpectedComparison(initial); else renderComparison(initial);
                         setBusy(false, null);
@@ -5542,7 +5637,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                     HashMap<String, Double> historyPercentiles = valuePercentileMapForTeams(teamStatsMap, historyStats, rankMetrics);
                     Comparison complete = new Comparison(true, team.name, team.abbr, "Team", 0, season, teamStats, historyStats, leagueStats, new Date(), "2015–" + season + " team avg", null, team, ranks, totals, percentiles, historyPercentiles, recentSeasons, seasonTrends, new LinkedHashMap<>());
                     main.post(() -> {
-                        if (teamMode && selectedTeam != null && selectedTeam.key().equals(team.key()) && currentSeason() == season) {
+                        if (isCurrentScreenRequest(requestToken) && activePrimaryTab == TAB_PROFILE && teamMode && selectedTeam != null && selectedTeam.key().equals(team.key()) && currentSeason() == season) {
                             lastComparison = complete;
                             int keepScrollY = mainScroll == null ? 0 : mainScroll.getScrollY();
                             if (expectedMode) renderExpectedComparison(complete); else renderComparison(complete);
@@ -5553,13 +5648,14 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                     });
                 } catch (Exception sectionFailure) {
                     main.post(() -> {
-                        if (teamMode && selectedTeam != null && selectedTeam.key().equals(team.key()) && currentSeason() == season) {
+                        if (isCurrentScreenRequest(requestToken) && activePrimaryTab == TAB_PROFILE && teamMode && selectedTeam != null && selectedTeam.key().equals(team.key()) && currentSeason() == season) {
                             statusView.setText("Loaded · history and trend sections unavailable right now");
                         }
                     });
                 }
             } catch (Exception e) {
                 main.post(() -> {
+                    if (!isCurrentScreenRequest(requestToken) || activePrimaryTab != TAB_PROFILE) return;
                     setBusy(false, null);
                     showError("Could not load team comparison. " + e.getMessage());
                 });
@@ -5575,6 +5671,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         constrainSelectedMetricsToPlayerRole(roleForScope(scope), true);
         showProfileSkeleton();  // v29: skeleton while H2H loads
         setBusy(true, scope == StatScope.BOTH ? "Loading player side-by-side · hitting + pitching…" : "Loading player side-by-side…");
+        final int requestToken = nextScreenRequestToken();
         io.execute(() -> {
             try {
                 ArrayList<LeaderboardEntry> entries = fetchLeaderboardForScope(season, scope);
@@ -5594,6 +5691,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 HashMap<String, Integer> totals = computePlayerRankTotalMap(entries, season, rankMetrics);
                 HeadToHeadComparison h = new HeadToHeadComparison(false, a.fullName, b.fullName, a.teamAbbr + " · " + a.position, b.teamAbbr + " · " + b.position, a.id, b.id, season, statsA, statsB, leagueStats, a, b, null, null, ranksA, ranksB, totals, totals, percentileMap(ranksA, totals), percentileMap(ranksB, totals), scope, new ArrayList<>(displayed), keyEdgeMetricsForScope(scope));
                 main.post(() -> {
+                    if (!isCurrentScreenRequest(requestToken) || activePrimaryTab != TAB_MATCHUP || !headToHeadMode) return;
                     lastComparison = null;
                     lastHeadToHead = h;
                     renderHeadToHead(h);
@@ -5602,6 +5700,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 });
             } catch (Exception e) {
                 main.post(() -> {
+                    if (!isCurrentScreenRequest(requestToken) || activePrimaryTab != TAB_MATCHUP) return;
                     setBusy(false, null);
                     showError("Could not load side-by-side player comparison. " + e.getMessage());
                 });
@@ -5617,6 +5716,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         constrainSelectedMetricsToPlayerRole("both", true);
         showProfileSkeleton();  // v29: skeleton while H2H loads
         setBusy(true, "Loading team side-by-side · hitting + pitching…");
+        final int requestToken = nextScreenRequestToken();
         io.execute(() -> {
             try {
                 ArrayList<LeaderboardEntry> entries = fetchLeaderboardForScope(season, scope);
@@ -5642,6 +5742,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 HashMap<String, Integer> totals = computeTeamRankTotalMap(teams, rankMetrics);
                 HeadToHeadComparison h = new HeadToHeadComparison(true, a.name, b.name, a.abbr, b.abbr, 0, 0, season, statsA, statsB, leagueStats, null, null, a, b, ranksA, ranksB, totals, totals, percentileMap(ranksA, totals), percentileMap(ranksB, totals), scope, new ArrayList<>(displayed), keyEdgeMetricsForScope(scope));
                 main.post(() -> {
+                    if (!isCurrentScreenRequest(requestToken) || activePrimaryTab != TAB_MATCHUP || !headToHeadMode) return;
                     lastComparison = null;
                     lastHeadToHead = h;
                     renderHeadToHead(h);
@@ -5650,6 +5751,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 });
             } catch (Exception e) {
                 main.post(() -> {
+                    if (!isCurrentScreenRequest(requestToken) || activePrimaryTab != TAB_MATCHUP) return;
                     setBusy(false, null);
                     showError("Could not load side-by-side team comparison. " + e.getMessage());
                 });
@@ -15959,8 +16061,8 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
 
 private View liveGameCard(LiveGame game) {
-    Team away = findTeamById(game.awayTeamId);
-    Team home = findTeamById(game.homeTeamId);
+    Team away = teamForLiveGame(game.awayTeamId, game.awayName, game.awayAbbr);
+    Team home = teamForLiveGame(game.homeTeamId, game.homeName, game.homeAbbr);
     TeamPalette awayPalette = away == null ? paletteForAbbr(game.awayAbbr) : paletteForTeam(away);
     TeamPalette homePalette = home == null ? paletteForAbbr(game.homeAbbr) : paletteForTeam(home);
 
@@ -16058,6 +16160,7 @@ private View liveGameCard(LiveGame game) {
 
     private void renderLiveGameMenu(LiveGame game) {
         if (standingsBox == null || activePrimaryTab != TAB_MATCHUP) return;
+        activeLiveGameMenu = game;
         matchupPathMode = MATCHUP_PATH_LIVE;
         matchupResultMode = false;
         if (form != null) form.setVisibility(View.GONE);
@@ -16066,8 +16169,8 @@ private View liveGameCard(LiveGame game) {
         standingsBox.removeAllViews();
         refreshMatchupHub();
 
-        Team away = findTeamById(game.awayTeamId);
-        Team home = findTeamById(game.homeTeamId);
+        Team away = teamForLiveGame(game.awayTeamId, game.awayName, game.awayAbbr);
+        Team home = teamForLiveGame(game.homeTeamId, game.homeName, game.homeAbbr);
         TeamPalette awayPalette = away == null ? paletteForAbbr(game.awayAbbr) : paletteForTeam(away);
         TeamPalette homePalette = home == null ? paletteForAbbr(game.homeAbbr) : paletteForTeam(home);
         int accent = mixColor(awayPalette.primary, homePalette.primary, 0.50f);
@@ -16160,8 +16263,8 @@ private View liveGameCard(LiveGame game) {
     }
 
     private void openLiveTeamMatchup(LiveGame game) {
-        Team away = findTeamById(game.awayTeamId);
-        Team home = findTeamById(game.homeTeamId);
+        Team away = teamForLiveGame(game.awayTeamId, game.awayName, game.awayAbbr);
+        Team home = teamForLiveGame(game.homeTeamId, game.homeName, game.homeAbbr);
         if (away == null) away = findTeamByName(game.awayAbbr);
         if (home == null) home = findTeamByName(game.homeAbbr);
         if (away == null || home == null) {
