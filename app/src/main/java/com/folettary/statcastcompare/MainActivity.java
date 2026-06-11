@@ -465,7 +465,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        // v187: bullpen usage matrix + scouting structure; phone-first portrait app. Prevent rotation recreation from dumping the user
+        // v188: bullpen usage matrix + scouting structure; phone-first portrait app. Prevent rotation recreation from dumping the user
         // back to Home while browsing a profile or matchup.
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
         getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
@@ -660,7 +660,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v187", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v188", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -16448,17 +16448,43 @@ private View liveGameCard(LiveGame game) {
 
 
 
-    private LinearLayout bullpenEdgeHeroCards(BullpenReport away, BullpenReport home, int awayColor, int homeColor) {
-        LinearLayout wrap = new LinearLayout(this);
-        wrap.setOrientation(LinearLayout.VERTICAL);
-        LinearLayout.LayoutParams wrapLp = matchWrap();
-        wrapLp.setMargins(0, dp(10), 0, dp(4));
-        wrap.setLayoutParams(wrapLp);
 
-        wrap.addView(bullpenEdgeHeroCard(
+    private LinearLayout bullpenEdgeHeroCards(BullpenReport away, BullpenReport home, int awayColor, int homeColor) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(12), dp(12), dp(12), dp(12));
+        LinearLayout.LayoutParams cardLp = matchWrap();
+        cardLp.setMargins(0, dp(10), 0, dp(5));
+        card.setLayoutParams(cardLp);
+        card.setBackground(roundedGradientStroke(new int[] {
+                Color.argb(120, Color.red(awayColor), Color.green(awayColor), Color.blue(awayColor)),
+                Color.rgb(5, 9, 18),
+                Color.argb(120, Color.red(homeColor), Color.green(homeColor), Color.blue(homeColor))
+        }, 24, Color.argb(108, 255, 255, 255), 1));
+
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        TextView left = text((away == null ? "A" : away.abbr) + " BULLPEN", 12, Color.rgb(235, 243, 252), true);
+        left.setSingleLine(true);
+        header.addView(left, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView vs = text("VS", 11, Color.rgb(247, 197, 77), true);
+        vs.setGravity(Gravity.CENTER);
+        vs.setPadding(dp(10), dp(3), dp(10), dp(3));
+        vs.setBackground(roundedStroke(Color.argb(24, 247, 197, 77), Color.argb(92, 247, 197, 77), 999, 1));
+        header.addView(vs);
+        TextView right = text((home == null ? "B" : home.abbr) + " BULLPEN", 12, Color.rgb(235, 243, 252), true);
+        right.setGravity(Gravity.RIGHT);
+        right.setSingleLine(true);
+        header.addView(right, new LinearLayout.LayoutParams(0, -2, 1));
+        card.addView(header, matchWrap());
+
+        LinearLayout.LayoutParams rowLp = matchWrap();
+        rowLp.setMargins(0, dp(10), 0, 0);
+        card.addView(bullpenMatchupEdgeRow(
                 "QUALITY EDGE",
-                bullpenQualityWinnerLabel(away, home),
                 bullpenQualitySentence(away, home),
+                bullpenQualityWinnerLabel(away, home),
                 bullpenQualityHeroValue(away),
                 bullpenQualityHeroValue(home),
                 away == null ? "A" : away.abbr,
@@ -16466,14 +16492,14 @@ private View liveGameCard(LiveGame game) {
                 awayColor,
                 homeColor,
                 bullpenWinnerSide(bullpenQualityWinnerLabel(away, home), away, home)
-        ), matchWrap());
+        ), rowLp);
 
         LinearLayout.LayoutParams freshLp = matchWrap();
         freshLp.setMargins(0, dp(8), 0, 0);
-        wrap.addView(bullpenEdgeHeroCard(
+        card.addView(bullpenMatchupEdgeRow(
                 "FRESHNESS EDGE",
-                bullpenFreshnessWinnerLabel(away, home),
                 bullpenFreshnessSentence(away, home),
+                bullpenFreshnessWinnerLabel(away, home),
                 bullpenFreshnessHeroValue(away),
                 bullpenFreshnessHeroValue(home),
                 away == null ? "A" : away.abbr,
@@ -16483,70 +16509,76 @@ private View liveGameCard(LiveGame game) {
                 bullpenWinnerSide(bullpenFreshnessWinnerLabel(away, home), away, home)
         ), freshLp);
 
-        return wrap;
+        return card;
     }
+
+
 
     private LinearLayout bullpenEdgeHeroCard(String title, String winner, String sentence, String leftValue, String rightValue,
                                             String awayAbbr, String homeAbbr, int awayColor, int homeColor, int winnerSide) {
-        LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(12), dp(10), dp(12), dp(10));
+        return bullpenMatchupEdgeRow(title, sentence, winner, leftValue, rightValue, awayAbbr, homeAbbr, awayColor, homeColor, winnerSide);
+    }
+
+    private LinearLayout bullpenMatchupEdgeRow(String title, String sentence, String winner, String leftValue, String rightValue,
+                                               String awayAbbr, String homeAbbr, int awayColor, int homeColor, int winnerSide) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.VERTICAL);
+        row.setPadding(dp(9), dp(9), dp(9), dp(8));
         int winnerColor = winnerSide < 0 ? awayColor : (winnerSide > 0 ? homeColor : Color.rgb(247, 197, 77));
-        card.setBackground(roundedGradientStroke(new int[] {
-                Color.argb(96, Color.red(awayColor), Color.green(awayColor), Color.blue(awayColor)),
-                Color.rgb(7, 11, 20),
-                Color.argb(96, Color.red(homeColor), Color.green(homeColor), Color.blue(homeColor))
-        }, 22, Color.argb(118, Color.red(winnerColor), Color.green(winnerColor), Color.blue(winnerColor)), 1));
+        row.setBackground(roundedGradientStroke(new int[] {
+                Color.argb(winnerSide < 0 ? 112 : 52, Color.red(awayColor), Color.green(awayColor), Color.blue(awayColor)),
+                Color.argb(226, 7, 11, 20),
+                Color.argb(winnerSide > 0 ? 112 : 52, Color.red(homeColor), Color.green(homeColor), Color.blue(homeColor))
+        }, 20, Color.argb(92, Color.red(winnerColor), Color.green(winnerColor), Color.blue(winnerColor)), 1));
 
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.HORIZONTAL);
         top.setGravity(Gravity.CENTER_VERTICAL);
-        TextView label = text(title, 10, Color.rgb(247, 197, 77), true);
+        TextView label = text(title, 9, Color.rgb(247, 197, 77), true);
         label.setLetterSpacing(0.10f);
+        label.setSingleLine(true);
         top.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
-        TextView win = text(winner, 19, winnerColor, true);
-        win.setGravity(Gravity.RIGHT);
-        win.setSingleLine(true);
-        top.addView(win);
-        card.addView(top, matchWrap());
+        TextView winnerText = text("Even".equals(winner) ? "EVEN" : winner, 13, winnerColor, true);
+        winnerText.setGravity(Gravity.RIGHT);
+        winnerText.setSingleLine(true);
+        top.addView(winnerText);
+        row.addView(top, matchWrap());
 
-        TextView body = text(sentence, 12, Color.rgb(220, 232, 247), true);
-        body.setPadding(0, dp(3), 0, dp(6));
-        body.setGravity(Gravity.CENTER);
-        card.addView(body, matchWrap());
+        TextView statement = text(sentence, 12, Color.rgb(230, 238, 250), true);
+        statement.setGravity(Gravity.CENTER);
+        statement.setSingleLine(true);
+        statement.setEllipsize(TextUtils.TruncateAt.END);
+        statement.setPadding(0, dp(4), 0, dp(3));
+        row.addView(statement, matchWrap());
 
-        LinearLayout vals = new LinearLayout(this);
-        vals.setOrientation(LinearLayout.HORIZONTAL);
-        vals.setGravity(Gravity.CENTER_VERTICAL);
-        TextView left = text(awayAbbr + "  " + leftValue, 11, winnerSide < 0 ? awayColor : Color.rgb(196, 209, 226), true);
+        LinearLayout compare = new LinearLayout(this);
+        compare.setOrientation(LinearLayout.HORIZONTAL);
+        compare.setGravity(Gravity.CENTER_VERTICAL);
+        TextView left = text(awayAbbr + "  " + leftValue, 10, winnerSide < 0 ? awayColor : Color.rgb(196, 209, 226), true);
         left.setSingleLine(true);
         left.setEllipsize(TextUtils.TruncateAt.END);
-        vals.addView(left, new LinearLayout.LayoutParams(0, -2, 1));
-        TextView right = text(rightValue + "  " + homeAbbr, 11, winnerSide > 0 ? homeColor : Color.rgb(196, 209, 226), true);
+        compare.addView(left, new LinearLayout.LayoutParams(0, -2, 1));
+
+        BullpenSparkRailView rail = new BullpenSparkRailView(this, winnerSide, awayColor, homeColor);
+        LinearLayout.LayoutParams railLp = new LinearLayout.LayoutParams(dp(122), dp(32));
+        railLp.setMargins(dp(6), 0, dp(6), 0);
+        compare.addView(rail, railLp);
+
+        TextView right = text(rightValue + "  " + homeAbbr, 10, winnerSide > 0 ? homeColor : Color.rgb(196, 209, 226), true);
         right.setGravity(Gravity.RIGHT);
         right.setSingleLine(true);
         right.setEllipsize(TextUtils.TruncateAt.END);
-        vals.addView(right, new LinearLayout.LayoutParams(0, -2, 1));
-        card.addView(vals, matchWrap());
-
-        card.addView(bullpenSparkRail(winnerSide, awayColor, homeColor), new LinearLayout.LayoutParams(-1, dp(25)));
-        return card;
+        compare.addView(right, new LinearLayout.LayoutParams(0, -2, 1));
+        row.addView(compare, matchWrap());
+        return row;
     }
+
+
 
     private View bullpenSparkRail(int winnerSide, int awayColor, int homeColor) {
-        FrameLayout frame = new FrameLayout(this);
-        TextView rail = text("━━━━━━━━━━━━━━━━━━━━━━━━", 11, Color.argb(95, 218, 230, 245), true);
-        rail.setGravity(Gravity.CENTER);
-        frame.addView(rail, new FrameLayout.LayoutParams(-1, -1));
-
-        TextView spark = text("⚡", 16, winnerSide < 0 ? awayColor : (winnerSide > 0 ? homeColor : Color.rgb(247, 197, 77)), true);
-        spark.setGravity(Gravity.CENTER);
-        FrameLayout.LayoutParams sp = new FrameLayout.LayoutParams(dp(40), -1);
-        sp.gravity = winnerSide < 0 ? (Gravity.START | Gravity.CENTER_VERTICAL) : (winnerSide > 0 ? (Gravity.END | Gravity.CENTER_VERTICAL) : Gravity.CENTER);
-        sp.setMargins(dp(18), 0, dp(18), 0);
-        frame.addView(spark, sp);
-        return frame;
+        return new BullpenSparkRailView(this, winnerSide, awayColor, homeColor);
     }
+
 
     private TextView bullpenOverallReadCard(BullpenReport away, BullpenReport home) {
         TextView read = text(bullpenOverallReadText(away, home), 11, Color.rgb(216, 229, 246), true);
@@ -16744,6 +16776,113 @@ private View liveGameCard(LiveGame game) {
         }
         if (fresh + available + watch + down == 0) return "No recent BP";
         return fresh + " fresh · " + available + " ready · " + watch + " watch · " + down + " down";
+    }
+
+
+    class BullpenSparkRailView extends View {
+        final int winnerSide;
+        final int awayColor;
+        final int homeColor;
+        final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG);
+        float progress = 0f;
+        boolean started = false;
+
+        BullpenSparkRailView(Context context, int winnerSide, int awayColor, int homeColor) {
+            super(context);
+            this.winnerSide = winnerSide;
+            this.awayColor = awayColor;
+            this.homeColor = homeColor;
+            setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+        }
+
+        @Override protected void onAttachedToWindow() {
+            super.onAttachedToWindow();
+            if (!started) {
+                started = true;
+                ValueAnimator anim = ValueAnimator.ofFloat(0f, 1f);
+                anim.setDuration(520);
+                anim.setInterpolator(new DecelerateInterpolator(1.9f));
+                anim.addUpdateListener(a -> {
+                    progress = (float) a.getAnimatedValue();
+                    invalidate();
+                });
+                anim.start();
+            }
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            float w = getWidth();
+            float h = getHeight();
+            if (w <= dp(20) || h <= 0) return;
+
+            float left = dp(8);
+            float right = w - dp(8);
+            float cx = w / 2f;
+            float y = h / 2f;
+            int winnerColor = winnerSide < 0 ? awayColor : (winnerSide > 0 ? homeColor : Color.rgb(247, 197, 77));
+            float norm = winnerSide < 0 ? -0.86f : (winnerSide > 0 ? 0.86f : 0f);
+            float sparkX = cx + ((right - left) / 2f - dp(9)) * norm * Math.max(0.18f, progress);
+            float abs = Math.abs(norm) * Math.max(0.18f, progress);
+
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeCap(Paint.Cap.ROUND);
+            p.setStrokeWidth(dp(5.6f));
+            p.setShader(new LinearGradient(left, y, right, y,
+                    new int[] {
+                            Color.argb(92, Color.red(awayColor), Color.green(awayColor), Color.blue(awayColor)),
+                            Color.argb(75, 226, 235, 248),
+                            Color.argb(92, Color.red(homeColor), Color.green(homeColor), Color.blue(homeColor))
+                    },
+                    new float[] { 0f, 0.50f, 1f },
+                    Shader.TileMode.CLAMP));
+            canvas.drawLine(left, y, right, y, p);
+            p.setShader(null);
+
+            p.setStrokeWidth(dp(1.1f));
+            p.setColor(Color.argb(170, 232, 240, 250));
+            canvas.drawLine(cx, y - dp(10), cx, y + dp(10), p);
+
+            if (Math.abs(sparkX - cx) > dp(1.0f)) {
+                p.setStrokeWidth(dp(4.2f));
+                p.setShader(new LinearGradient(cx, y, sparkX, y,
+                        new int[] {
+                                Color.argb(36, Color.red(winnerColor), Color.green(winnerColor), Color.blue(winnerColor)),
+                                Color.argb((int) (118 + 70 * abs), Color.red(winnerColor), Color.green(winnerColor), Color.blue(winnerColor)),
+                                Color.argb((int) (185 + 45 * abs), Color.red(winnerColor), Color.green(winnerColor), Color.blue(winnerColor))
+                        },
+                        new float[] { 0f, 0.58f, 1f },
+                        Shader.TileMode.CLAMP));
+                p.setShadowLayer(dp(3.5f + 4.5f * abs), 0, 0, Color.argb((int) (82 + 70 * abs), Color.red(winnerColor), Color.green(winnerColor), Color.blue(winnerColor)));
+                canvas.drawLine(cx, y, sparkX, y, p);
+                p.clearShadowLayer();
+                p.setShader(null);
+            }
+
+            drawBullpenSpark(canvas, sparkX, y, winnerColor, Math.max(0.22f, abs));
+            p.setStrokeCap(Paint.Cap.BUTT);
+        }
+
+        private void drawBullpenSpark(Canvas canvas, float x, float y, int color, float strength) {
+            int hot = mixColor(Color.WHITE, color, 0.14f);
+            p.setStyle(Paint.Style.FILL);
+            p.setShader(new RadialGradient(x, y, dp(13 + 8 * strength),
+                    new int[] {
+                            Color.argb((int) (160 + 55 * strength), Color.red(color), Color.green(color), Color.blue(color)),
+                            Color.argb((int) (52 + 42 * strength), Color.red(color), Color.green(color), Color.blue(color)),
+                            Color.TRANSPARENT
+                    },
+                    new float[] { 0f, 0.43f, 1f },
+                    Shader.TileMode.CLAMP));
+            canvas.drawCircle(x, y, dp(13 + 8 * strength), p);
+            p.setShader(null);
+            p.setColor(Color.rgb(5, 9, 17));
+            canvas.drawCircle(x, y, dp(5.0f), p);
+            p.setColor(hot);
+            canvas.drawCircle(x, y, dp(3.4f), p);
+            p.setColor(Color.WHITE);
+            canvas.drawCircle(x - dp(0.9f), y - dp(0.9f), dp(1.0f), p);
+        }
     }
 
     private LinearLayout bullpenUsageMatrixCard(BullpenReport report, int color) {
