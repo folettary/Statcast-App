@@ -249,6 +249,16 @@ public class MainActivity extends Activity {
     private String trendWindowMode = "15d";
     private final ArrayDeque<Integer> navTabHistory = new ArrayDeque<>();
     private boolean restoringNavHistory = false;
+    // v166: Matchups tab is now a two-path hub: compact live games or manual create.
+    private static final int MATCHUP_PATH_LIVE = 0;
+    private static final int MATCHUP_PATH_CREATE = 1;
+    private int matchupPathMode = MATCHUP_PATH_LIVE;
+    private boolean matchupResultMode = false;
+    private LinearLayout matchupHubBox;
+    private TextView matchupHubTitle;
+    private TextView matchupHubSubtitle;
+    private TextView matchupLivePathButton;
+    private TextView matchupCreatePathButton;
 
     private final LinkedHashSet<String> selectedMetricKeys = new LinkedHashSet<>();
     // v119: stats shown on screen and stats shown in the hero Key Stat Edge card are separate controls.
@@ -589,7 +599,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v165", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v166", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -600,6 +610,11 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams homeLp = matchWrap();
         homeLp.setMargins(0, dp(8), 0, 0);
         root.addView(homeBox, homeLp);
+
+        matchupHubBox = buildMatchupHubBox();
+        LinearLayout.LayoutParams matchupHubLp = matchWrap();
+        matchupHubLp.setMargins(0, dp(8), 0, dp(6));
+        root.addView(matchupHubBox, matchupHubLp);
 
         form = verticalCard(28, new int[] { Color.rgb(5, 10, 18), Color.rgb(8, 18, 34), Color.rgb(7, 24, 46) });
         form.setBackground(roundedGradientStroke(new int[] { Color.rgb(5, 10, 18), Color.rgb(8, 18, 34), Color.rgb(7, 24, 46) }, 28, Color.argb(92, 104, 195, 228), 1));
@@ -920,6 +935,141 @@ public class MainActivity extends Activity {
         wireEvents();
     }
 
+
+
+    private LinearLayout buildMatchupHubBox() {
+        LinearLayout hub = new LinearLayout(this);
+        hub.setOrientation(LinearLayout.VERTICAL);
+        hub.setPadding(dp(11), dp(10), dp(11), dp(10));
+        hub.setVisibility(View.GONE);
+        hub.setBackground(roundedGradientStroke(new int[] {
+                Color.rgb(5, 9, 17),
+                Color.rgb(8, 18, 34),
+                Color.rgb(6, 30, 44)
+        }, 22, Color.argb(88, 104, 195, 228), 1));
+
+        LinearLayout titleRow = new LinearLayout(this);
+        titleRow.setOrientation(LinearLayout.VERTICAL);
+        matchupHubTitle = text("MATCHUPS", 14, Color.rgb(235, 244, 252), true);
+        matchupHubTitle.setLetterSpacing(0.10f);
+        titleRow.addView(matchupHubTitle, matchWrap());
+        matchupHubSubtitle = text("Choose live games or build a custom matchup.", 11, Color.rgb(180, 198, 220), false);
+        matchupHubSubtitle.setPadding(0, dp(3), 0, 0);
+        titleRow.addView(matchupHubSubtitle, matchWrap());
+        hub.addView(titleRow, matchWrap());
+
+        LinearLayout switcher = new LinearLayout(this);
+        switcher.setOrientation(LinearLayout.HORIZONTAL);
+        switcher.setPadding(dp(3), dp(3), dp(3), dp(3));
+        switcher.setBackground(roundedStroke(Color.argb(30, 255, 255, 255), Color.argb(56, 190, 214, 236), 17, 1));
+        LinearLayout.LayoutParams switchLp = matchWrap();
+        switchLp.setMargins(0, dp(9), 0, 0);
+        hub.addView(switcher, switchLp);
+
+        matchupLivePathButton = matchupPathChip("Live Matchups");
+        matchupLivePathButton.setOnClickListener(v -> openLiveMatchupsPath());
+        switcher.addView(matchupLivePathButton, new LinearLayout.LayoutParams(0, dp(38), 1));
+
+        matchupCreatePathButton = matchupPathChip("Create Matchup");
+        matchupCreatePathButton.setOnClickListener(v -> openCreateMatchupPath());
+        LinearLayout.LayoutParams createLp = new LinearLayout.LayoutParams(0, dp(38), 1);
+        createLp.setMargins(dp(5), 0, 0, 0);
+        switcher.addView(matchupCreatePathButton, createLp);
+        refreshMatchupHub();
+        return hub;
+    }
+
+    private TextView matchupPathChip(String label) {
+        TextView tv = text(label, 12, Color.WHITE, true);
+        tv.setGravity(Gravity.CENTER);
+        tv.setSingleLine(true);
+        tv.setPadding(dp(8), dp(7), dp(8), dp(7));
+        tv.setForeground(ripple(true));
+        tv.setClickable(true);
+        return tv;
+    }
+
+    private void refreshMatchupHub() {
+        if (matchupHubBox == null) return;
+        boolean show = activePrimaryTab == TAB_MATCHUP;
+        matchupHubBox.setVisibility(show ? View.VISIBLE : View.GONE);
+        if (!show) return;
+        if (matchupResultMode) {
+            if (matchupHubTitle != null) matchupHubTitle.setText("MATCHUP CARD");
+            if (matchupHubSubtitle != null) matchupHubSubtitle.setText("Card-first view. Use the buttons below only when you want to change paths.");
+            if (matchupLivePathButton != null) matchupLivePathButton.setText("← Today’s Games");
+            if (matchupCreatePathButton != null) matchupCreatePathButton.setText("Edit / Create");
+        } else {
+            if (matchupHubTitle != null) matchupHubTitle.setText("MATCHUPS");
+            if (matchupHubSubtitle != null) matchupHubSubtitle.setText(matchupPathMode == MATCHUP_PATH_LIVE
+                    ? "Today’s slate in compact game tiles. Tap one for recommended matchups."
+                    : "Build a custom player or team matchup.");
+            if (matchupLivePathButton != null) matchupLivePathButton.setText("Live Matchups");
+            if (matchupCreatePathButton != null) matchupCreatePathButton.setText("Create Matchup");
+        }
+        styleMatchupPathChip(matchupLivePathButton, matchupPathMode == MATCHUP_PATH_LIVE && !matchupResultMode, Color.rgb(99, 166, 255));
+        styleMatchupPathChip(matchupCreatePathButton, matchupPathMode == MATCHUP_PATH_CREATE && !matchupResultMode, Color.rgb(247, 197, 77));
+    }
+
+    private void styleMatchupPathChip(TextView tv, boolean active, int accent) {
+        if (tv == null) return;
+        tv.setTextColor(active ? Color.rgb(8, 13, 22) : Color.rgb(220, 232, 246));
+        tv.setBackground(active
+                ? roundedGradientStroke(new int[] { Color.rgb(255, 255, 255), softColor(accent, 0.20f) }, 15, Color.argb(130, Color.red(accent), Color.green(accent), Color.blue(accent)), 1)
+                : roundedStroke(Color.argb(8, 255, 255, 255), Color.argb(44, 255, 255, 255), 15, 1));
+    }
+
+    private void openLiveMatchupsPath() {
+        activePrimaryTab = TAB_MATCHUP;
+        matchupPathMode = MATCHUP_PATH_LIVE;
+        matchupResultMode = false;
+        headToHeadMode = true;
+        rankingsModeActive = false;
+        expectedMode = false;
+        hideKeyboard();
+        if (homeBox != null) homeBox.setVisibility(View.GONE);
+        if (form != null) form.setVisibility(View.GONE);
+        if (resultsBox != null) resultsBox.setVisibility(View.GONE);
+        if (standingsBox != null) standingsBox.setVisibility(View.VISIBLE);
+        updateBottomNavSelection();
+        updateAnalysisModeButtons();
+        refreshMatchupHub();
+        if (standingsBox != null) standingsBox.removeAllViews();
+        renderLiveMatchupsPanel();
+        if (mainScroll != null) mainScroll.post(() -> mainScroll.scrollTo(0, 0));
+    }
+
+    private void openCreateMatchupPath() {
+        activePrimaryTab = TAB_MATCHUP;
+        matchupPathMode = MATCHUP_PATH_CREATE;
+        matchupResultMode = false;
+        headToHeadMode = true;
+        rankingsModeActive = false;
+        expectedMode = false;
+        if (homeBox != null) homeBox.setVisibility(View.GONE);
+        if (form != null) form.setVisibility(View.VISIBLE);
+        if (standingsBox != null) { standingsBox.setVisibility(View.VISIBLE); standingsBox.removeAllViews(); }
+        updateBottomNavSelection();
+        applyHeadToHeadVisibility();
+        updateAnalysisModeButtons();
+        updateViewModeButtons();
+        refreshMatchupHub();
+        statusView.setText(statusTextForMode());
+        renderComparePreview();
+        // Stay in builder mode; selecting/changing side A or B will refresh the card.
+        if (resultsBox != null) resultsBox.setVisibility(View.GONE);
+        if (mainScroll != null) mainScroll.post(() -> mainScroll.scrollTo(0, 0));
+    }
+
+    private void enterMatchupResultMode() {
+        if (activePrimaryTab != TAB_MATCHUP || !headToHeadMode) return;
+        matchupResultMode = true;
+        if (form != null) form.setVisibility(View.GONE);
+        if (standingsBox != null) standingsBox.setVisibility(View.GONE);
+        if (resultsBox != null) resultsBox.setVisibility(View.VISIBLE);
+        refreshMatchupHub();
+        if (mainScroll != null) mainScroll.post(() -> mainScroll.smoothScrollTo(0, 0));
+    }
 
     private TextView heroPill(String label) {
         TextView tv = text(label, 12, Color.WHITE, true);
@@ -2099,6 +2249,8 @@ public class MainActivity extends Activity {
 
     private void enterMatchupCardFromHome() {
         activePrimaryTab = TAB_MATCHUP;
+        matchupPathMode = MATCHUP_PATH_CREATE;
+        matchupResultMode = true;
         headToHeadMode = true;
         rankingsModeActive = false;
         expectedMode = false;
@@ -2108,6 +2260,7 @@ public class MainActivity extends Activity {
         if (form != null) form.setVisibility(View.GONE);
         if (standingsBox != null) standingsBox.setVisibility(View.GONE);
         if (resultsBox != null) resultsBox.setVisibility(View.VISIBLE);
+        refreshMatchupHub();
         applyHeadToHeadVisibility();
         updateAnalysisModeButtons();
         updateViewModeButtons();
@@ -2364,7 +2517,9 @@ public class MainActivity extends Activity {
         activePrimaryTab = tab;
         if (tab == TAB_HOME) {
             hideKeyboard();
+            matchupResultMode = false;
             if (homeBox != null) homeBox.setVisibility(View.VISIBLE);
+            if (matchupHubBox != null) matchupHubBox.setVisibility(View.GONE);
             if (form != null) form.setVisibility(View.GONE);
             if (resultsBox != null) resultsBox.setVisibility(View.GONE);
             if (standingsBox != null) standingsBox.setVisibility(View.GONE);
@@ -2372,10 +2527,13 @@ public class MainActivity extends Activity {
             return;
         }
         if (homeBox != null) homeBox.setVisibility(View.GONE);
-        if (form != null) form.setVisibility(View.VISIBLE);
         if (tab == TAB_MATCHUP) {
-            setHeadToHeadMode(true);
+            openLiveMatchupsPath();
+            return;
         } else if (tab == TAB_PROFILE) {
+            matchupResultMode = false;
+            if (matchupHubBox != null) matchupHubBox.setVisibility(View.GONE);
+            if (form != null) form.setVisibility(View.VISIBLE);
             headToHeadMode = false;
             rankingsModeActive = false;
             expectedMode = false;
@@ -2388,6 +2546,9 @@ public class MainActivity extends Activity {
             else renderSearchLanding();
             statusView.setText(teamMode ? "Search · choose a team to open its profile." : "Search · choose a player to open their profile.");
         } else if (tab == TAB_RANKINGS) {
+            matchupResultMode = false;
+            if (matchupHubBox != null) matchupHubBox.setVisibility(View.GONE);
+            if (form != null) form.setVisibility(View.VISIBLE);
             showStandings();
         }
         updateBottomNavSelection();
@@ -4611,26 +4772,29 @@ public class MainActivity extends Activity {
     }
 
     private void setHeadToHeadMode(boolean useHeadToHead) {
-        activePrimaryTab = TAB_MATCHUP;
+        if (useHeadToHead) {
+            openCreateMatchupPath();
+            return;
+        }
+        activePrimaryTab = TAB_PROFILE;
+        matchupResultMode = false;
+        if (matchupHubBox != null) matchupHubBox.setVisibility(View.GONE);
         if (homeBox != null) homeBox.setVisibility(View.GONE);
         if (form != null) form.setVisibility(View.VISIBLE);
-        if (standingsBox != null) standingsBox.setVisibility(View.VISIBLE);
         updateBottomNavSelection();
-        headToHeadMode = useHeadToHead;
+        headToHeadMode = false;
         rankingsModeActive = false;
         expectedMode = false;
         updateAnalysisModeButtons();
         applyHeadToHeadVisibility();
         updateViewModeButtons();
         statusView.setText(statusTextForMode());
-        renderComparePreview();
-        standingsBox.removeAllViews();
-        renderLiveMatchupsPanel();
-        if (!refreshHeadToHeadIfReady()) resultsBox.setVisibility(View.GONE);
     }
 
     private void setExpectedMode() {
         activePrimaryTab = TAB_PROFILE;
+        matchupResultMode = false;
+        if (matchupHubBox != null) matchupHubBox.setVisibility(View.GONE);
         if (homeBox != null) homeBox.setVisibility(View.GONE);
         if (form != null) form.setVisibility(View.VISIBLE);
         updateBottomNavSelection();
@@ -4971,6 +5135,7 @@ public class MainActivity extends Activity {
                     lastHeadToHead = h;
                     renderHeadToHead(h);
                     setBusy(false, "Loaded side-by-side for " + season);
+                    enterMatchupResultMode();
                 });
             } catch (Exception e) {
                 main.post(() -> {
@@ -5018,6 +5183,7 @@ public class MainActivity extends Activity {
                     lastHeadToHead = h;
                     renderHeadToHead(h);
                     setBusy(false, "Loaded side-by-side for " + season);
+                    enterMatchupResultMode();
                 });
             } catch (Exception e) {
                 main.post(() -> {
@@ -5088,6 +5254,8 @@ public class MainActivity extends Activity {
 
     private void showStandings() {
         activePrimaryTab = TAB_RANKINGS;
+        matchupResultMode = false;
+        if (matchupHubBox != null) matchupHubBox.setVisibility(View.GONE);
         if (homeBox != null) homeBox.setVisibility(View.GONE);
         if (form != null) form.setVisibility(View.VISIBLE);
         updateBottomNavSelection();
@@ -10290,10 +10458,14 @@ public class MainActivity extends Activity {
         slp.setMargins(0, dp(5), 0, 0);
         shell.addView(spark, slp);
         if ("season".equals(mode)) {
-            shell.addView(trendMonthTickRow(labels), matchWrap());
             if (trendPointCount(monthlyPoints) > 0) {
-                shell.addView(monthValueStrip(trendValues(monthlyPoints), trendLabels(monthlyPoints), m), matchWrap());
+                SeasonMonthTimelineView monthLane = new SeasonMonthTimelineView(this, labels, monthlyPoints, m, palette.primary);
+                LinearLayout.LayoutParams monthLaneLp = new LinearLayout.LayoutParams(-1, dp(52));
+                monthLaneLp.setMargins(0, dp(4), 0, 0);
+                shell.addView(monthLane, monthLaneLp);
                 shell.addView(careerBaselineRow(m), matchWrap());
+            } else {
+                shell.addView(trendMonthTickRow(labels), matchWrap());
             }
         } else if ("month".equals(mode)) {
             shell.addView(monthValueStrip(values, labels, m), matchWrap());
@@ -10355,6 +10527,37 @@ public class MainActivity extends Activity {
             row.addView(tv, new LinearLayout.LayoutParams(0, -2, 1));
         }
         return row;
+    }
+
+
+    private ArrayList<TrendMonthSegment> monthSegmentsForTrendLabels(ArrayList<String> labels) {
+        ArrayList<TrendMonthSegment> out = new ArrayList<>();
+        if (labels == null || labels.isEmpty()) return out;
+        String current = "";
+        int start = -1;
+        for (int i = 0; i < labels.size(); i++) {
+            String month = monthNameFromTrendLabel(labels.get(i));
+            if (month.isEmpty()) continue;
+            if (current.isEmpty()) {
+                current = month;
+                start = i;
+            } else if (!month.equals(current)) {
+                out.add(new TrendMonthSegment(current, start, Math.max(start, i - 1)));
+                current = month;
+                start = i;
+            }
+        }
+        if (!current.isEmpty()) out.add(new TrendMonthSegment(current, start, labels.size() - 1));
+        return out;
+    }
+
+    private Double monthlyValueForLabel(ArrayList<TrendPoint> monthlyPoints, String month) {
+        if (monthlyPoints == null || month == null) return null;
+        for (TrendPoint p : monthlyPoints) {
+            if (p == null) continue;
+            if (month.equalsIgnoreCase(monthNameFromTrendLabel(p.label)) || month.equalsIgnoreCase(safe(p.label))) return p.value;
+        }
+        return null;
     }
 
     private ArrayList<String> uniqueTrendMonths(ArrayList<String> labels) {
@@ -12577,6 +12780,12 @@ public class MainActivity extends Activity {
 
     private String enc(String s) throws Exception { return URLEncoder.encode(s == null ? "" : s, "UTF-8"); }
     private String safe(String s) { return s == null ? "" : s; }
+    private String lastNameOnly(String s) {
+        String v = safe(s).trim();
+        if (v.isEmpty()) return v;
+        String[] parts = v.split("\s+");
+        return parts.length == 0 ? v : parts[parts.length - 1];
+    }
     private Double pick(Map<String, String> row, String... names) {
         for (String n : names) if (row.containsKey(n)) return num(row.get(n));
         HashMap<String, String> lowerMap = new HashMap<>();
@@ -14777,7 +14986,7 @@ public class MainActivity extends Activity {
     // ── Live matchups tab ──────────────────────────────────────────────────────────────────────
 
     private void renderLiveMatchupsPanel() {
-        if (standingsBox == null || activePrimaryTab != TAB_MATCHUP) return;
+        if (standingsBox == null || activePrimaryTab != TAB_MATCHUP || matchupPathMode != MATCHUP_PATH_LIVE || matchupResultMode) return;
         standingsBox.removeAllViews();
 
         LinearLayout panel = new LinearLayout(this);
@@ -14800,7 +15009,7 @@ public class MainActivity extends Activity {
         titleRow.addView(slateChip);
         panel.addView(titleRow, matchWrap());
 
-        TextView sub = text("Tap any game to open the team-vs-team matchup card. Probable pitchers and live/final scores appear when MLB has them.", 11, Color.rgb(174, 190, 211), false);
+        TextView sub = text("Tap any compact game tile for team, starter, and key-hitter matchup options.", 11, Color.rgb(174, 190, 211), false);
         sub.setPadding(0, dp(5), 0, dp(6));
         panel.addView(sub, matchWrap());
 
@@ -14826,7 +15035,7 @@ public class MainActivity extends Activity {
     }
 
     private void renderLiveMatchupGames(ArrayList<LiveGame> games) {
-        if (standingsBox == null || activePrimaryTab != TAB_MATCHUP) return;
+        if (standingsBox == null || activePrimaryTab != TAB_MATCHUP || matchupPathMode != MATCHUP_PATH_LIVE || matchupResultMode) return;
         standingsBox.removeAllViews();
 
         LinearLayout panel = new LinearLayout(this);
@@ -14849,7 +15058,7 @@ public class MainActivity extends Activity {
         titleRow.addView(count);
         panel.addView(titleRow, matchWrap());
 
-        TextView sub = text("Tap a game to generate the matchup card from the current season stats.", 11, Color.rgb(174, 190, 211), false);
+        TextView sub = text("Compact 2-up slate. Tap a game to choose Team Overall, Starting Pitchers, or Key Hitters.", 11, Color.rgb(174, 190, 211), false);
         sub.setPadding(0, dp(5), 0, dp(7));
         panel.addView(sub, matchWrap());
 
@@ -14860,14 +15069,37 @@ public class MainActivity extends Activity {
             empty.setBackground(roundedStroke(Color.argb(76, 8, 13, 22), Color.argb(52, 255, 255, 255), 14, 1));
             panel.addView(empty, matchWrap());
         } else {
-            for (LiveGame game : games) panel.addView(liveGameCard(game), matchWrap());
+            LinearLayout grid = new LinearLayout(this);
+            grid.setOrientation(LinearLayout.VERTICAL);
+            int i = 0;
+            while (i < games.size()) {
+                LinearLayout row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                LinearLayout.LayoutParams rowLp = matchWrap();
+                rowLp.setMargins(0, dp(6), 0, 0);
+                panel.addView(row, rowLp);
+
+                LinearLayout.LayoutParams leftLp = new LinearLayout.LayoutParams(0, dp(118), 1);
+                row.addView(liveGameCard(games.get(i)), leftLp);
+                if (i + 1 < games.size()) {
+                    LinearLayout.LayoutParams rightLp = new LinearLayout.LayoutParams(0, dp(118), 1);
+                    rightLp.setMargins(dp(7), 0, 0, 0);
+                    row.addView(liveGameCard(games.get(i + 1)), rightLp);
+                } else {
+                    Space spacer = new Space(this);
+                    LinearLayout.LayoutParams rightLp = new LinearLayout.LayoutParams(0, dp(118), 1);
+                    rightLp.setMargins(dp(7), 0, 0, 0);
+                    row.addView(spacer, rightLp);
+                }
+                i += 2;
+            }
         }
 
         standingsBox.addView(panel, panelLp);
     }
 
     private void renderLiveMatchupError(String message) {
-        if (standingsBox == null || activePrimaryTab != TAB_MATCHUP) return;
+        if (standingsBox == null || activePrimaryTab != TAB_MATCHUP || matchupPathMode != MATCHUP_PATH_LIVE || matchupResultMode) return;
         standingsBox.removeAllViews();
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
@@ -14891,24 +15123,22 @@ public class MainActivity extends Activity {
 
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(11), dp(10), dp(11), dp(10));
+        card.setPadding(dp(8), dp(8), dp(8), dp(8));
         card.setClickable(true);
         card.setForeground(ripple(true));
         card.setBackground(roundedGradientStroke(new int[] { mixColor(awayPalette.primary, Color.rgb(5, 9, 17), 0.86f), Color.rgb(6, 11, 20), mixColor(homePalette.primary, Color.rgb(5, 9, 17), 0.86f) }, 17, Color.argb(96, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
-        card.setOnClickListener(v -> openLiveTeamMatchup(game));
-        LinearLayout.LayoutParams lp = matchWrap();
-        lp.setMargins(0, dp(6), 0, 0);
-        card.setLayoutParams(lp);
+        card.setOnClickListener(v -> renderLiveGameMenu(game));
+        card.setLayoutParams(matchWrap());
 
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.HORIZONTAL);
         top.setGravity(Gravity.CENTER_VERTICAL);
-        TextView status = text(game.statusLabel(), 9, statusColor(game), true);
+        TextView status = text(game.statusLabel(), 8, statusColor(game), true);
         status.setGravity(Gravity.CENTER);
         status.setPadding(dp(7), dp(3), dp(7), dp(3));
         status.setBackground(roundedStroke(Color.argb(88, 8, 13, 22), Color.argb(106, Color.red(statusColor(game)), Color.green(statusColor(game)), Color.blue(statusColor(game))), 12, 1));
         top.addView(status);
-        TextView time = text(game.timeLabel(), 10, Color.rgb(170, 187, 207), true);
+        TextView time = text(game.timeLabel(), 8, Color.rgb(170, 187, 207), true);
         time.setGravity(Gravity.RIGHT);
         top.addView(time, new LinearLayout.LayoutParams(0, -2, 1));
         card.addView(top, matchWrap());
@@ -14916,15 +15146,15 @@ public class MainActivity extends Activity {
         LinearLayout teams = new LinearLayout(this);
         teams.setOrientation(LinearLayout.HORIZONTAL);
         teams.setGravity(Gravity.CENTER_VERTICAL);
-        teams.setPadding(0, dp(8), 0, dp(5));
+        teams.setPadding(0, dp(7), 0, dp(3));
         teams.addView(liveTeamColumn(game.awayAbbr, game.awayName, game.awayPitcher, game.awayScoreText(), awayPalette.primary, Gravity.LEFT), new LinearLayout.LayoutParams(0, -2, 1));
-        TextView at = text("@", 16, Color.rgb(185, 198, 218), true);
+        TextView at = text("@", 12, Color.rgb(185, 198, 218), true);
         at.setGravity(Gravity.CENTER);
-        teams.addView(at, new LinearLayout.LayoutParams(dp(32), -2));
+        teams.addView(at, new LinearLayout.LayoutParams(dp(20), -2));
         teams.addView(liveTeamColumn(game.homeAbbr, game.homeName, game.homePitcher, game.homeScoreText(), homePalette.primary, Gravity.RIGHT), new LinearLayout.LayoutParams(0, -2, 1));
         card.addView(teams, matchWrap());
 
-        TextView hint = text("Open team matchup card  ❯", 10, Color.rgb(196, 210, 229), true);
+        TextView hint = text("Choose matchups  ❯", 8, Color.rgb(196, 210, 229), true);
         hint.setGravity(Gravity.RIGHT);
         hint.setLetterSpacing(0.04f);
         card.addView(hint, matchWrap());
@@ -14935,15 +15165,15 @@ public class MainActivity extends Activity {
         LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
         col.setGravity(gravity == Gravity.RIGHT ? Gravity.RIGHT : Gravity.LEFT);
-        TextView top = text((safe(abbr).isEmpty() ? initials(name) : abbr).toUpperCase(Locale.US) + (safe(score).isEmpty() ? "" : "  " + score), 20, readableTeamColor(color, color, true), true);
+        TextView top = text((safe(abbr).isEmpty() ? initials(name) : abbr).toUpperCase(Locale.US) + (safe(score).isEmpty() ? "" : "  " + score), 15, readableTeamColor(color, color, true), true);
         top.setGravity(gravity);
         top.setFontFeatureSettings("'tnum' 1");
         col.addView(top, matchWrap());
-        TextView full = text(safe(name), 10, Color.rgb(205, 217, 234), true);
+        TextView full = text(safe(name), 8, Color.rgb(205, 217, 234), true);
         full.setGravity(gravity);
         full.setSingleLine(true);
         col.addView(full, matchWrap());
-        TextView pit = text(safe(pitcher).isEmpty() ? "Probable pitcher TBD" : pitcher, 9, Color.rgb(150, 167, 190), false);
+        TextView pit = text(safe(pitcher).isEmpty() ? "Pitcher TBD" : lastNameOnly(pitcher), 8, Color.rgb(150, 167, 190), false);
         pit.setGravity(gravity);
         pit.setSingleLine(true);
         col.addView(pit, matchWrap());
@@ -14956,6 +15186,110 @@ public class MainActivity extends Activity {
         if (state.contains("live") || detail.contains("progress")) return Color.rgb(82, 226, 176);
         if (state.contains("final") || detail.contains("final")) return Color.rgb(184, 198, 218);
         return Color.rgb(247, 197, 77);
+    }
+
+
+    private void renderLiveGameMenu(LiveGame game) {
+        if (standingsBox == null || activePrimaryTab != TAB_MATCHUP) return;
+        matchupPathMode = MATCHUP_PATH_LIVE;
+        matchupResultMode = false;
+        if (form != null) form.setVisibility(View.GONE);
+        if (resultsBox != null) resultsBox.setVisibility(View.GONE);
+        standingsBox.setVisibility(View.VISIBLE);
+        standingsBox.removeAllViews();
+        refreshMatchupHub();
+
+        Team away = findTeamById(game.awayTeamId);
+        Team home = findTeamById(game.homeTeamId);
+        TeamPalette awayPalette = away == null ? paletteForAbbr(game.awayAbbr) : paletteForTeam(away);
+        TeamPalette homePalette = home == null ? paletteForAbbr(game.homeAbbr) : paletteForTeam(home);
+        int accent = mixColor(awayPalette.primary, homePalette.primary, 0.50f);
+
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(12), dp(12), dp(12), dp(12));
+        panel.setBackground(roundedGradientStroke(new int[] {
+                mixColor(awayPalette.primary, Color.rgb(5, 9, 17), 0.86f),
+                Color.rgb(5, 9, 17),
+                mixColor(homePalette.primary, Color.rgb(5, 9, 17), 0.86f)
+        }, 22, Color.argb(110, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
+        LinearLayout.LayoutParams panelLp = matchWrap();
+        panelLp.setMargins(0, dp(9), 0, dp(8));
+        standingsBox.addView(panel, panelLp);
+
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        TextView back = text("← Games", 10, Color.rgb(218, 232, 248), true);
+        back.setGravity(Gravity.CENTER);
+        back.setPadding(dp(8), dp(5), dp(8), dp(5));
+        back.setBackground(roundedStroke(Color.argb(50, 255, 255, 255), Color.argb(72, 255, 255, 255), 14, 1));
+        back.setForeground(ripple(true));
+        back.setClickable(true);
+        back.setOnClickListener(v -> openLiveMatchupsPath());
+        top.addView(back);
+        TextView status = text(game.statusLabel() + (safe(game.timeLabel()).isEmpty() ? "" : " · " + game.timeLabel()), 10, statusColor(game), true);
+        status.setGravity(Gravity.RIGHT);
+        top.addView(status, new LinearLayout.LayoutParams(0, -2, 1));
+        panel.addView(top, matchWrap());
+
+        TextView title = text(game.awayAbbr + " @ " + game.homeAbbr, 24, Color.WHITE, true);
+        title.setGravity(Gravity.CENTER);
+        title.setLetterSpacing(0.02f);
+        title.setPadding(0, dp(8), 0, 0);
+        panel.addView(title, matchWrap());
+        String pitchers = (safe(game.awayPitcher).isEmpty() ? "Away SP TBD" : lastNameOnly(game.awayPitcher))
+                + " vs " + (safe(game.homePitcher).isEmpty() ? "Home SP TBD" : lastNameOnly(game.homePitcher));
+        TextView sub = text(pitchers, 12, Color.rgb(190, 207, 229), true);
+        sub.setGravity(Gravity.CENTER);
+        sub.setPadding(0, dp(3), 0, dp(9));
+        panel.addView(sub, matchWrap());
+
+        LinearLayout row1 = new LinearLayout(this);
+        row1.setOrientation(LinearLayout.HORIZONTAL);
+        panel.addView(row1, matchWrap());
+        row1.addView(gameMenuTile("Team Overall", game.awayAbbr + " vs " + game.homeAbbr, "Compare the two teams", accent, v -> openLiveTeamMatchup(game)), new LinearLayout.LayoutParams(0, dp(94), 1));
+        LinearLayout.LayoutParams spLp = new LinearLayout.LayoutParams(0, dp(94), 1);
+        spLp.setMargins(dp(7), 0, 0, 0);
+        row1.addView(gameMenuTile("Starting Pitchers", pitchers, "Preselected SP matchup", Color.rgb(247, 197, 77), v -> openLivePitcherMatchup(game)), spLp);
+
+        LinearLayout row2 = new LinearLayout(this);
+        row2.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams row2Lp = matchWrap();
+        row2Lp.setMargins(0, dp(7), 0, 0);
+        panel.addView(row2, row2Lp);
+        row2.addView(gameMenuTile("Key Hitters", "Top OPS bats", "Auto-picks one hitter per team", Color.rgb(99, 166, 255), v -> openLiveTopHitterMatchup(game)), new LinearLayout.LayoutParams(0, dp(94), 1));
+        LinearLayout.LayoutParams trLp = new LinearLayout.LayoutParams(0, dp(94), 1);
+        trLp.setMargins(dp(7), 0, 0, 0);
+        row2.addView(gameMenuTile("Trending", "Coming soon", "Last 7/15 day hot hands", Color.rgb(120, 220, 207), v -> Toast.makeText(this, "Trending player matchups are next after the v1 flow.", Toast.LENGTH_SHORT).show()), trLp);
+    }
+
+    private LinearLayout gameMenuTile(String title, String value, String caption, int accent, View.OnClickListener click) {
+        LinearLayout tile = new LinearLayout(this);
+        tile.setOrientation(LinearLayout.VERTICAL);
+        tile.setGravity(Gravity.CENTER_VERTICAL);
+        tile.setPadding(dp(9), dp(8), dp(9), dp(8));
+        tile.setClickable(true);
+        tile.setForeground(ripple(true));
+        tile.setOnClickListener(click);
+        tile.setBackground(roundedGradientStroke(new int[] {
+                mixColor(accent, Color.rgb(6, 10, 18), 0.80f),
+                Color.rgb(6, 11, 20)
+        }, 18, Color.argb(104, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
+        TextView t = text(title, 12, Color.WHITE, true);
+        t.setSingleLine(true);
+        tile.addView(t, matchWrap());
+        TextView v = text(value, 10, Color.rgb(210, 224, 241), true);
+        v.setSingleLine(true);
+        v.setEllipsize(TextUtils.TruncateAt.END);
+        v.setPadding(0, dp(4), 0, 0);
+        tile.addView(v, matchWrap());
+        TextView c = text(caption + "  ❯", 8, Color.rgb(158, 176, 199), false);
+        c.setSingleLine(true);
+        c.setEllipsize(TextUtils.TruncateAt.END);
+        c.setPadding(0, dp(4), 0, 0);
+        tile.addView(c, matchWrap());
+        return tile;
     }
 
     private void openLiveTeamMatchup(LiveGame game) {
@@ -14986,6 +15320,104 @@ public class MainActivity extends Activity {
         statusView.setText("Live matchup · " + away.abbr + " @ " + home.abbr + ".");
         compareTeamsSideBySide(away, home, currentSeason());
         if (mainScroll != null) mainScroll.post(() -> mainScroll.smoothScrollTo(0, 0));
+    }
+
+
+    private void openLivePitcherMatchup(LiveGame game) {
+        Player away = findPlayerByName(game.awayPitcher);
+        Player home = findPlayerByName(game.homePitcher);
+        if (away == null || home == null) {
+            Toast.makeText(this, "Probable pitchers are not both available in the active player list yet.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        teamMode = false;
+        headToHeadMode = true;
+        rankingsModeActive = false;
+        expectedMode = false;
+        selectedPlayer = away;
+        comparePlayer = home;
+        constrainSelectedMetricsToPlayerRole("pitch", true);
+        applyHeadToHeadVisibility();
+        updateAnalysisModeButtons();
+        updateViewModeButtons();
+        renderSelectionPreview();
+        renderComparePreview();
+        if (standingsBox != null) standingsBox.removeAllViews();
+        if (resultsBox != null) resultsBox.setVisibility(View.VISIBLE);
+        statusView.setText("Live SP matchup · " + lastNameOnly(game.awayPitcher) + " vs " + lastNameOnly(game.homePitcher) + ".");
+        comparePlayersSideBySide(away, home, currentSeason());
+    }
+
+    private void openLiveTopHitterMatchup(LiveGame game) {
+        Team awayTeam = findTeamById(game.awayTeamId);
+        Team homeTeam = findTeamById(game.homeTeamId);
+        if (awayTeam == null || homeTeam == null) {
+            Toast.makeText(this, "Could not match game teams to app teams.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Toast.makeText(this, "Finding top hitters…", Toast.LENGTH_SHORT).show();
+        io.execute(() -> {
+            try {
+                ArrayList<LeaderboardEntry> entries = eligiblePlayerEntries(fetchLeaderboard(currentSeason()), currentSeason(), metricByKey("ops"));
+                LeaderboardEntry awayEntry = topHitterForTeam(entries, awayTeam);
+                LeaderboardEntry homeEntry = topHitterForTeam(entries, homeTeam);
+                Player away = playerFromEntry(awayEntry);
+                Player home = playerFromEntry(homeEntry);
+                main.post(() -> {
+                    if (away == null || home == null) {
+                        Toast.makeText(this, "Could not find top hitters for both teams.", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    teamMode = false;
+                    headToHeadMode = true;
+                    rankingsModeActive = false;
+                    expectedMode = false;
+                    selectedPlayer = away;
+                    comparePlayer = home;
+                    constrainSelectedMetricsToPlayerRole("hit", true);
+                    applyHeadToHeadVisibility();
+                    updateAnalysisModeButtons();
+                    updateViewModeButtons();
+                    renderSelectionPreview();
+                    renderComparePreview();
+                    if (standingsBox != null) standingsBox.removeAllViews();
+                    if (resultsBox != null) resultsBox.setVisibility(View.VISIBLE);
+                    statusView.setText("Live key hitters · " + away.fullName + " vs " + home.fullName + ".");
+                    comparePlayersSideBySide(away, home, currentSeason());
+                });
+            } catch (Exception e) {
+                main.post(() -> Toast.makeText(this, "Could not load key hitter matchup.", Toast.LENGTH_SHORT).show());
+            }
+        });
+    }
+
+    private LeaderboardEntry topHitterForTeam(ArrayList<LeaderboardEntry> entries, Team team) {
+        if (entries == null || team == null) return null;
+        Metric ops = metricByKey("ops");
+        LeaderboardEntry best = null;
+        for (LeaderboardEntry e : entries) {
+            if (e == null || e.stats == null) continue;
+            if (!team.key().equals(teamKeyFromEntry(e))) continue;
+            Double value = e.stats.get("ops");
+            if (value == null || Double.isNaN(value)) continue;
+            if (best == null || compareMetricValues(value, best.stats.get("ops"), ops) < 0) best = e;
+        }
+        return best;
+    }
+
+    private Player findPlayerByName(String name) {
+        String target = normalizeNameKey(name);
+        if (target.isEmpty()) return null;
+        for (Player p : allPlayers) if (p != null && normalizeNameKey(p.fullName).equals(target)) return p;
+        for (Player p : allPlayers) if (p != null && normalizeNameKey(p.fullName).contains(target)) return p;
+        return null;
+    }
+
+    private Player playerFromEntry(LeaderboardEntry e) {
+        if (e == null) return null;
+        Player existing = findPlayerById(e.playerId);
+        if (existing != null) return existing;
+        return new Player(e.playerId, e.name, e.teamName, e.teamAbbr, "Hitter");
     }
 
     private ArrayList<LiveGame> fetchTodayLiveGames() throws Exception {
@@ -15386,6 +15818,89 @@ public class MainActivity extends Activity {
         return v;
     }
 
+
+    class TrendMonthSegment {
+        final String month;
+        final int start;
+        final int end;
+        TrendMonthSegment(String month, int start, int end) { this.month = month; this.start = start; this.end = end; }
+    }
+
+    class SeasonMonthTimelineView extends View {
+        final ArrayList<String> labels;
+        final ArrayList<TrendPoint> monthlyPoints;
+        final Metric metric;
+        final int accent;
+        final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        SeasonMonthTimelineView(Context ctx, ArrayList<String> labels, ArrayList<TrendPoint> monthlyPoints, Metric metric, int accent) {
+            super(ctx);
+            this.labels = labels == null ? new ArrayList<>() : labels;
+            this.monthlyPoints = monthlyPoints;
+            this.metric = metric;
+            this.accent = accent;
+        }
+        @Override protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            if (labels.size() < 2) return;
+            ArrayList<TrendMonthSegment> segments = monthSegmentsForTrendLabels(labels);
+            if (segments.isEmpty()) return;
+            float w = getWidth(), h = getHeight();
+            float padL = dp(8), padR = dp(54);
+            float plotW = Math.max(1f, w - padL - padR);
+            int n = labels.size();
+
+            paint.setTypeface(tfBold);
+            paint.setFontFeatureSettings("'tnum' 1");
+            paint.setTextAlign(Paint.Align.CENTER);
+            paint.setStrokeWidth(dp(1));
+            for (int i = 0; i < segments.size(); i++) {
+                TrendMonthSegment seg = segments.get(i);
+                float x1 = padL + plotW * seg.start / (n - 1f);
+                float x2 = padL + plotW * Math.max(seg.start, seg.end) / (n - 1f);
+                if (i < segments.size() - 1) {
+                    TrendMonthSegment next = segments.get(i + 1);
+                    x2 = padL + plotW * next.start / (n - 1f);
+                } else {
+                    x2 = padL + plotW;
+                }
+                if (x2 < x1 + dp(18)) x2 = Math.min(padL + plotW, x1 + dp(18));
+                float cx = (x1 + x2) / 2f;
+
+                paint.setStyle(Paint.Style.FILL);
+                paint.setColor(i % 2 == 0 ? Color.argb(30, 255, 255, 255) : Color.argb(14, 255, 255, 255));
+                canvas.drawRoundRect(new RectF(x1 + dp(1), dp(1), x2 - dp(1), h - dp(2)), dp(9), dp(9), paint);
+
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setColor(Color.argb(70, 255, 255, 255));
+                canvas.drawLine(x1, 0, x1, h, paint);
+
+                paint.setStyle(Paint.Style.FILL);
+                paint.setTextSize(dp(9));
+                paint.setColor(Color.rgb(198, 212, 230));
+                canvas.drawText(seg.month.toUpperCase(Locale.US), cx, dp(14), paint);
+
+                Double value = monthlyValueForLabel(monthlyPoints, seg.month);
+                String valueText = value == null || Double.isNaN(value) ? "—" : format(value, metric);
+                float pillW = Math.min(Math.max(dp(38), paint.measureText(valueText) + dp(12)), Math.max(dp(28), x2 - x1 - dp(6)));
+                RectF pill = new RectF(cx - pillW / 2f, dp(22), cx + pillW / 2f, dp(43));
+                paint.setColor(Color.argb(92, Color.red(accent), Color.green(accent), Color.blue(accent)));
+                canvas.drawRoundRect(pill, dp(10), dp(10), paint);
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setColor(Color.argb(116, Color.red(accent), Color.green(accent), Color.blue(accent)));
+                canvas.drawRoundRect(pill, dp(10), dp(10), paint);
+                paint.setStyle(Paint.Style.FILL);
+                paint.setTextSize(dp(10));
+                paint.setColor(Color.WHITE);
+                canvas.drawText(valueText, cx, dp(37), paint);
+            }
+            TrendMonthSegment last = segments.get(segments.size() - 1);
+            float end = padL + plotW;
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setColor(Color.argb(70, 255, 255, 255));
+            canvas.drawLine(end, 0, end, h, paint);
+        }
+    }
+
     class SparklineView extends View {
         final ArrayList<Double> values;
         final ArrayList<String> labels;
@@ -15428,11 +15943,28 @@ public class MainActivity extends Activity {
             float plotH = h - padT - padB;
 
             paint.setShader(null);
+
+            // v166: season charts now have subtle month lanes that use the same x-scale
+            // as the sparkline, so labels and monthly values line up with the grid.
+            if ("season".equals(mode)) {
+                ArrayList<TrendMonthSegment> segments = monthSegmentsForTrendLabels(labels);
+                paint.setStyle(Paint.Style.FILL);
+                for (int i = 0; i < segments.size(); i++) {
+                    TrendMonthSegment seg = segments.get(i);
+                    float x1 = padL + plotW * seg.start / (n - 1f);
+                    float x2 = (i + 1 < segments.size())
+                            ? padL + plotW * segments.get(i + 1).start / (n - 1f)
+                            : padL + plotW;
+                    paint.setColor(i % 2 == 0 ? Color.argb(20, 255, 255, 255) : Color.argb(8, 255, 255, 255));
+                    canvas.drawRect(x1, padT, x2, padT + plotH, paint);
+                }
+            }
+
             paint.setStyle(Paint.Style.STROKE);
             paint.setStrokeWidth(dp(1));
 
-            // v163: structured trend modes get faint full-height guide lines.
-            paint.setColor(Color.argb(24, 255, 255, 255));
+            // v163/v166: structured trend modes get faint full-height guide lines.
+            paint.setColor(Color.argb("season".equals(mode) ? 52 : 24, 255, 255, 255));
             ArrayList<Integer> guideIndices = guideIndicesForMode();
             for (Integer index : guideIndices) {
                 if (index == null || index < 0 || index >= n) continue;
