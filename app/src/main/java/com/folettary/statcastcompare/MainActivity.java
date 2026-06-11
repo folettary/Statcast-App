@@ -465,7 +465,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        // v186: bullpen usage matrix + scouting structure; phone-first portrait app. Prevent rotation recreation from dumping the user
+        // v187: bullpen usage matrix + scouting structure; phone-first portrait app. Prevent rotation recreation from dumping the user
         // back to Home while browsing a profile or matchup.
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
         getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
@@ -660,7 +660,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v186", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v187", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -16986,34 +16986,7 @@ private View liveGameCard(LiveGame game) {
     }
 
 
-    private void bullpenSectionTitle(LinearLayout panel, String title, String subtitle) {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(2), dp(12), 0, dp(2));
 
-        TextView t = text(title, 10, Color.rgb(247, 197, 77), true);
-        t.setLetterSpacing(0.11f);
-        row.addView(t, new LinearLayout.LayoutParams(0, -2, 1));
-
-        String help = bullpenHelpText(title);
-        if (!safe(help).isEmpty()) {
-            TextView info = text("ⓘ", 11, Color.rgb(178, 196, 220), true);
-            info.setGravity(Gravity.CENTER);
-            info.setPadding(dp(8), dp(2), dp(4), dp(2));
-            info.setClickable(true);
-            info.setForeground(ripple(true));
-            info.setOnClickListener(v -> Toast.makeText(this, help, Toast.LENGTH_LONG).show());
-            row.addView(info, new LinearLayout.LayoutParams(dp(36), -2));
-        }
-        panel.addView(row, matchWrap());
-
-        if (!safe(subtitle).isEmpty()) {
-            TextView s = text(subtitle, 9, Color.rgb(156, 174, 197), false);
-            s.setPadding(dp(2), 0, 0, dp(5));
-            panel.addView(s, matchWrap());
-        }
-    }
 
 
 
