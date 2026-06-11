@@ -600,7 +600,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v168", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v169", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -1176,7 +1176,7 @@ public class MainActivity extends Activity {
 
         home.addView(hero, matchWrap());
 
-        // v168: Promote the new Live Matchups flow on Home with a featured game + quick slate strip.
+        // v169: Promote Live Matchups with canonical MLB abbreviations and stronger team-gradient cards.
         homeLiveMatchupsBox = buildHomeLiveMatchupsBox();
         LinearLayout.LayoutParams liveHomeLp = matchWrap();
         liveHomeLp.setMargins(0, dp(10), 0, 0);
@@ -1385,10 +1385,10 @@ public class MainActivity extends Activity {
         card.setClickable(game != null);
         card.setForeground(ripple(true));
         card.setBackground(roundedGradientStroke(new int[] {
-                mixColor(awayPalette.primary, Color.rgb(5, 9, 17), 0.80f),
-                Color.rgb(5, 9, 17),
-                mixColor(homePalette.primary, Color.rgb(5, 9, 17), 0.80f)
-        }, 22, Color.argb(118, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
+                mixColor(awayPalette.primary, Color.rgb(5, 9, 17), 0.58f),
+                mixColor(awayPalette.secondary, homePalette.secondary, 0.50f),
+                mixColor(homePalette.primary, Color.rgb(5, 9, 17), 0.58f)
+        }, 22, Color.argb(168, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
         if (game != null) card.setOnClickListener(v -> openHomeLiveGame(game));
 
         LinearLayout top = new LinearLayout(this);
@@ -1406,7 +1406,7 @@ public class MainActivity extends Activity {
         top.addView(status);
         card.addView(top, matchWrap());
 
-        String title = game == null ? "Live Matchups" : game.awayAbbr + " @ " + game.homeAbbr;
+        String title = game == null ? "Live Matchups" : displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr) + " @ " + displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr);
         TextView gameTitle = text(title, 26, Color.WHITE, true);
         gameTitle.setGravity(Gravity.CENTER);
         gameTitle.setLetterSpacing(0.02f);
@@ -1443,12 +1443,12 @@ public class MainActivity extends Activity {
         tile.setClickable(true);
         tile.setForeground(ripple(true));
         tile.setBackground(roundedGradientStroke(new int[] {
-                mixColor(awayPalette.primary, Color.rgb(5, 9, 17), 0.86f),
-                mixColor(homePalette.primary, Color.rgb(5, 9, 17), 0.86f)
-        }, 18, Color.argb(96, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
+                mixColor(awayPalette.primary, Color.rgb(5, 9, 17), 0.62f),
+                mixColor(homePalette.primary, Color.rgb(5, 9, 17), 0.62f)
+        }, 18, Color.argb(154, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
         tile.setOnClickListener(v -> openHomeLiveGame(game));
 
-        TextView matchup = text(game.awayAbbr + " @ " + game.homeAbbr, 15, Color.WHITE, true);
+        TextView matchup = text(displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr) + " @ " + displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr), 15, Color.WHITE, true);
         matchup.setGravity(Gravity.CENTER);
         matchup.setSingleLine(true);
         tile.addView(matchup, matchWrap());
@@ -11296,7 +11296,7 @@ public class MainActivity extends Activity {
             JSONObject teamJson = teams.getJSONObject(i);
             int teamId = teamJson.optInt("id");
             String name = teamJson.optString("name", "MLB");
-            String abbr = teamJson.optString("abbreviation", teamJson.optString("teamCode", name));
+            String abbr = canonicalMlbAbbr(teamId, name, teamJson.optString("abbreviation", teamJson.optString("teamCode", name)));
             Team t = new Team(teamId, name, abbr);
             teamList.add(t);
             teamsById.put(teamId, t);
@@ -12921,6 +12921,56 @@ public class MainActivity extends Activity {
         int g = Math.round(Color.green(a) * (1f - t) + Color.green(b) * t);
         int bb = Math.round(Color.blue(a) * (1f - t) + Color.blue(b) * t);
         return Color.rgb(r, g, bb);
+    }
+
+    private String displayGameAbbr(int teamId, String teamName, String fallback) {
+        return canonicalMlbAbbr(teamId, teamName, fallback).toUpperCase(Locale.US);
+    }
+
+    private String canonicalMlbAbbr(int teamId, String teamName, String fallback) {
+        switch (teamId) {
+            case 109: return "ARI";
+            case 144: return "ATL";
+            case 110: return "BAL";
+            case 111: return "BOS";
+            case 112: return "CHC";
+            case 145: return "CWS";
+            case 113: return "CIN";
+            case 114: return "CLE";
+            case 115: return "COL";
+            case 116: return "DET";
+            case 117: return "HOU";
+            case 118: return "KC";
+            case 108: return "LAA";
+            case 119: return "LAD";
+            case 146: return "MIA";
+            case 158: return "MIL";
+            case 142: return "MIN";
+            case 121: return "NYM";
+            case 147: return "NYY";
+            case 133: return "ATH";
+            case 143: return "PHI";
+            case 134: return "PIT";
+            case 135: return "SD";
+            case 137: return "SF";
+            case 136: return "SEA";
+            case 138: return "STL";
+            case 139: return "TB";
+            case 140: return "TEX";
+            case 141: return "TOR";
+            case 120: return "WSH";
+        }
+        String raw = safe(fallback).toUpperCase(Locale.US).replaceAll("[^A-Z]", "");
+        if (raw.equals("AZ") || raw.equals("ARZ")) return "ARI";
+        if (raw.equals("CHW")) return "CWS";
+        if (raw.equals("KCR")) return "KC";
+        if (raw.equals("SDP")) return "SD";
+        if (raw.equals("SFG")) return "SF";
+        if (raw.equals("TBR")) return "TB";
+        if (raw.equals("WSN")) return "WSH";
+        if (raw.equals("OAK") || raw.equals("ATHLETICS")) return "ATH";
+        if (!raw.isEmpty()) return raw;
+        return initials(teamName);
     }
 
     private String initials(String value) {
@@ -15394,7 +15444,7 @@ public class MainActivity extends Activity {
         card.setPadding(dp(8), dp(8), dp(8), dp(8));
         card.setClickable(true);
         card.setForeground(ripple(true));
-        card.setBackground(roundedGradientStroke(new int[] { mixColor(awayPalette.primary, Color.rgb(5, 9, 17), 0.86f), Color.rgb(6, 11, 20), mixColor(homePalette.primary, Color.rgb(5, 9, 17), 0.86f) }, 17, Color.argb(96, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
+        card.setBackground(roundedGradientStroke(new int[] { mixColor(awayPalette.primary, Color.rgb(5, 9, 17), 0.62f), Color.rgb(6, 11, 20), mixColor(homePalette.primary, Color.rgb(5, 9, 17), 0.62f) }, 17, Color.argb(154, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
         card.setOnClickListener(v -> renderLiveGameMenu(game));
         card.setLayoutParams(matchWrap());
 
@@ -15415,11 +15465,11 @@ public class MainActivity extends Activity {
         teams.setOrientation(LinearLayout.HORIZONTAL);
         teams.setGravity(Gravity.CENTER_VERTICAL);
         teams.setPadding(0, dp(7), 0, dp(3));
-        teams.addView(liveTeamColumn(game.awayAbbr, game.awayName, game.awayPitcher, game.awayScoreText(), awayPalette.primary, Gravity.LEFT), new LinearLayout.LayoutParams(0, -2, 1));
+        teams.addView(liveTeamColumn(displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr), game.awayName, game.awayPitcher, game.awayScoreText(), awayPalette.primary, Gravity.LEFT), new LinearLayout.LayoutParams(0, -2, 1));
         TextView at = text("@", 12, Color.rgb(185, 198, 218), true);
         at.setGravity(Gravity.CENTER);
         teams.addView(at, new LinearLayout.LayoutParams(dp(20), -2));
-        teams.addView(liveTeamColumn(game.homeAbbr, game.homeName, game.homePitcher, game.homeScoreText(), homePalette.primary, Gravity.RIGHT), new LinearLayout.LayoutParams(0, -2, 1));
+        teams.addView(liveTeamColumn(displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr), game.homeName, game.homePitcher, game.homeScoreText(), homePalette.primary, Gravity.RIGHT), new LinearLayout.LayoutParams(0, -2, 1));
         card.addView(teams, matchWrap());
 
         TextView hint = text("Choose matchups  ❯", 8, Color.rgb(196, 210, 229), true);
@@ -15477,10 +15527,10 @@ public class MainActivity extends Activity {
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(dp(12), dp(12), dp(12), dp(12));
         panel.setBackground(roundedGradientStroke(new int[] {
-                mixColor(awayPalette.primary, Color.rgb(5, 9, 17), 0.86f),
+                mixColor(awayPalette.primary, Color.rgb(5, 9, 17), 0.60f),
                 Color.rgb(5, 9, 17),
-                mixColor(homePalette.primary, Color.rgb(5, 9, 17), 0.86f)
-        }, 22, Color.argb(110, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
+                mixColor(homePalette.primary, Color.rgb(5, 9, 17), 0.60f)
+        }, 22, Color.argb(166, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
         LinearLayout.LayoutParams panelLp = matchWrap();
         panelLp.setMargins(0, dp(9), 0, dp(8));
         standingsBox.addView(panel, panelLp);
@@ -15501,7 +15551,7 @@ public class MainActivity extends Activity {
         top.addView(status, new LinearLayout.LayoutParams(0, -2, 1));
         panel.addView(top, matchWrap());
 
-        TextView title = text(game.awayAbbr + " @ " + game.homeAbbr, 24, Color.WHITE, true);
+        TextView title = text(displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr) + " @ " + displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr), 24, Color.WHITE, true);
         title.setGravity(Gravity.CENTER);
         title.setLetterSpacing(0.02f);
         title.setPadding(0, dp(8), 0, 0);
@@ -15516,7 +15566,7 @@ public class MainActivity extends Activity {
         LinearLayout row1 = new LinearLayout(this);
         row1.setOrientation(LinearLayout.HORIZONTAL);
         panel.addView(row1, matchWrap());
-        row1.addView(gameMenuTile("Team Overall", game.awayAbbr + " vs " + game.homeAbbr, "Compare the two teams", accent, v -> openLiveTeamMatchup(game)), new LinearLayout.LayoutParams(0, dp(94), 1));
+        row1.addView(gameMenuTile("Team Overall", displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr) + " vs " + displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr), "Compare the two teams", accent, v -> openLiveTeamMatchup(game)), new LinearLayout.LayoutParams(0, dp(94), 1));
         LinearLayout.LayoutParams spLp = new LinearLayout.LayoutParams(0, dp(94), 1);
         spLp.setMargins(dp(7), 0, 0, 0);
         row1.addView(gameMenuTile("Starting Pitchers", pitchers, "Preselected SP matchup", Color.rgb(247, 197, 77), v -> openLivePitcherMatchup(game)), spLp);
@@ -15718,8 +15768,10 @@ public class MainActivity extends Activity {
                 Team homeKnown = findTeamById(live.homeTeamId);
                 live.awayName = awayTeam == null ? "Away" : awayTeam.optString("name", "Away");
                 live.homeName = homeTeam == null ? "Home" : homeTeam.optString("name", "Home");
-                live.awayAbbr = awayKnown == null ? initials(live.awayName) : awayKnown.abbr;
-                live.homeAbbr = homeKnown == null ? initials(live.homeName) : homeKnown.abbr;
+                String awayApiAbbr = awayTeam == null ? "" : awayTeam.optString("abbreviation", awayTeam.optString("teamCode", ""));
+                String homeApiAbbr = homeTeam == null ? "" : homeTeam.optString("abbreviation", homeTeam.optString("teamCode", ""));
+                live.awayAbbr = canonicalMlbAbbr(live.awayTeamId, live.awayName, awayKnown == null ? awayApiAbbr : awayKnown.abbr);
+                live.homeAbbr = canonicalMlbAbbr(live.homeTeamId, live.homeName, homeKnown == null ? homeApiAbbr : homeKnown.abbr);
                 live.awayScore = awayNode == null ? -1 : awayNode.optInt("score", -1);
                 live.homeScore = homeNode == null ? -1 : homeNode.optInt("score", -1);
                 live.abstractState = status == null ? "" : status.optString("abstractGameState", "");
