@@ -21,6 +21,7 @@ import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.LinearGradient;
+import android.graphics.Matrix;
 import android.graphics.RadialGradient;
 import android.graphics.SweepGradient;
 import android.graphics.Outline;
@@ -87,13 +88,35 @@ public class MainActivity extends Activity {
     // v172: Dedicated image pool. Headshots/logos previously shared the 8-thread io pool with
     // multi-second leaderboard CSV downloads, so images queued behind data work and popped in
     // late while scrolling. Images now never wait on stats fetches.
-    private final ExecutorService imgIo = Executors.newFixedThreadPool(6);
+    // v200: now newest-first (LIFO). Search suggestion lists rebuild on every keystroke and
+    // screens churn, so the old FIFO queue made currently-visible rows wait behind image
+    // requests from rows that no longer exist on screen. Newest-submitted now runs first, so
+    // whatever the user is looking at loads first; abandoned requests drain afterwards. Bumped
+    // to 8 threads — headshots are tiny and round-trip-bound, so the extra parallelism clears
+    // a fresh screenful in one wave.
+    private final ExecutorService imgIo = new java.util.concurrent.ThreadPoolExecutor(
+            8, 8, 30L, java.util.concurrent.TimeUnit.SECONDS,
+            new java.util.concurrent.LinkedBlockingDeque<Runnable>() {
+                @Override public boolean offer(Runnable r) { return offerFirst(r); }
+            });
+    // v200: single low-intensity thread that trickles roster headshots onto disk in the
+    // background so search and rankings avatars come from local storage instead of the network.
+    private final ExecutorService prewarmIo = Executors.newSingleThreadExecutor();
     // v172: Cached pool for fanning out independent data fetches inside one comparison build.
     // A cached pool grows on demand, so nested blocking fan-outs can't deadlock the way nested
     // submits into the bounded io pool could.
     private final ExecutorService fanout = Executors.newCachedThreadPool();
     private final Handler main = new Handler(Looper.getMainLooper());
-    private final Map<String, String> textCache = Collections.synchronizedMap(new HashMap<>());
+    // v201: was an unbounded HashMap. A session that touches several seasons accumulates tens
+    // of MB of dead CSV/JSON strings (each Savant custom CSV is 1-3MB and is only read once,
+    // when it's parsed into leaderboardCache), which drives GC pressure that slows EVERYTHING.
+    // Now bounded at ~12MB of characters; eviction is safe because the disk HTTP cache remains
+    // the source of truth and a re-read costs a few milliseconds.
+    private final LruCache<String, String> textCache = new LruCache<String, String>(12 * 1024) {
+        @Override protected int sizeOf(String key, String value) {
+            return Math.max(1, (key.length() + value.length()) * 2 / 1024);
+        }
+    };
     // v172: in-flight HTTP cache refreshes (stale-while-revalidate) so each stale URL refreshes once.
     private final Set<String> refreshingUrls = Collections.synchronizedSet(new HashSet<>());
     // v172: per-key locks so concurrent leaderboard requests for the same season download once.
@@ -490,6 +513,7 @@ public class MainActivity extends Activity {
         io.shutdown();
         imgIo.shutdown();
         fanout.shutdown();
+        prewarmIo.shutdownNow();
     }
 
     private int nextScreenRequestToken() {
@@ -661,7 +685,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v199", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v201", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -5368,6 +5392,8 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                     try { fetchCombinedPlayerLeaderboard(Calendar.getInstance().get(Calendar.YEAR)); }
                     catch (Exception ignored) {}
                 });
+                // v200: trickle roster headshots onto disk so search/rankings avatars are local.
+                prewarmHeadshotsToDisk(loaded.players);
                 main.post(() -> {
                     allTeams.clear(); allTeams.addAll(loaded.teams);
                     allPlayers.clear(); allPlayers.addAll(loaded.players);
@@ -5921,19 +5947,34 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         });
     }
 
+    // v201: this filter ran Calendar.getInstance() TWICE PER ENTRY — with ~1,500 entries ×
+    // ~40 metrics × 3 rank/percentile maps per profile, that was on the order of 360,000
+    // Calendar instantiations per screen build, plus per-entry string/type checks. Everything
+    // loop-invariant is now hoisted. The unsorted variant exists because the rank-TOTAL and
+    // value-percentile builders only need the filtered set, so sorting it (~40 extra sorts of
+    // 1,500 entries per profile, twice over) was pure waste.
     private ArrayList<LeaderboardEntry> eligiblePlayerEntries(ArrayList<LeaderboardEntry> entries, int season, Metric metric) {
+        ArrayList<LeaderboardEntry> eligible = eligiblePlayerEntriesUnsorted(entries, season, metric);
+        sortEntries(eligible, metric);
+        return eligible;
+    }
+
+    private ArrayList<LeaderboardEntry> eligiblePlayerEntriesUnsorted(ArrayList<LeaderboardEntry> entries, int season, Metric metric) {
         ArrayList<LeaderboardEntry> eligible = new ArrayList<>();
+        boolean currentSeasonYear = season == Calendar.getInstance().get(Calendar.YEAR);
+        int minPa = currentSeasonYear ? 50 : 100;
+        int minBbe = currentSeasonYear ? 25 : 50;
+        double minIp = currentSeasonYear ? 10 : 25;
+        boolean contactMetric = metric.type.equals("contact") || metric.type.equals("rate");
+        boolean pitchingMetric = "pitch".equals(metric.side);
         for (LeaderboardEntry e : entries) {
             Double val = e.stats.get(metric.key);
             if (val == null) continue;
-            int minPa = season == Calendar.getInstance().get(Calendar.YEAR) ? 50 : 100;
-            int minBbe = season == Calendar.getInstance().get(Calendar.YEAR) ? 25 : 50;
-            boolean contactMetric = metric.type.equals("contact") || metric.type.equals("rate");
-            boolean pitchingMetric = "pitch".equals(metric.side);
-            boolean eligibleSample = pitchingMetric ? (e.stats.ip >= (season == Calendar.getInstance().get(Calendar.YEAR) ? 10 : 25) || e.stats.pa >= minPa) : (e.stats.pa >= minPa && (!contactMetric || e.stats.bbe >= minBbe));
+            boolean eligibleSample = pitchingMetric
+                    ? (e.stats.ip >= minIp || e.stats.pa >= minPa)
+                    : (e.stats.pa >= minPa && (!contactMetric || e.stats.bbe >= minBbe));
             if (eligibleSample) eligible.add(e);
         }
-        sortEntries(eligible, metric);
         return eligible;
     }
 
@@ -6193,7 +6234,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
     private HashMap<String, Integer> computePlayerRankTotalMap(ArrayList<LeaderboardEntry> entries, int season, ArrayList<Metric> metricList) {
         HashMap<String, Integer> totals = new HashMap<>();
-        for (Metric m : metricList) totals.put(m.key, eligiblePlayerEntries(entries, season, m).size());
+        for (Metric m : metricList) totals.put(m.key, eligiblePlayerEntriesUnsorted(entries, season, m).size());
         return totals;
     }
 
@@ -6295,7 +6336,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             Double value = stats.get(m.key);
             if (value == null || Double.isNaN(value)) continue;
             ArrayList<Double> vals = new ArrayList<>();
-            for (LeaderboardEntry e : eligiblePlayerEntries(entries, season, m)) {
+            for (LeaderboardEntry e : eligiblePlayerEntriesUnsorted(entries, season, m)) {
                 Double v = e.stats.get(m.key);
                 if (v != null && !Double.isNaN(v)) vals.add(v);
             }
@@ -12378,16 +12419,23 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             // v172: the Savant custom CSV and the MLB standard leaderboard are independent
             // requests; fetch them in parallel instead of back-to-back.
             Future<ArrayList<LeaderboardEntry>> standardFuture = fanout.submit(() -> fetchStandardLeaderboard(season, false));
+            String csvUrl;
             String csv;
             List<Map<String, String>> rows;
             try {
-                csv = httpGet(customLeaderboardUrl(season, true));
+                csvUrl = customLeaderboardUrl(season, true);
+                csv = httpGet(csvUrl);
                 rows = parseCsv(csv);
                 if (rows.isEmpty()) throw new Exception("Expanded custom leaderboard returned no rows");
             } catch (Exception expandedFailed) {
-                csv = httpGet(customLeaderboardUrl(season, false));
+                csvUrl = customLeaderboardUrl(season, false);
+                csv = httpGet(csvUrl);
                 rows = parseCsv(csv);
             }
+            // v201: the raw CSV is 1-3MB and single-use — the parsed entries are what gets
+            // cached (leaderboardCache below). Drop the text immediately rather than letting
+            // a season's worth of dead strings sit in memory.
+            textCache.remove(csvUrl);
             if (rows.isEmpty()) throw new Exception("No Baseball Savant leaderboard rows returned for " + season + ".");
             ArrayList<LeaderboardEntry> entries = new ArrayList<>();
             for (Map<String, String> row : rows) {
@@ -13311,6 +13359,36 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         loadBitmapFromUrls(urls, callback);
     }
 
+    // v200: search bars and rankings bind headshots on demand, so the first-ever sighting of a
+    // player paid a network round trip — that's the visible lag while typing in search. This
+    // trickles every active player's primary headshot onto disk on one low-intensity thread
+    // (one image at a time with a small pause), skipping anything already cached and never
+    // touching the in-memory LruCache, so it can't compete with on-screen image loads. After
+    // the first session, search/rankings avatars come from local disk. The URL below must stay
+    // byte-identical to the primary URL in loadPlayerImageBitmap, since the disk key is derived
+    // from it.
+    private void prewarmHeadshotsToDisk(ArrayList<Player> players) {
+        if (players == null || players.isEmpty()) return;
+        final ArrayList<Player> snapshot = new ArrayList<>(players);
+        prewarmIo.execute(() -> {
+            File imgDir = new File(getCacheDir(), "img");
+            imgDir.mkdirs();
+            for (Player p : snapshot) {
+                if (Thread.currentThread().isInterrupted()) return;
+                if (p == null || p.id <= 0) continue;
+                String primary = "https://img.mlbstatic.com/mlb-photos/image/upload/w_240,q_auto:good/v1/people/" + p.id + "/headshot/current";
+                File diskFile = new File(imgDir, "img_" + Integer.toHexString(primary.hashCode()) + ".webp");
+                if (diskFile.exists()) continue;
+                try {
+                    fetchAndCacheBitmap(new String[] { primary }, diskFile);
+                    Thread.sleep(40L);
+                } catch (InterruptedException interrupted) {
+                    return;
+                } catch (Exception ignored) {}
+            }
+        });
+    }
+
     private void loadTeamLogoBitmap(Team team, BitmapCallback callback) {
         if (team == null || callback == null) return;
         String code = espnTeamCode(team);
@@ -13850,7 +13928,10 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         int currentYear = Calendar.getInstance().get(Calendar.YEAR);
         // v175: the live slate URL is date-keyed but game states change minute to minute; the
         // old fall-through gave it the long TTL, freezing live status for the rest of the day.
-        if (urlString.contains("/schedule")) return 60L * 1000L;
+        // v200: schedule RANGE queries (startDate=...) are historical lookups — the bullpen card
+        // pulls a team's full season schedule this way — so they get 6h instead of re-downloading
+        // a ~season-long JSON on every open. Only the live slate (date=today) stays at 60s.
+        if (urlString.contains("/schedule")) return urlString.contains("startDate=") ? 6L * 60L * 60L * 1000L : 60L * 1000L;
         if (urlString.contains("/roster/") || urlString.contains("/sports/1/players") || urlString.contains("/teams?")) return 12L * 60L * 60L * 1000L;
         // v175: the current-season check only matched "year=" (Savant's param), but every
         // statsapi URL uses "season=" — so current-season standard leaderboards, team stats,
@@ -15613,6 +15694,14 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private float shimmerPhase = 0f;
         private ValueAnimator shimmerAnim;
+        // v201: the shimmer allocated a fresh LinearGradient shader plus ~20 RectF objects on
+        // EVERY animation frame — 60fps of garbage for the entire duration of every load,
+        // exactly when the CPU is busiest with parsing and layout. The shader is now built once
+        // per width and slid with a local matrix; the rect is reused.
+        private LinearGradient shimmerShader;
+        private float shimmerShaderBandW = -1f;
+        private final Matrix shimmerMatrix = new Matrix();
+        private final RectF skelRect = new RectF();
 
         SkeletonLoadingView(Context context) { super(context); }
 
@@ -15649,17 +15738,22 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
             // Shimmer band sweeps left-to-right, repeating
             float bandW = w * 0.55f;
-            float bandStart = -bandW + (w + bandW) * shimmerPhase;
-            LinearGradient shimmer = new LinearGradient(
-                bandStart, 0, bandStart + bandW, 0,
-                new int[] {
-                    Color.argb(0,   120, 190, 255),
-                    Color.argb(105, 170, 220, 255),
-                    Color.argb(0,   120, 190, 255)
-                },
-                new float[] { 0f, 0.5f, 1f },
-                Shader.TileMode.CLAMP
-            );
+            if (shimmerShader == null || shimmerShaderBandW != bandW) {
+                shimmerShader = new LinearGradient(
+                    0, 0, bandW, 0,
+                    new int[] {
+                        Color.argb(0,   120, 190, 255),
+                        Color.argb(105, 170, 220, 255),
+                        Color.argb(0,   120, 190, 255)
+                    },
+                    new float[] { 0f, 0.5f, 1f },
+                    Shader.TileMode.CLAMP
+                );
+                shimmerShaderBandW = bandW;
+            }
+            shimmerMatrix.setTranslate(-bandW + (w + bandW) * shimmerPhase, 0);
+            shimmerShader.setLocalMatrix(shimmerMatrix);
+            LinearGradient shimmer = shimmerShader;
 
             float px  = dp(4);   // horizontal padding matching form card
             float iy  = dp(8);   // current y cursor
@@ -15728,23 +15822,25 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
         /** Full-card background (slightly darker base) */
         private void skelCard(Canvas canvas, float l, float t, float r, float b, float radius, LinearGradient shimmer) {
+            skelRect.set(l, t, r, b);
             paint.setShader(null);
             paint.setStyle(Paint.Style.FILL);
             paint.setColor(Color.rgb(7, 13, 24));
-            canvas.drawRoundRect(new RectF(l, t, r, b), radius, radius, paint);
+            canvas.drawRoundRect(skelRect, radius, radius, paint);
             paint.setShader(shimmer);
-            canvas.drawRoundRect(new RectF(l, t, r, b), radius, radius, paint);
+            canvas.drawRoundRect(skelRect, radius, radius, paint);
             paint.setShader(null);
         }
 
         /** Inner element (slightly lighter) */
         private void skelItem(Canvas canvas, float l, float t, float r, float b, float radius, LinearGradient shimmer) {
+            skelRect.set(l, t, r, b);
             paint.setShader(null);
             paint.setStyle(Paint.Style.FILL);
             paint.setColor(Color.rgb(22, 34, 54));
-            canvas.drawRoundRect(new RectF(l, t, r, b), radius, radius, paint);
+            canvas.drawRoundRect(skelRect, radius, radius, paint);
             paint.setShader(shimmer);
-            canvas.drawRoundRect(new RectF(l, t, r, b), radius, radius, paint);
+            canvas.drawRoundRect(skelRect, radius, radius, paint);
             paint.setShader(null);
         }
     }
@@ -15814,58 +15910,87 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         @Override public int getCount() { return data.size(); }
         @Override public Object getItem(int position) { return data.get(position); }
         @Override public long getItemId(int position) { return data.get(position).id; }
+
+        // v201: getView previously called removeAllViews() and rebuilt ~12 child views on EVERY
+        // bind, defeating ListView recycling entirely — visible jank when scrolling search
+        // results and wasted work on every keystroke. The structure is now built once per
+        // recycled row and only per-player content (colors, texts, image) is rebound. The image
+        // is guarded by a tag so a recycled row can't receive the previous player's bitmap.
+        class SuggestionRowHolder {
+            LinearLayout row; FrameLayout avatar; ImageView img;
+            TextView name; TextView meta; TextView chip; TextView abbr;
+        }
+
+        private SuggestionRowHolder buildSuggestionRow() {
+            SuggestionRowHolder h = new SuggestionRowHolder();
+            h.row = new LinearLayout(MainActivity.this);
+            h.row.setOrientation(LinearLayout.HORIZONTAL);
+            h.row.setGravity(Gravity.CENTER_VERTICAL);
+            h.row.setPadding(dp(12), dp(12), dp(12), dp(12));
+            h.avatar = new FrameLayout(MainActivity.this);
+            h.avatar.setPadding(dp(3), dp(3), dp(3), dp(3));
+            h.img = new ImageView(MainActivity.this);
+            h.img.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            h.img.setAdjustViewBounds(false);
+            h.img.setBackground(rounded(Color.WHITE, 30));
+            applyRoundedClip(h.img, 30);
+            h.avatar.addView(h.img, new FrameLayout.LayoutParams(-1, -1));
+            LinearLayout.LayoutParams imgLp = new LinearLayout.LayoutParams(dp(68), dp(68));
+            imgLp.setMargins(0, 0, dp(9), 0);
+            h.row.addView(h.avatar, imgLp);
+            LinearLayout col = new LinearLayout(MainActivity.this);
+            col.setOrientation(LinearLayout.VERTICAL);
+            h.name = text("", 17, Color.WHITE, true);
+            h.meta = text("", 11, Color.rgb(180, 194, 214), false);
+            col.addView(h.name);
+            col.addView(h.meta);
+            h.row.addView(col, new LinearLayout.LayoutParams(0, -2, 1));
+            LinearLayout chipWrap = new LinearLayout(MainActivity.this);
+            chipWrap.setOrientation(LinearLayout.VERTICAL);
+            chipWrap.setGravity(Gravity.END);
+            h.chip = text("", 10, Color.WHITE, true);
+            h.chip.setGravity(Gravity.CENTER);
+            h.chip.setPadding(dp(8), dp(4), dp(8), dp(4));
+            h.chip.setBackground(roundedStroke(Color.argb(28, 255, 255, 255), Color.argb(92, 255, 255, 255), 12, 1));
+            chipWrap.addView(h.chip);
+            h.abbr = text("", 10, Color.WHITE, true);
+            h.abbr.setPadding(dp(7), dp(4), dp(7), dp(4));
+            h.abbr.setBackground(rounded(Color.argb(12, 255, 255, 255), 11));
+            LinearLayout.LayoutParams abbrLp = new LinearLayout.LayoutParams(-2, -2);
+            abbrLp.topMargin = dp(6);
+            chipWrap.addView(h.abbr, abbrLp);
+            h.row.addView(chipWrap);
+            h.row.setTag(h);
+            return h;
+        }
+
         @Override public View getView(int position, View convertView, android.view.ViewGroup parent) {
             Player p = data.get(position);
-            LinearLayout row;
-            if (convertView instanceof LinearLayout) row = (LinearLayout) convertView;
-            else {
-                row = new LinearLayout(MainActivity.this);
-                row.setOrientation(LinearLayout.HORIZONTAL);
-                row.setGravity(Gravity.CENTER_VERTICAL);
-                row.setPadding(dp(10), dp(9), dp(10), dp(9));
-            }
-            row.removeAllViews();
+            SuggestionRowHolder h = convertView != null && convertView.getTag() instanceof SuggestionRowHolder
+                    ? (SuggestionRowHolder) convertView.getTag()
+                    : buildSuggestionRow();
             TeamPalette palette = paletteForAbbr(p.teamAbbr);
-            row.setPadding(dp(12), dp(12), dp(12), dp(12));
-            row.setBackground(roundedGradient(new int[] {
+            h.row.setBackground(roundedGradient(new int[] {
                     softColor(palette.primary, 0.18f),
                     Color.rgb(7, 12, 22),
                     softColor(palette.secondary, 0.12f)
             }, 22));
-            FrameLayout avatar = new FrameLayout(MainActivity.this);
-            avatar.setPadding(dp(3), dp(3), dp(3), dp(3));
-            avatar.setBackground(roundedGradient(new int[] { softColor(palette.primary, 0.20f), softColor(palette.secondary, 0.26f) }, 34));
-            ImageView img = new ImageView(MainActivity.this);
-            img.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            img.setAdjustViewBounds(false);
-            img.setBackground(rounded(Color.WHITE, 30));
-            applyRoundedClip(img, 30);
-            avatar.addView(img, new FrameLayout.LayoutParams(-1, -1));
-            LinearLayout.LayoutParams imgLp = new LinearLayout.LayoutParams(dp(68), dp(68));
-            imgLp.setMargins(0, 0, dp(9), 0);
-            row.addView(avatar, imgLp);
-            loadPlayerImage(p.id, img);
-            LinearLayout col = new LinearLayout(MainActivity.this);
-            col.setOrientation(LinearLayout.VERTICAL);
-            col.addView(text(p.fullName, 17, Color.WHITE, true));
-            col.addView(text(p.teamAbbr + " · " + p.position + (isPitcher(p) ? " · Pitcher" : " · Hitter"), 11, Color.rgb(180, 194, 214), false));
-            row.addView(col, new LinearLayout.LayoutParams(0, -2, 1));
-            LinearLayout chipWrap = new LinearLayout(MainActivity.this);
-            chipWrap.setOrientation(LinearLayout.VERTICAL);
-            chipWrap.setGravity(Gravity.END);
-            TextView chip = text(isPitcher(p) ? "P" : "BAT", 10, isPitcher(p) ? Color.rgb(132, 188, 255) : readableTeamColor(palette.primary, palette.secondary, true), true);
-            chip.setGravity(Gravity.CENTER);
-            chip.setPadding(dp(8), dp(4), dp(8), dp(4));
-            chip.setBackground(roundedStroke(Color.argb(28, 255, 255, 255), Color.argb(92, 255, 255, 255), 12, 1));
-            chipWrap.addView(chip);
-            TextView abbr = text(p.teamAbbr, 10, readableTeamColor(palette.primary, palette.secondary, true), true);
-            abbr.setPadding(dp(7), dp(4), dp(7), dp(4));
-            abbr.setBackground(rounded(Color.argb(12, 255, 255, 255), 11));
-            LinearLayout.LayoutParams abbrLp = new LinearLayout.LayoutParams(-2, -2);
-            abbrLp.topMargin = dp(6);
-            chipWrap.addView(abbr, abbrLp);
-            row.addView(chipWrap);
-            return row;
+            h.avatar.setBackground(roundedGradient(new int[] { softColor(palette.primary, 0.20f), softColor(palette.secondary, 0.26f) }, 34));
+            h.name.setText(p.fullName);
+            h.meta.setText(p.teamAbbr + " · " + p.position + (isPitcher(p) ? " · Pitcher" : " · Hitter"));
+            h.chip.setText(isPitcher(p) ? "P" : "BAT");
+            h.chip.setTextColor(isPitcher(p) ? Color.rgb(132, 188, 255) : readableTeamColor(palette.primary, palette.secondary, true));
+            h.abbr.setText(p.teamAbbr);
+            h.abbr.setTextColor(readableTeamColor(palette.primary, palette.secondary, true));
+            final ImageView target = h.img;
+            final int pid = p.id;
+            target.setTag(pid);
+            target.setImageDrawable(roundedGradient(new int[] { Color.rgb(5, 9, 17), Color.rgb(13, 20, 34) }, 24));
+            loadPlayerImageBitmap(pid, bitmap -> {
+                Object tag = target.getTag();
+                if (tag instanceof Integer && (Integer) tag == pid) target.setImageBitmap(bitmap);
+            });
+            return h.row;
         }
     }
 
@@ -18164,12 +18289,111 @@ private View liveGameCard(LiveGame game) {
             ArrayList<ScheduleGameRef> games = fetchCompletedTeamGames(team, start, end, excludeGamePk, true);
             if (games.isEmpty()) games = fetchCompletedTeamGames(team, start, end, excludeGamePk, false);
             int startIndex = Math.max(0, games.size() - 90);
+            // v200: this loop previously fetched each boxscore one-by-one — up to 90 serial HTTP
+            // round trips per team (~180 per matchup card), which is why the bullpen card was so
+            // slow. Completed games are immutable, so each game's parsed relief appearances are
+            // now cached permanently (repeat opens read tiny local JSONs and only fetch games
+            // completed since the last view), and first-time fetches run 8 wide. daysAgo is
+            // recomputed from the game date at merge time so freshness stays correct no matter
+            // when the cache entry was written.
+            ExecutorService pool = Executors.newFixedThreadPool(8);
+            ArrayList<Future<ArrayList<BullpenAppearanceRecord>>> futures = new ArrayList<>();
             for (int i = startIndex; i < games.size(); i++) {
-                ScheduleGameRef g = games.get(i);
+                final ScheduleGameRef g = games.get(i);
                 if (g == null) continue;
-                mergeBullpenAppearancesFromBoxscore(report, team, g.gamePk, g.dateKey, daysAgoFromDateKey(g.dateKey));
+                futures.add(pool.submit(() -> bullpenAppearancesForGame(team, g.gamePk, g.dateKey)));
             }
+            for (Future<ArrayList<BullpenAppearanceRecord>> f : futures) {
+                try {
+                    for (BullpenAppearanceRecord r : f.get()) {
+                        report.addAppearance(r.dateKey, daysAgoFromDateKey(r.dateKey), r.pitcherId, r.pitcherName,
+                                r.ip, r.pitches, r.er, r.hits, r.walks, r.k, r.bf, r.hr, r.runs, r.bulk, r.longRelief);
+                    }
+                } catch (Exception ignored) {}
+            }
+            pool.shutdown();
             report.qualitySource = "Appearance-based";
+        } catch (Exception ignored) {}
+    }
+
+    static class BullpenAppearanceRecord {
+        final String dateKey; final int pitcherId; final String pitcherName;
+        final double ip; final int pitches;
+        final double er, hits, walks, k, bf, hr, runs;
+        final boolean bulk, longRelief;
+        BullpenAppearanceRecord(String dateKey, int pitcherId, String pitcherName, double ip, int pitches,
+                                double er, double hits, double walks, double k, double bf, double hr, double runs,
+                                boolean bulk, boolean longRelief) {
+            this.dateKey = dateKey; this.pitcherId = pitcherId; this.pitcherName = pitcherName;
+            this.ip = ip; this.pitches = pitches;
+            this.er = er; this.hits = hits; this.walks = walks; this.k = k;
+            this.bf = bf; this.hr = hr; this.runs = runs;
+            this.bulk = bulk; this.longRelief = longRelief;
+        }
+    }
+
+    // v200: per-(game, team) relief appearances. Cache hit = tiny local JSON; miss = boxscore
+    // fetch + parse, then cached permanently since completed games never change. A successful
+    // parse with no relief work caches an empty list; a fetch/parse FAILURE is never cached.
+    private ArrayList<BullpenAppearanceRecord> bullpenAppearancesForGame(Team team, int gamePk, String dateKey) {
+        String cacheKey = "bpapp_" + gamePk + "_" + team.id;
+        ArrayList<BullpenAppearanceRecord> cached = loadCachedBullpenAppearances(cacheKey);
+        if (cached != null) return cached;
+        ArrayList<BullpenAppearanceRecord> parsed = parseBullpenAppearancesFromBoxscore(team, gamePk, dateKey);
+        if (parsed != null) {
+            saveCachedBullpenAppearances(cacheKey, parsed);
+            return parsed;
+        }
+        return new ArrayList<>();
+    }
+
+    private File bullpenAppearanceCacheFile(String key) {
+        File dir = new File(getCacheDir(), "bullpen_apps");
+        dir.mkdirs();
+        return new File(dir, key + ".json");
+    }
+
+    private ArrayList<BullpenAppearanceRecord> loadCachedBullpenAppearances(String key) {
+        try {
+            File f = bullpenAppearanceCacheFile(key);
+            if (!f.exists()) return null;
+            String text = readCacheFile(f);
+            if (text == null || text.isEmpty()) return null;
+            JSONObject root = new JSONObject(text);
+            JSONArray arr = root.optJSONArray("appearances");
+            if (arr == null) return null;
+            ArrayList<BullpenAppearanceRecord> out = new ArrayList<>();
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject o = arr.optJSONObject(i);
+                if (o == null) continue;
+                out.add(new BullpenAppearanceRecord(
+                        o.optString("date", ""), o.optInt("pid", 0), o.optString("name", ""),
+                        o.optDouble("ip", 0), o.optInt("pitches", 0),
+                        o.optDouble("er", 0), o.optDouble("h", 0), o.optDouble("bb", 0), o.optDouble("k", 0),
+                        o.optDouble("bf", 0), o.optDouble("hr", 0), o.optDouble("r", 0),
+                        o.optBoolean("bulk", false), o.optBoolean("long", false)));
+            }
+            return out;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void saveCachedBullpenAppearances(String key, ArrayList<BullpenAppearanceRecord> records) {
+        try {
+            JSONArray arr = new JSONArray();
+            for (BullpenAppearanceRecord r : records) {
+                JSONObject o = new JSONObject();
+                o.put("date", r.dateKey); o.put("pid", r.pitcherId); o.put("name", r.pitcherName);
+                o.put("ip", r.ip); o.put("pitches", r.pitches);
+                o.put("er", r.er); o.put("h", r.hits); o.put("bb", r.walks); o.put("k", r.k);
+                o.put("bf", r.bf); o.put("hr", r.hr); o.put("r", r.runs);
+                o.put("bulk", r.bulk); o.put("long", r.longRelief);
+                arr.put(o);
+            }
+            JSONObject root = new JSONObject();
+            root.put("appearances", arr);
+            writeCacheFile(bullpenAppearanceCacheFile(key), root.toString());
         } catch (Exception ignored) {}
     }
 
@@ -18222,22 +18446,31 @@ private View liveGameCard(LiveGame game) {
     }
 
 
-    private void mergeBullpenAppearancesFromBoxscore(BullpenReport report, Team team, int gamePk, String dateKey, int daysAgo) {
-        if (report == null || team == null || gamePk <= 0) return;
+    // v200: was mergeBullpenAppearancesFromBoxscore. Now a pure parser safe to run on worker
+    // threads (the report is only mutated on the collecting thread): returns the game's relief
+    // appearance records, an empty list for a valid boxscore with no relief work, or null on
+    // fetch/parse failure so failures are never cached as absence.
+    private ArrayList<BullpenAppearanceRecord> parseBullpenAppearancesFromBoxscore(Team team, int gamePk, String dateKey) {
+        if (team == null || gamePk <= 0) return new ArrayList<>();
         try {
-            JSONObject box = new JSONObject(httpGet("https://statsapi.mlb.com/api/v1/game/" + gamePk + "/boxscore"));
+            String boxUrl = "https://statsapi.mlb.com/api/v1/game/" + gamePk + "/boxscore";
+            JSONObject box = new JSONObject(httpGet(boxUrl));
+            // Single-use ~200KB payload: the parsed records are what gets cached, so don't let
+            // up to 180 of these accumulate in the in-memory text cache for the whole session.
+            textCache.remove(boxUrl);
+            ArrayList<BullpenAppearanceRecord> out = new ArrayList<>();
             JSONObject teamsObj = box.optJSONObject("teams");
-            if (teamsObj == null) return;
+            if (teamsObj == null) return out;
             JSONObject side = null;
             JSONObject away = teamsObj.optJSONObject("away");
             JSONObject home = teamsObj.optJSONObject("home");
             if (away != null && teamMatchesBoxscoreTeam(away.optJSONObject("team"), team)) side = away;
             else if (home != null && teamMatchesBoxscoreTeam(home.optJSONObject("team"), team)) side = home;
-            if (side == null) return;
+            if (side == null) return out;
 
             JSONArray pitchers = side.optJSONArray("pitchers");
             JSONObject players = side.optJSONObject("players");
-            if (pitchers == null || players == null || pitchers.length() == 0) return;
+            if (pitchers == null || players == null || pitchers.length() == 0) return out;
 
             HashSet<Integer> starterIds = starterPitcherIdsFromBoxscore(pitchers, players);
             int firstPitcherId = pitchers.optInt(0, 0);
@@ -18269,9 +18502,13 @@ private View liveGameCard(LiveGame game) {
 
                 boolean bulk = isBulkReliefAppearance(openerGame, i, ip, pitches);
                 boolean longRelief = isLongReliefAppearance(bulk, ip, pitches);
-                report.addAppearance(dateKey, daysAgo, pid, pitcherNameFromBoxscore(pObj), ip, pitches, er, hits, bb, k, bf, hr, runs, bulk, longRelief);
+                out.add(new BullpenAppearanceRecord(dateKey, pid, pitcherNameFromBoxscore(pObj), ip, pitches,
+                        er, hits, bb, k, bf, hr, runs, bulk, longRelief));
             }
-        } catch (Exception ignored) {}
+            return out;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
 
@@ -18404,7 +18641,13 @@ private View liveGameCard(LiveGame game) {
 
 
     private void mergeBullpenUsageFromBoxscore(BullpenReport report, Team team, int gamePk, String dateKey, int daysAgo) {
-        mergeBullpenAppearancesFromBoxscore(report, team, gamePk, dateKey, daysAgo);
+        // v200: routes through the same cached per-(game, team) appearance records as the main
+        // appearance path, so the recent-usage fallback also skips re-fetching boxscores.
+        if (report == null) return;
+        for (BullpenAppearanceRecord r : bullpenAppearancesForGame(team, gamePk, dateKey)) {
+            report.addAppearance(r.dateKey, daysAgo, r.pitcherId, r.pitcherName,
+                    r.ip, r.pitches, r.er, r.hits, r.walks, r.k, r.bf, r.hr, r.runs, r.bulk, r.longRelief);
+        }
     }
 
 
