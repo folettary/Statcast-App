@@ -465,7 +465,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        // v192: bullpen usage matrix + scouting structure; phone-first portrait app. Prevent rotation recreation from dumping the user
+        // v193: bullpen usage matrix + scouting structure; phone-first portrait app. Prevent rotation recreation from dumping the user
         // back to Home while browsing a profile or matchup.
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
         getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
@@ -660,7 +660,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v192", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v193", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -7968,7 +7968,14 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
         @Override public boolean performClick() {
             super.performClick();
-            showMetricPicker();
+            if (isBullpenHeroComparison(h)) {
+                showBullpenInfoSheet("Bullpen Matchup Type",
+                        "This card uses the same premium matchup framework, but Bullpen is a fixed matchup type instead of a normal lens.\n\n"
+                                + "Overall bullpen edge is weighted 70% Quality and 30% Freshness. Quality uses ERA, WHIP, K-BB%, and HR/9. Freshness uses recent non-starter workload, pitch counts, back-to-back relievers, and watch/down usage signals.\n\n"
+                                + "The detailed Freshness and Quality panels below show the supporting data.");
+            } else {
+                showMetricPicker();
+            }
             return true;
         }
 
@@ -8027,11 +8034,13 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
             float titleY = card.top + dp(28);
             drawText(canvas, h.season + " STATCAST MATCHUP", card.centerX(), titleY, dp(10), Color.rgb(204, 215, 230), true, Paint.Align.CENTER, 0.13f);
-            String statPill = keyScore.scoredRows == allMetrics.size()
-                    ? keyScore.scoredRows + " SCORING STATS"
-                    : allMetrics.size() + " SELECTED · " + keyScore.scoredRows + " SCORED";
-            drawPill(canvas, statPill, card.centerX(), titleY + dp(24), dp(keyScore.scoredRows == allMetrics.size() ? 104 : 138), dp(24), Color.argb(36, 255, 255, 255), Color.argb(72, 255, 255, 255), Color.rgb(218, 228, 241), dp(8));
-            String lensLabel = "LENS · " + matchupLensNameForUi(h).toUpperCase(Locale.US);
+            boolean bullpenCard = isBullpenHeroComparison(h);
+            String statPill = bullpenCard ? "QUALITY + FRESHNESS"
+                    : (keyScore.scoredRows == allMetrics.size()
+                        ? keyScore.scoredRows + " SCORING STATS"
+                        : allMetrics.size() + " SELECTED · " + keyScore.scoredRows + " SCORED");
+            drawPill(canvas, statPill, card.centerX(), titleY + dp(24), dp(bullpenCard ? 148 : (keyScore.scoredRows == allMetrics.size() ? 104 : 138)), dp(24), Color.argb(36, 255, 255, 255), Color.argb(72, 255, 255, 255), Color.rgb(218, 228, 241), dp(8));
+            String lensLabel = premiumCardLensEyebrow();
             drawText(canvas, lensLabel, card.centerX(), titleY + dp(49), dp(7), Color.rgb(206, 218, 235), true, Paint.Align.CENTER, 0.08f);
             if (keyScore.sampleAdjustedRows > 0) {
                 drawPill(canvas, "SAMPLE WEIGHTED", card.centerX(), titleY + dp(68), dp(110), dp(17), Color.argb(24, 255, 255, 255), Color.argb(52, 255, 255, 255), Color.rgb(174, 190, 212), dp(6));
@@ -8911,10 +8920,11 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             String title = pctDiff <= 2 ? "WEIGHTED EDGE · EVEN" : "WEIGHTED EDGE · " + leader + " " + leadWord;
 
             float titleSize = fitTextSize(paint, title, dp(9), dp(7), score.width() - dp(30), 0.10f, true);
-            drawText(canvas, title, score.centerX(), score.top + dp(23), titleSize, Color.rgb(232, 240, 249), true, Paint.Align.CENTER, 0.10f);
-            drawText(canvas, "SCORED EDGE SHARE", score.centerX(), score.top + dp(41), dp(7), Color.rgb(166, 181, 202), true, Paint.Align.CENTER, 0.11f);
+            drawText(canvas, title, score.centerX(), score.top + dp(20), titleSize, Color.rgb(232, 240, 249), true, Paint.Align.CENTER, 0.10f);
+            drawText(canvas, premiumCardScoreContextLine(), score.centerX(), score.top + dp(37), dp(7), isBullpenHeroComparison(h) ? Color.rgb(247, 197, 77) : Color.rgb(194, 210, 232), true, Paint.Align.CENTER, 0.10f);
+            drawText(canvas, isBullpenHeroComparison(h) ? "WEIGHTED BULLPEN EDGE" : "SCORED EDGE SHARE", score.centerX(), score.top + dp(51), dp(7), Color.rgb(166, 181, 202), true, Paint.Align.CENTER, 0.11f);
 
-            float midY = score.top + dp(74);
+            float midY = score.top + dp(78);
             float scoreSize = dp(35);
             float hyphenSize = dp(29);
             float xA = score.centerX() - dp(68);
@@ -8972,8 +8982,10 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         }
 
         private void drawKeyStatBody(Canvas canvas, RectF card, float keyY) {
-            keyEdgePickerHotspot.set(card.left + dp(10), keyY - dp(26), card.left + dp(190), keyY + dp(16));
-            drawText(canvas, "SCORED STAT EDGE", card.left + dp(48), keyY, dp(11), Color.rgb(228, 235, 245), true, Paint.Align.LEFT, 0.12f);
+            keyEdgePickerHotspot.set(card.left + dp(10), keyY - dp(26), card.left + dp(244), keyY + dp(16));
+            String sectionTitle = premiumCardStatSectionTitle();
+            float sectionTitleSize = fitTextSize(paint, sectionTitle, dp(11), dp(8), card.width() - dp(90), 0.10f, true);
+            drawText(canvas, sectionTitle, card.left + dp(48), keyY, sectionTitleSize, Color.rgb(228, 235, 245), true, Paint.Align.LEFT, 0.10f);
             paint.setStyle(Paint.Style.FILL);
             paint.setShader(null);
             paint.setColor(Color.argb(48, 255, 255, 255));
@@ -9603,6 +9615,22 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             paint.setTextAlign(align);
         }
 
+
+        private String premiumCardLensEyebrow() {
+            if (isBullpenHeroComparison(h)) return "MATCHUP TYPE · BULLPEN";
+            return "LENS · " + matchupLensNameForUi(h).toUpperCase(Locale.US);
+        }
+
+        private String premiumCardScoreContextLine() {
+            if (isBullpenHeroComparison(h)) return "70% QUALITY · 30% FRESHNESS";
+            return matchupLensNameForUi(h).toUpperCase(Locale.US) + " LENS";
+        }
+
+        private String premiumCardStatSectionTitle() {
+            if (isBullpenHeroComparison(h)) return "BULLPEN SCORING FACTORS";
+            return matchupLensNameForUi(h).toUpperCase(Locale.US) + " LENS STATS";
+        }
+
         private void drawPill(Canvas canvas, String label, float cx, float cy, float w, float h, int fill, int stroke, int textColor, float sp) {
             RectF r = new RectF(cx - w / 2f, cy - h / 2f, cx + w / 2f, cy + h / 2f);
             paint.setStyle(Paint.Style.FILL);
@@ -9681,6 +9709,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     private StatScoreSummary summarizeHeadToHeadEdges(HeadToHeadComparison h, ArrayList<Metric> metricList) {
         // v130: keep the math weighted, but expose it as a clearer edge-share visual.
         // This keeps quick-glance behavior while avoiding a misleading row-count scoreboard.
+        if (isBullpenHeroComparison(h)) return summarizeBullpenHeroEdges(h, metricList);
         StatScoreSummary summary = new StatScoreSummary();
         if (metricList == null) return summary;
         for (Metric m : metricList) {
@@ -9707,6 +9736,35 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 } else {
                     summary.aPts += loserShare;
                     summary.bPts += winnerShare;
+                }
+            }
+        }
+        return summary;
+    }
+
+    private StatScoreSummary summarizeBullpenHeroEdges(HeadToHeadComparison h, ArrayList<Metric> metricList) {
+        StatScoreSummary summary = new StatScoreSummary();
+        if (h == null || metricList == null) return summary;
+        for (Metric m : metricList) {
+            StatEdgeResult edge = statEdgeForMetric(h, m);
+            if (edge == null || !edge.valid) continue;
+            double weight = "bpQualityScore".equals(m.key) ? 0.70d : ("bpFreshnessScore".equals(m.key) ? 0.30d : 0.0d);
+            if (weight <= 0.0d) continue;
+            summary.displayedRows++;
+            summary.scoredRows++;
+            if (edge.winner == 0) {
+                summary.tossUpRows++;
+                summary.aPts += weight * 0.5d;
+                summary.bPts += weight * 0.5d;
+            } else {
+                double winnerShare = 0.5d + 0.5d * Math.max(0d, Math.min(1d, edge.scoreStrength));
+                double loserShare = 1d - winnerShare;
+                if (edge.winner < 0) {
+                    summary.aPts += weight * winnerShare;
+                    summary.bPts += weight * loserShare;
+                } else {
+                    summary.aPts += weight * loserShare;
+                    summary.bPts += weight * winnerShare;
                 }
             }
         }
@@ -16420,36 +16478,10 @@ private View liveGameCard(LiveGame game) {
 
         panel.addView(bullpenEdgeHeroCards(away, home, awayColor, homeColor), matchWrap());
 
-        bullpenSectionTitle(panel, "FRESHNESS DETAILS", "");
-        panel.addView(bullpenTeamSummaryRow(away, home, awayColor, homeColor), matchWrap());
-
-        bullpenSectionTitle(panel, "RELIEVER AVAILABILITY", "Last 5 days by arm");
-        panel.addView(bullpenUsageMatrixCard(away, awayColor), matchWrap());
-        LinearLayout.LayoutParams homeMatrixLp = matchWrap();
-        homeMatrixLp.setMargins(0, dp(8), 0, 0);
-        panel.addView(bullpenUsageMatrixCard(home, homeColor), homeMatrixLp);
-
-        bullpenSectionTitle(panel, "RECENT WORKLOAD", "");
-        bullpenSubsectionLabel(panel, "Yesterday");
-        bullpenCompareRow(panel, "Relievers", bullpenIpPitches(away.yesterdayIp, away.yesterdayPitches), bullpenIpPitches(home.yesterdayIp, home.yesterdayPitches), compareLower(away.yesterdayIp, home.yesterdayIp), awayColor, homeColor);
-        bullpenCompareRow(panel, "Follower", bullpenIpPitches(away.yesterdayBulkIp, away.yesterdayBulkPitches), bullpenIpPitches(home.yesterdayBulkIp, home.yesterdayBulkPitches), compareLower(away.yesterdayBulkIp, home.yesterdayBulkIp), awayColor, homeColor);
-        bullpenCompareRow(panel, "Long relief", bullpenIpPitches(away.yesterdayLongIp, away.yesterdayLongPitches), bullpenIpPitches(home.yesterdayLongIp, home.yesterdayLongPitches), compareLower(away.yesterdayLongIp, home.yesterdayLongIp), awayColor, homeColor);
-        bullpenCompareRow(panel, "Staff usage", bullpenIpPitches(away.yesterdayNonStarterIp(), away.yesterdayNonStarterPitches()), bullpenIpPitches(home.yesterdayNonStarterIp(), home.yesterdayNonStarterPitches()), compareLower(away.yesterdayNonStarterIp(), home.yesterdayNonStarterIp()), awayColor, homeColor);
-        bullpenSubsectionLabel(panel, "Prior 2 Days");
-        bullpenCompareRow(panel, "Relievers", bullpenIpFmt(away.last2Ip), bullpenIpFmt(home.last2Ip), compareLower(away.last2Ip, home.last2Ip), awayColor, homeColor);
-        bullpenCompareRow(panel, "Follower", bullpenIpFmt(away.last2BulkIp), bullpenIpFmt(home.last2BulkIp), compareLower(away.last2BulkIp, home.last2BulkIp), awayColor, homeColor);
-        bullpenCompareRow(panel, "Long relief", bullpenIpFmt(away.last2LongIp), bullpenIpFmt(home.last2LongIp), compareLower(away.last2LongIp, home.last2LongIp), awayColor, homeColor);
-        bullpenCompareRow(panel, "Staff usage", bullpenIpPitches(away.last2NonStarterIp(), away.last2NonStarterPitches()), bullpenIpPitches(home.last2NonStarterIp(), home.last2NonStarterPitches()), compareLower(away.last2NonStarterIp(), home.last2NonStarterIp()), awayColor, homeColor);
-        bullpenCompareRow(panel, "B2B relievers", String.valueOf(away.b2bArms), String.valueOf(home.b2bArms), compareLower(away.b2bArms, home.b2bArms), awayColor, homeColor);
-        bullpenCompareRow(panel, "Freshness read", away.fatigueLabel(), home.fatigueLabel(), compareLower(away.fatiguePenalty(), home.fatiguePenalty()), awayColor, homeColor);
-
-        bullpenSectionTitle(panel, "QUALITY DETAILS", "Relief appearances only");
-        bullpenCompareRow(panel, "ERA", bullpenFmt(away.era(), 2), bullpenFmt(home.era(), 2), compareLower(away.era(), home.era()), awayColor, homeColor);
-        bullpenCompareRow(panel, "WHIP", bullpenFmt(away.whip(), 2), bullpenFmt(home.whip(), 2), compareLower(away.whip(), home.whip()), awayColor, homeColor);
-        bullpenCompareRow(panel, "K-BB%", bullpenFmt(away.kMinusBbPct(), 1) + "%", bullpenFmt(home.kMinusBbPct(), 1) + "%", compareHigher(away.kMinusBbPct(), home.kMinusBbPct()), awayColor, homeColor);
-        bullpenCompareRow(panel, "HR/9", bullpenFmt(away.hr9(), 2), bullpenFmt(home.hr9(), 2), compareLower(away.hr9(), home.hr9()), awayColor, homeColor);
-        bullpenCompareRow(panel, "Last 30d ERA", bullpenFmt(away.recent30Era(), 2), bullpenFmt(home.recent30Era(), 2), compareLower(away.recent30Era(), home.recent30Era()), awayColor, homeColor);
-        bullpenCompareRow(panel, "Last 14d K-BB%", bullpenFmt(away.recent14KMinusBbPct(), 1) + "%", bullpenFmt(home.recent14KMinusBbPct(), 1) + "%", compareHigher(away.recent14KMinusBbPct(), home.recent14KMinusBbPct()), awayColor, homeColor);
+        LinearLayout detailContent = new LinearLayout(this);
+        detailContent.setOrientation(LinearLayout.VERTICAL);
+        panel.addView(bullpenDetailSwitcher(detailContent, away, home, awayColor, homeColor), matchWrap());
+        panel.addView(detailContent, matchWrap());
 
 
         standingsBox.addView(panel, matchWrap());
@@ -16479,6 +16511,99 @@ private View liveGameCard(LiveGame game) {
 
 
 
+
+
+    private LinearLayout bullpenDetailSwitcher(LinearLayout detailContent, BullpenReport away, BullpenReport home, int awayColor, int homeColor) {
+        LinearLayout shell = new LinearLayout(this);
+        shell.setOrientation(LinearLayout.VERTICAL);
+        shell.setPadding(dp(6), dp(6), dp(6), dp(6));
+        shell.setBackground(roundedStroke(Color.argb(30, 255, 255, 255), Color.argb(48, 255, 255, 255), 18, 1));
+        LinearLayout.LayoutParams shellLp = matchWrap();
+        shellLp.setMargins(0, dp(4), 0, dp(8));
+        shell.setLayoutParams(shellLp);
+
+        LinearLayout tabs = new LinearLayout(this);
+        tabs.setOrientation(LinearLayout.HORIZONTAL);
+        tabs.setGravity(Gravity.CENTER);
+        final int[] selected = new int[] { 0 };
+        final TextView[] chips = new TextView[2];
+
+        Runnable refresh = () -> {
+            chips[0].setBackground(bullpenDetailTabBg(selected[0] == 0, awayColor, homeColor));
+            chips[1].setBackground(bullpenDetailTabBg(selected[0] == 1, awayColor, homeColor));
+            chips[0].setTextColor(selected[0] == 0 ? Color.rgb(8, 12, 20) : Color.rgb(218, 231, 246));
+            chips[1].setTextColor(selected[0] == 1 ? Color.rgb(8, 12, 20) : Color.rgb(218, 231, 246));
+            detailContent.removeAllViews();
+            if (selected[0] == 0) renderBullpenFreshnessDetails(detailContent, away, home, awayColor, homeColor);
+            else renderBullpenQualityDetails(detailContent, away, home, awayColor, homeColor);
+        };
+
+        chips[0] = bullpenDetailTabChip("Freshness", () -> { selected[0] = 0; refresh.run(); });
+        chips[1] = bullpenDetailTabChip("Quality", () -> { selected[0] = 1; refresh.run(); });
+        tabs.addView(chips[0], new LinearLayout.LayoutParams(0, dp(36), 1));
+        LinearLayout.LayoutParams qLp = new LinearLayout.LayoutParams(0, dp(36), 1);
+        qLp.setMargins(dp(8), 0, 0, 0);
+        tabs.addView(chips[1], qLp);
+        shell.addView(tabs, matchWrap());
+
+        refresh.run();
+        return shell;
+    }
+
+    private TextView bullpenDetailTabChip(String label, Runnable onClick) {
+        TextView chip = text(label, 12, Color.rgb(218, 231, 246), true);
+        chip.setGravity(Gravity.CENTER);
+        chip.setSingleLine(true);
+        chip.setForeground(ripple(false));
+        chip.setOnClickListener(v -> { if (onClick != null) onClick.run(); });
+        return chip;
+    }
+
+    private Drawable bullpenDetailTabBg(boolean active, int awayColor, int homeColor) {
+        if (active) {
+            return roundedGradientStroke(new int[] { Color.rgb(255, 255, 255), Color.rgb(126, 235, 226), Color.rgb(247, 197, 77) }, 16, Color.argb(150, 255, 255, 255), 1);
+        }
+        return roundedGradientStroke(new int[] {
+                Color.argb(42, Color.red(awayColor), Color.green(awayColor), Color.blue(awayColor)),
+                Color.argb(44, 8, 12, 20),
+                Color.argb(42, Color.red(homeColor), Color.green(homeColor), Color.blue(homeColor))
+        }, 16, Color.argb(52, 255, 255, 255), 1);
+    }
+
+    private void renderBullpenFreshnessDetails(LinearLayout panel, BullpenReport away, BullpenReport home, int awayColor, int homeColor) {
+        bullpenSectionTitle(panel, "FRESHNESS DETAILS", "");
+        panel.addView(bullpenTeamSummaryRow(away, home, awayColor, homeColor), matchWrap());
+
+        bullpenSectionTitle(panel, "RELIEVER AVAILABILITY", "Last 5 days by arm");
+        panel.addView(bullpenUsageMatrixCard(away, awayColor), matchWrap());
+        LinearLayout.LayoutParams homeMatrixLp = matchWrap();
+        homeMatrixLp.setMargins(0, dp(8), 0, 0);
+        panel.addView(bullpenUsageMatrixCard(home, homeColor), homeMatrixLp);
+
+        bullpenSectionTitle(panel, "RECENT WORKLOAD", "");
+        bullpenSubsectionLabel(panel, "Yesterday");
+        bullpenCompareRow(panel, "Relievers", bullpenIpPitches(away.yesterdayIp, away.yesterdayPitches), bullpenIpPitches(home.yesterdayIp, home.yesterdayPitches), compareLower(away.yesterdayIp, home.yesterdayIp), awayColor, homeColor);
+        bullpenCompareRow(panel, "Follower", bullpenIpPitches(away.yesterdayBulkIp, away.yesterdayBulkPitches), bullpenIpPitches(home.yesterdayBulkIp, home.yesterdayBulkPitches), compareLower(away.yesterdayBulkIp, home.yesterdayBulkIp), awayColor, homeColor);
+        bullpenCompareRow(panel, "Long relief", bullpenIpPitches(away.yesterdayLongIp, away.yesterdayLongPitches), bullpenIpPitches(home.yesterdayLongIp, home.yesterdayLongPitches), compareLower(away.yesterdayLongIp, home.yesterdayLongIp), awayColor, homeColor);
+        bullpenCompareRow(panel, "Non-starter IP", bullpenIpPitches(away.yesterdayNonStarterIp(), away.yesterdayNonStarterPitches()), bullpenIpPitches(home.yesterdayNonStarterIp(), home.yesterdayNonStarterPitches()), compareLower(away.yesterdayNonStarterIp(), home.yesterdayNonStarterIp()), awayColor, homeColor);
+        bullpenSubsectionLabel(panel, "Prior 2 Days");
+        bullpenCompareRow(panel, "Relievers", bullpenIpFmt(away.last2Ip), bullpenIpFmt(home.last2Ip), compareLower(away.last2Ip, home.last2Ip), awayColor, homeColor);
+        bullpenCompareRow(panel, "Follower", bullpenIpFmt(away.last2BulkIp), bullpenIpFmt(home.last2BulkIp), compareLower(away.last2BulkIp, home.last2BulkIp), awayColor, homeColor);
+        bullpenCompareRow(panel, "Long relief", bullpenIpFmt(away.last2LongIp), bullpenIpFmt(home.last2LongIp), compareLower(away.last2LongIp, home.last2LongIp), awayColor, homeColor);
+        bullpenCompareRow(panel, "Non-starter IP", bullpenIpPitches(away.last2NonStarterIp(), away.last2NonStarterPitches()), bullpenIpPitches(home.last2NonStarterIp(), home.last2NonStarterPitches()), compareLower(away.last2NonStarterIp(), home.last2NonStarterIp()), awayColor, homeColor);
+        bullpenCompareRow(panel, "B2B relievers", String.valueOf(away.b2bArms), String.valueOf(home.b2bArms), compareLower(away.b2bArms, home.b2bArms), awayColor, homeColor);
+        bullpenCompareRow(panel, "Freshness read", away.fatigueLabel(), home.fatigueLabel(), compareLower(away.fatiguePenalty(), home.fatiguePenalty()), awayColor, homeColor);
+    }
+
+    private void renderBullpenQualityDetails(LinearLayout panel, BullpenReport away, BullpenReport home, int awayColor, int homeColor) {
+        bullpenSectionTitle(panel, "QUALITY DETAILS", "Relief appearances only");
+        bullpenCompareRow(panel, "ERA", bullpenFmt(away.era(), 2), bullpenFmt(home.era(), 2), compareLower(away.era(), home.era()), awayColor, homeColor);
+        bullpenCompareRow(panel, "WHIP", bullpenFmt(away.whip(), 2), bullpenFmt(home.whip(), 2), compareLower(away.whip(), home.whip()), awayColor, homeColor);
+        bullpenCompareRow(panel, "K-BB%", bullpenFmt(away.kMinusBbPct(), 1) + "%", bullpenFmt(home.kMinusBbPct(), 1) + "%", compareHigher(away.kMinusBbPct(), home.kMinusBbPct()), awayColor, homeColor);
+        bullpenCompareRow(panel, "HR/9", bullpenFmt(away.hr9(), 2), bullpenFmt(home.hr9(), 2), compareLower(away.hr9(), home.hr9()), awayColor, homeColor);
+        bullpenCompareRow(panel, "Last 30d ERA", bullpenFmt(away.recent30Era(), 2), bullpenFmt(home.recent30Era(), 2), compareLower(away.recent30Era(), home.recent30Era()), awayColor, homeColor);
+        bullpenCompareRow(panel, "Last 14d K-BB%", bullpenFmt(away.recent14KMinusBbPct(), 1) + "%", bullpenFmt(home.recent14KMinusBbPct(), 1) + "%", compareHigher(away.recent14KMinusBbPct(), home.recent14KMinusBbPct()), awayColor, homeColor);
+    }
 
     private LinearLayout bullpenEdgeHeroCard(String title, String winner, String sentence, String leftValue, String rightValue,
                                             String awayAbbr, String homeAbbr, int awayColor, int homeColor, int winnerSide) {
@@ -16618,9 +16743,8 @@ private View liveGameCard(LiveGame game) {
         TeamPalette awayPalette = paletteForBullpenReport(away, awayColor);
         TeamPalette homePalette = paletteForBullpenReport(home, homeColor);
         PremiumShareCardView card = new PremiumShareCardView(this, h, awayPalette, homePalette);
-        // Keep the true matchup card renderer, but avoid opening the global lens picker from this
-        // bullpen-specific card; details live below the hero.
-        card.setClickable(false);
+        // Bullpen is a fixed matchup type; tapping the card's lens/stat header opens an explanation instead of changing the global lens.
+        card.setClickable(true);
         return card;
     }
 
@@ -16690,11 +16814,6 @@ private View liveGameCard(LiveGame game) {
         ArrayList<Metric> out = new ArrayList<>();
         out.add(new Metric("bpQualityScore", "Quality", "", 0, true, "rate", "Bullpen", "pitch"));
         out.add(new Metric("bpFreshnessScore", "Freshness", "", 0, true, "rate", "Bullpen", "pitch"));
-        out.add(new Metric("bpERA", "ERA", "", 2, false, "rate", "Bullpen", "pitch"));
-        out.add(new Metric("bpWHIP", "WHIP", "", 2, false, "rate", "Bullpen", "pitch"));
-        out.add(new Metric("bpKMinusBB", "K-BB %", "%", 1, true, "rate", "Bullpen", "pitch"));
-        out.add(new Metric("bpStaffIP", "Staff IP", "", 1, false, "rate", "Bullpen", "pitch"));
-        out.add(new Metric("bpB2B", "B2B Arms", "", 0, false, "count", "Bullpen", "pitch"));
         return out;
     }
 
@@ -16817,7 +16936,7 @@ private View liveGameCard(LiveGame game) {
         availability.setSingleLine(true);
         availability.setEllipsize(TextUtils.TruncateAt.END);
         card.addView(availability, matchWrap());
-        TextView usage = text(r.fatigueLabel() + " workload · " + bullpenIpFmt(r.last2NonStarterIp()) + " staff", 9, Color.rgb(176, 196, 219), false);
+        TextView usage = text(r.fatigueLabel() + " · " + bullpenIpFmt(r.last2NonStarterIp()) + " IP last 2d", 9, Color.rgb(176, 196, 219), false);
         usage.setGravity(Gravity.CENTER);
         usage.setSingleLine(true);
         usage.setEllipsize(TextUtils.TruncateAt.END);
@@ -17485,7 +17604,7 @@ private View liveGameCard(LiveGame game) {
         row.setPadding(0, dp(7), 0, dp(2));
         TextView left = text("Arm", 8, Color.rgb(156, 174, 197), true);
         left.setSingleLine(true);
-        row.addView(left, new LinearLayout.LayoutParams(dp(82), -2));
+        row.addView(left, new LinearLayout.LayoutParams(dp(76), -2));
         for (int ago = 5; ago >= 1; ago--) {
             TextView day = text(bpDateLabel(ago), 8, Color.rgb(156, 174, 197), true);
             day.setGravity(Gravity.CENTER);
@@ -17493,7 +17612,7 @@ private View liveGameCard(LiveGame game) {
         }
         TextView status = text("Status", 8, Color.rgb(156, 174, 197), true);
         status.setGravity(Gravity.RIGHT);
-        row.addView(status, new LinearLayout.LayoutParams(dp(58), -2));
+        row.addView(status, new LinearLayout.LayoutParams(dp(72), -2));
         return row;
     }
 
@@ -17505,14 +17624,20 @@ private View liveGameCard(LiveGame game) {
         TextView name = text(arm == null ? "—" : arm.displayName(), 9, Color.rgb(235, 242, 250), true);
         name.setSingleLine(true);
         name.setEllipsize(TextUtils.TruncateAt.END);
-        row.addView(name, new LinearLayout.LayoutParams(dp(82), dp(28)));
+        row.addView(name, new LinearLayout.LayoutParams(dp(76), dp(28)));
         for (int ago = 5; ago >= 1; ago--) row.addView(bullpenPitchCell(arm == null ? 0 : arm.pitchesByAgo[ago], color), new LinearLayout.LayoutParams(0, dp(28), 1));
         String statusText = arm == null ? "—" : arm.status();
-        TextView status = text(statusText, 8, bullpenStatusColor(statusText), true);
-        status.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        String statusDisplay = "Likely down".equals(statusText) ? "Down" : statusText;
+        int statusColor = bullpenStatusColor(statusText);
+        TextView status = text(statusDisplay, 7, statusColor, true);
+        status.setGravity(Gravity.CENTER);
         status.setSingleLine(true);
         status.setEllipsize(TextUtils.TruncateAt.END);
-        row.addView(status, new LinearLayout.LayoutParams(dp(58), dp(28)));
+        status.setPadding(dp(2), 0, dp(2), 0);
+        status.setBackground(roundedStroke(Color.argb(30, Color.red(statusColor), Color.green(statusColor), Color.blue(statusColor)), Color.argb(82, Color.red(statusColor), Color.green(statusColor), Color.blue(statusColor)), 999, 1));
+        LinearLayout.LayoutParams statusLp = new LinearLayout.LayoutParams(dp(72), dp(24));
+        statusLp.setMargins(dp(4), dp(2), 0, dp(2));
+        row.addView(status, statusLp);
         return row;
     }
 
@@ -17670,16 +17795,16 @@ private View liveGameCard(LiveGame game) {
     private String bullpenHelpText(String title) {
         String t = safe(title).toUpperCase(Locale.US);
         if (t.contains("FRESHNESS DETAILS")) {
-            return "Freshness estimates how rested each bullpen is tonight. It uses recent pitch counts, reliever usage, back-to-back appearances, and total staff workload.";
+            return "Freshness estimates how rested each bullpen is tonight. It uses recent pitch counts, reliever usage, back-to-back appearances, watch/down arms, and total non-starter workload. In the hero, freshness is 30% of the overall bullpen edge.";
         }
         if (t.contains("RELIEVER")) {
             return "Each cell is pitches thrown on that date. Ready means used recently but likely fine. Watch means workload concern. Follower is the main arm after an opener; Long is a later extended outing.";
         }
         if (t.contains("WORKLOAD")) {
-            return "Relievers are normal relief appearances. Follower is the main arm after an opener. Long relief is a later extended outing. Staff usage combines all non-starter workload.";
+            return "Relievers are normal relief appearances. Follower is the main arm after an opener. Long relief is a later extended outing. Non-starter IP combines reliever, follower, and long-relief workload.";
         }
         if (t.contains("QUALITY")) {
-            return "Quality compares bullpen performance from actual relief appearances. The main rates exclude starters/openers, follower outings, and long relief so the quality edge reflects normal bullpen work.";
+            return "Quality compares bullpen performance from actual relief appearances. The hero quality score uses ERA, WHIP, K-BB%, and HR/9, and quality is 70% of the overall bullpen edge. The main rates exclude starters/openers, follower outings, and long relief so the quality edge reflects normal bullpen work.";
         }
         return "";
     }
