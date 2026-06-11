@@ -249,7 +249,7 @@ public class MainActivity extends Activity {
     private String trendWindowMode = "15d";
     private final ArrayDeque<Integer> navTabHistory = new ArrayDeque<>();
     private boolean restoringNavHistory = false;
-    // v166: Matchups tab is now a two-path hub: compact live games or manual create.
+    // v167: Matchups tab is now a two-path hub: compact live games or manual create.
     private static final int MATCHUP_PATH_LIVE = 0;
     private static final int MATCHUP_PATH_CREATE = 1;
     private int matchupPathMode = MATCHUP_PATH_LIVE;
@@ -599,7 +599,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v166", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v167", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -12783,7 +12783,7 @@ public class MainActivity extends Activity {
     private String lastNameOnly(String s) {
         String v = safe(s).trim();
         if (v.isEmpty()) return v;
-        String[] parts = v.split("\s+");
+        String[] parts = v.split("\\s+");
         return parts.length == 0 ? v : parts[parts.length - 1];
     }
     private Double pick(Map<String, String> row, String... names) {
@@ -15944,7 +15944,7 @@ public class MainActivity extends Activity {
 
             paint.setShader(null);
 
-            // v166: season charts now have subtle month lanes that use the same x-scale
+            // v167: season charts now have subtle month lanes that use the same x-scale
             // as the sparkline, so labels and monthly values line up with the grid.
             if ("season".equals(mode)) {
                 ArrayList<TrendMonthSegment> segments = monthSegmentsForTrendLabels(labels);
@@ -15963,7 +15963,7 @@ public class MainActivity extends Activity {
             paint.setStyle(Paint.Style.STROKE);
             paint.setStrokeWidth(dp(1));
 
-            // v163/v166: structured trend modes get faint full-height guide lines.
+            // v163/v167: structured trend modes get faint full-height guide lines.
             paint.setColor(Color.argb("season".equals(mode) ? 52 : 24, 255, 255, 255));
             ArrayList<Integer> guideIndices = guideIndicesForMode();
             for (Integer index : guideIndices) {
