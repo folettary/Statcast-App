@@ -465,7 +465,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        // v185: bullpen usage matrix + scouting structure; phone-first portrait app. Prevent rotation recreation from dumping the user
+        // v186: bullpen usage matrix + scouting structure; phone-first portrait app. Prevent rotation recreation from dumping the user
         // back to Home while browsing a profile or matchup.
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
         getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
@@ -660,7 +660,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v185", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v186", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -17015,22 +17015,7 @@ private View liveGameCard(LiveGame game) {
         }
     }
 
-    private String bullpenHelpText(String title) {
-        String t = safe(title).toUpperCase(Locale.US);
-        if (t.contains("AVAILABILITY") && !t.contains("RELIEVER")) {
-            return "Counts are based on recent true reliever usage. Fresh/ready/watch/down are workload reads, not official availability.";
-        }
-        if (t.contains("RELIEVER")) {
-            return "Each cell is pitches thrown on that date. Follower is the main pitcher after an opener; Long is a later extended outing.";
-        }
-        if (t.contains("WORKLOAD")) {
-            return "Relievers = normal relief. Follower = main arm after opener. Long relief = later extended outing. Staff usage = all non-starter workload.";
-        }
-        if (t.contains("QUALITY")) {
-            return "Quality uses appearance-based relief stats and excludes starters/openers, follower outings, and long relief from the main bullpen rates.";
-        }
-        return "";
-    }
+
 
 
 
