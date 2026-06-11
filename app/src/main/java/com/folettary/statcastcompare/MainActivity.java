@@ -618,7 +618,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v172", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v173", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -5488,7 +5488,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                     if (teamStats == null) teamStats = new Stats();
                     teamStatsMap.put(team.key(), teamStats);
                 }
-                Stats leagueStats = computeLeagueAverage(entries);
+                Stats leagueStats = computeLeagueAverageFromTeams(teamStatsMap);
                 ArrayList<Metric> displayed = selectedMetricsForScope(scope);
                 ArrayList<Metric> rankMetrics = metricsForRankScope(scope, true);
                 HashMap<String, Integer> ranks = computeTeamRankMap(teamStatsMap, team.key(), rankMetrics);
@@ -5583,7 +5583,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                     if (statsB == null) statsB = new Stats();
                     teams.put(b.key(), statsB);
                 }
-                Stats leagueStats = computeLeagueAverage(entries);
+                Stats leagueStats = computeLeagueAverageFromTeams(teams);
                 ArrayList<Metric> displayed = selectedMetricsForScope(scope);
                 ArrayList<Metric> rankMetrics = metricsForRankScope(scope, true);
                 HashMap<String, Integer> ranksA = computeTeamRankMap(teams, a.key(), rankMetrics);
@@ -11920,10 +11920,6 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         return fetchLeaderboardForScope(season, scopeForPlayers(a, b));
     }
 
-    private ArrayList<LeaderboardEntry> fetchLeaderboardForSelectedMetrics(int season) throws Exception {
-        return fetchLeaderboardForScope(season, currentStatScope());
-    }
-
     private ArrayList<LeaderboardEntry> fetchLeaderboard(int season) throws Exception {
         ArrayList<LeaderboardEntry> cached = leaderboardCache.get(season);
         if (cached != null) return cached;
@@ -12380,6 +12376,26 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         return b.build();
     }
 
+    // v173: league average for TEAM screens. The team comparison screens were reusing
+    // computeLeagueAverage(entries) over PLAYER leaderboard rows, which broke many stats:
+    //  - every count metric (HR, Hits, Runs Scored, SB, Pitching K, ...) came out as the mean
+    //    per PLAYER (~10 HR), displayed next to the team's season TOTAL (~200 HR);
+    //  - teamRPG/teamRAPG were derived from runs divided by summed PLAYER game appearances
+    //    (each team game counted once per player who appeared), the exact failure mode the
+    //    v149 record repair exists to prevent;
+    //  - teamWinPct had no league baseline at all, since player rows carry no record.
+    // Rate stats happened to survive because weighted player rates equal league rates, which
+    // is why the bug looked like "many stats but not all". The fix averages over the 30
+    // official team stat objects: count metrics become the mean per team, rates stay exact
+    // league rates via the summed raw totals, and win% averages the official records.
+    private Stats computeLeagueAverageFromTeams(Map<String, Stats> teamStatsMap) {
+        WeightedStatsBuilder b = new WeightedStatsBuilder(metrics);
+        if (teamStatsMap != null) {
+            for (Stats s : teamStatsMap.values()) b.add(s);
+        }
+        return b.build();
+    }
+
     private LinkedHashMap<Integer, Stats> fetchPlayerRecentSeasonStats(Player player, int throughSeason) {
         LinkedHashMap<Integer, Stats> out = new LinkedHashMap<>();
         int first = Math.max(STATCAST_START_YEAR, throughSeason - 3);
@@ -12406,10 +12422,13 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         LinkedHashMap<Integer, Stats> out = new LinkedHashMap<>();
         int first = Math.max(STATCAST_START_YEAR, throughSeason - 3);
         // v172: parallel per-year fetches, collected back in display order.
+        // v173: per-year values now come from fetchOfficialTeamSeasonStats (direct team stats +
+        // official record repair) instead of the raw player aggregate, so the same per-year
+        // miscalculations fixed in the 2015+ column don't leak into the recent-seasons strip.
         LinkedHashMap<Integer, Future<Stats>> futures = new LinkedHashMap<>();
         for (int y = throughSeason; y >= first; y--) {
             final int year = y;
-            futures.put(year, fanout.submit(() -> aggregateTeamStats(fetchLeaderboardForSelectedMetrics(year)).get(team.key())));
+            futures.put(year, fanout.submit(() -> fetchOfficialTeamSeasonStats(team, year)));
         }
         for (Map.Entry<Integer, Future<Stats>> entry : futures.entrySet()) {
             try {
@@ -12440,22 +12459,56 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         return b.build();
     }
 
+    // v173: one canonical way to build a team's stats for a single season, used by both the
+    // 2015+ history column and the recent-seasons strip. The Savant player aggregate seeds the
+    // statcast-only metrics (xwOBA, barrel%, ...), the direct MLB team endpoints overwrite the
+    // true season totals, and the v149 official-record repair fixes Win%, Runs/Game, RA/Game,
+    // and Run Diff against standings game counts. Previously these paths used ONLY the player
+    // aggregate, so per-year team counts could be mis-attributed (traded players) and
+    // teamRPG/teamRAPG were derived from summed player game appearances.
+    private Stats fetchOfficialTeamSeasonStats(Team team, int season) {
+        Stats seed = null;
+        try { seed = aggregateTeamStats(fetchLeaderboardForScope(season, StatScope.BOTH)).get(team.key()); }
+        catch (Exception ignored) {}
+        Stats s = fetchTeamStatsForScope(team, season, StatScope.BOTH, seed);
+        if (s != null && s.anyValue()) return s;
+        return seed == null ? null : copyStats(seed);
+    }
+
     private Stats fetchTeamHistoryStats(Team team, int throughSeason) {
-        WeightedStatsBuilder b = new WeightedStatsBuilder(metrics, true);
+        // v173: this column is labeled "2015–{season} team avg" and its percentile is computed
+        // against single-season league values, but the old builder ran with sumCounts=true, so
+        // every count metric (HR, Hits, Runs, SB, Pitching K, ...) was the SUM across all
+        // Statcast-era seasons — an ~11x inflated "average" that also pinned its percentile.
+        // Rate stats were weighted correctly, which is why only some stats looked wrong.
+        // The fix: per-year official team stats (see fetchOfficialTeamSeasonStats), averaged
+        // with sumCounts=false so counts become per-season means while the summed raw totals
+        // still yield exact era-wide rates (AVG, ERA, Runs/Game, ...).
+        WeightedStatsBuilder b = new WeightedStatsBuilder(metrics, false);
         ExecutorService pool = Executors.newFixedThreadPool(6);
         ArrayList<Future<Stats>> futures = new ArrayList<>();
         for (int y = STATCAST_START_YEAR; y <= throughSeason; y++) {
             final int year = y;
-            futures.add(pool.submit(() -> {
-                try { return aggregateTeamStats(fetchLeaderboardForSelectedMetrics(year)).get(team.key()); }
-                catch (Exception ignored) { return null; }
-            }));
+            futures.add(pool.submit(() -> fetchOfficialTeamSeasonStats(team, year)));
         }
+        int yearsWithData = 0;
         for (Future<Stats> f : futures) {
-            try { b.add(f.get()); } catch (Exception ignored) {}
+            try {
+                Stats s = f.get();
+                if (s != null && s.anyValue()) { b.add(s); yearsWithData++; }
+            } catch (Exception ignored) {}
         }
         pool.shutdown();
-        return b.build();
+        Stats out = b.build();
+        // The builder keeps two raw-derived multi-year totals that the metric loop skips;
+        // rescale them to the same per-season basis as the count metrics.
+        Double rs = out.get("teamRunsScored"), ra = out.get("teamRunsAllowed");
+        if (rs != null && !Double.isNaN(rs) && ra != null && !Double.isNaN(ra)) out.put("teamRunDiff", rs - ra);
+        if (yearsWithData > 0) {
+            Double ipTotal = out.get("ip");
+            if (ipTotal != null && !Double.isNaN(ipTotal)) out.put("ip", ipTotal / yearsWithData);
+        }
+        return out;
     }
 
     private LinkedHashMap<String, Stats> fetchPlayerRecentWindows(Player player, int season) {
