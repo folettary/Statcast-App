@@ -465,7 +465,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        // v193: bullpen usage matrix + scouting structure; phone-first portrait app. Prevent rotation recreation from dumping the user
+        // v194: bullpen usage matrix + scouting structure; phone-first portrait app. Prevent rotation recreation from dumping the user
         // back to Home while browsing a profile or matchup.
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
         getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
@@ -660,7 +660,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v193", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v194", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -4432,6 +4432,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.HORIZONTAL);
         top.setGravity(Gravity.CENTER_VERTICAL);
+        top.setPadding(dp(12), 0, dp(12), 0);
         TextView title = text("Custom Lens", 14, Color.rgb(238, 245, 252), true);
         top.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
         TextView badge = text("Edit", 10, Color.rgb(255, 235, 152), true);
@@ -9032,7 +9033,132 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             }
         }
 
+
+        private boolean isBullpenCategoryMetric(Metric m) {
+            return m != null && ("bpQualityScore".equals(m.key) || "bpFreshnessScore".equals(m.key));
+        }
+
+        private void drawBullpenGroupedShareMetric(Canvas canvas, Metric m, RectF panel, float top, float bottom) {
+            Double a = h.statsA.get(m.key), b = h.statsB.get(m.key);
+            StatEdgeResult edge = statEdgeForMetric(h, m);
+            int winner = edge == null ? 0 : edge.winner;
+            int aBase = battleTeamColor(paletteA, paletteB, true);
+            int bBase = battleTeamColor(paletteB, paletteA, false);
+            int aStrong = boostNeonColor(aBase, 1.58f, 1.18f);
+            int bStrong = boostNeonColor(bBase, 1.58f, 1.18f);
+            int aColor = mixColor(ensureReadableColor(boostNeonColor(aBase, 1.16f, 1.05f), 168), Color.rgb(216, 224, 236), 0.07f);
+            int bColor = mixColor(ensureReadableColor(boostNeonColor(bBase, 1.16f, 1.05f), 168), Color.rgb(216, 224, 236), 0.07f);
+
+            float rowH = bottom - top;
+            float leftX = panel.left + dp(22);
+            float rightX = panel.right - dp(22);
+            float cX = panel.centerX();
+
+            float valueSize = dp(20);
+            float labelSize = dp(11);
+            float valueY = top + rowH * 0.30f;
+            float labelY = top + rowH * 0.28f;
+            float railY = top + rowH * 0.53f;
+            float sub1Y = top + rowH * 0.73f;
+            float sub2Y = top + rowH * 0.87f;
+
+            paint.setShadowLayer(dp(4), 0, 0, Color.argb(104, 0, 0, 0));
+            drawText(canvas, shareFormat(a, m), leftX, centeredTextBaseline(valueY, valueSize, true), valueSize, winner < 0 ? aStrong : aColor, true, Paint.Align.LEFT, 0.00f);
+            drawText(canvas, shareFormat(b, m), rightX, centeredTextBaseline(valueY, valueSize, true), valueSize, winner > 0 ? bStrong : bColor, true, Paint.Align.RIGHT, 0.00f);
+            paint.clearShadowLayer();
+
+            drawText(canvas, m.label, cX, centeredTextBaseline(labelY, labelSize, true), labelSize, Color.rgb(224, 232, 242), true, Paint.Align.CENTER, 0.10f);
+
+            float railLeft = panel.left + dp(126);
+            float railRight = panel.right - dp(126);
+            drawBullpenCategoryRail(canvas, railLeft, railRight, railY, winner, aStrong, bStrong, edge);
+
+            String[] leftLines = bullpenCategorySubLines(m.key, h.statsA);
+            String[] rightLines = bullpenCategorySubLines(m.key, h.statsB);
+            drawTextFit(canvas, leftLines[0], leftX, sub1Y, dp(190), dp(7.4f), Color.rgb(190, 205, 226), true, Paint.Align.LEFT, 0.02f);
+            drawTextFit(canvas, leftLines[1], leftX, sub2Y, dp(190), dp(7.2f), Color.rgb(150, 168, 194), true, Paint.Align.LEFT, 0.02f);
+            drawTextFit(canvas, rightLines[0], rightX, sub1Y, dp(190), dp(7.4f), Color.rgb(190, 205, 226), true, Paint.Align.RIGHT, 0.02f);
+            drawTextFit(canvas, rightLines[1], rightX, sub2Y, dp(190), dp(7.2f), Color.rgb(150, 168, 194), true, Paint.Align.RIGHT, 0.02f);
+        }
+
+        private void drawBullpenCategoryRail(Canvas canvas, float railLeft, float railRight, float railY, int winner, int aStrong, int bStrong, StatEdgeResult edge) {
+            float cX = (railLeft + railRight) / 2f;
+            float half = Math.max(dp(34), (railRight - railLeft) / 2f);
+
+            strokePaint.setStyle(Paint.Style.STROKE);
+            strokePaint.setStrokeCap(Paint.Cap.ROUND);
+            strokePaint.setStrokeWidth(dp(4.8f));
+            strokePaint.setShader(new LinearGradient(railLeft, railY, railRight, railY,
+                    new int[] {
+                            Color.argb(0, Color.red(aStrong), Color.green(aStrong), Color.blue(aStrong)),
+                            Color.argb(74, Color.red(aStrong), Color.green(aStrong), Color.blue(aStrong)),
+                            Color.argb(154, 244, 249, 255),
+                            Color.argb(74, Color.red(bStrong), Color.green(bStrong), Color.blue(bStrong)),
+                            Color.argb(0, Color.red(bStrong), Color.green(bStrong), Color.blue(bStrong))
+                    },
+                    new float[] {0f, .24f, .50f, .76f, 1f}, Shader.TileMode.CLAMP));
+            canvas.drawLine(railLeft, railY, railRight, railY, strokePaint);
+
+            int direction = winner < 0 ? -1 : (winner > 0 ? 1 : 0);
+            int sparkColor = direction < 0 ? aStrong : bStrong;
+            float edgeNorm = edge == null ? 0f : (float)Math.max(0d, Math.min(1d, edge.visualStrength));
+            float sparkStrength = edge == null ? 0f : (float)Math.max(0d, Math.min(1d, edge.glowStrength));
+            float sparkX = cX + direction * Math.max(dp(20), half - dp(5)) * edgeNorm;
+            sparkX = Math.max(railLeft + dp(4), Math.min(railRight - dp(4), sparkX));
+
+            strokePaint.setShader(null);
+            strokePaint.setStrokeWidth(dp(1.4f));
+            strokePaint.setColor(Color.argb(178, 235, 242, 250));
+            canvas.drawLine(cX, railY - dp(12), cX, railY + dp(12), strokePaint);
+
+            if (winner != 0) {
+                strokePaint.setStrokeWidth(dp(5.8f));
+                strokePaint.setShader(new LinearGradient(cX, railY, sparkX, railY,
+                        new int[] {
+                                Color.argb(96, Color.red(sparkColor), Color.green(sparkColor), Color.blue(sparkColor)),
+                                Color.argb(178, Color.red(sparkColor), Color.green(sparkColor), Color.blue(sparkColor)),
+                                Color.argb(226, Color.red(sparkColor), Color.green(sparkColor), Color.blue(sparkColor))
+                        },
+                        new float[] {0f, .55f, 1f}, Shader.TileMode.CLAMP));
+                strokePaint.setShadowLayer(dp(4.4f), 0, 0, Color.argb(92, Color.red(sparkColor), Color.green(sparkColor), Color.blue(sparkColor)));
+                canvas.drawLine(cX, railY, sparkX, railY, strokePaint);
+                strokePaint.clearShadowLayer();
+                strokePaint.setShader(null);
+                drawElectricStar(canvas, sparkX, railY, sparkColor, dp(10.0f), Math.max(0.42f, sparkStrength));
+            }
+            strokePaint.setShader(null);
+            strokePaint.setStrokeCap(Paint.Cap.BUTT);
+        }
+
+        private String[] bullpenCategorySubLines(String key, Stats st) {
+            if (st == null) return new String[] { "—", "—" };
+            if ("bpQualityScore".equals(key)) {
+                return new String[] {
+                        "ERA " + fmtStat(st.get("bpERA"), 2) + " · WHIP " + fmtStat(st.get("bpWHIP"), 2),
+                        "K-BB " + fmtStat(st.get("bpKMinusBB"), 1) + "% · HR/9 " + fmtStat(st.get("bpHR9"), 2)
+                };
+            }
+            return new String[] {
+                    fmtStat(st.get("bpStaffIP"), 1) + " IP last 2d · " + fmtCount(st.get("bpB2B")) + " B2B",
+                    fmtCount(st.get("bpFreshArms")) + " fresh · " + fmtCount(st.get("bpReadyArms")) + " ready · " + fmtCount(st.get("bpWatchArms")) + " watch"
+            };
+        }
+
+        private String fmtStat(Double v, int decimals) {
+            if (v == null || Double.isNaN(v)) return "—";
+            return String.format(Locale.US, "%." + decimals + "f", v);
+        }
+
+        private String fmtCount(Double v) {
+            if (v == null || Double.isNaN(v)) return "0";
+            return String.valueOf((int)Math.round(v));
+        }
+
         private void drawShareMetric(Canvas canvas, Metric m, RectF panel, float top, float bottom) {
+            if (isBullpenHeroComparison(h) && isBullpenCategoryMetric(m)) {
+                drawBullpenGroupedShareMetric(canvas, m, panel, top, bottom);
+                return;
+            }
             Double a = h.statsA.get(m.key), b = h.statsB.get(m.key);
             StatEdgeResult edge = statEdgeForMetric(h, m);
             int winner = edge == null ? 0 : edge.winner;
@@ -9744,30 +9870,29 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
     private StatScoreSummary summarizeBullpenHeroEdges(HeadToHeadComparison h, ArrayList<Metric> metricList) {
         StatScoreSummary summary = new StatScoreSummary();
-        if (h == null || metricList == null) return summary;
-        for (Metric m : metricList) {
-            StatEdgeResult edge = statEdgeForMetric(h, m);
-            if (edge == null || !edge.valid) continue;
-            double weight = "bpQualityScore".equals(m.key) ? 0.70d : ("bpFreshnessScore".equals(m.key) ? 0.30d : 0.0d);
-            if (weight <= 0.0d) continue;
-            summary.displayedRows++;
-            summary.scoredRows++;
-            if (edge.winner == 0) {
-                summary.tossUpRows++;
-                summary.aPts += weight * 0.5d;
-                summary.bPts += weight * 0.5d;
-            } else {
-                double winnerShare = 0.5d + 0.5d * Math.max(0d, Math.min(1d, edge.scoreStrength));
-                double loserShare = 1d - winnerShare;
-                if (edge.winner < 0) {
-                    summary.aPts += weight * winnerShare;
-                    summary.bPts += weight * loserShare;
-                } else {
-                    summary.aPts += weight * loserShare;
-                    summary.bPts += weight * winnerShare;
-                }
-            }
+        if (h == null || h.statsA == null || h.statsB == null) return summary;
+        Double qa = h.statsA.get("bpQualityScore");
+        Double qb = h.statsB.get("bpQualityScore");
+        Double fa = h.statsA.get("bpFreshnessScore");
+        Double fb = h.statsB.get("bpFreshnessScore");
+        if (qa == null || qb == null || fa == null || fb == null) return summary;
+
+        summary.displayedRows = 2;
+        summary.scoredRows = 2;
+
+        double aScore = qa * 0.70d + fa * 0.30d;
+        double bScore = qb * 0.70d + fb * 0.30d;
+        double gap = aScore - bScore;
+
+        // v194: bullpen edge share is a softened weighted-gap read, not winner-take-all.
+        // A 15 point category-score gap should feel like a clear edge, not 100-0 domination.
+        double pctA = 50.0d + clampDouble(gap * 0.92d, -38.0d, 38.0d);
+        if (Math.abs(gap) < 1.5d) {
+            summary.tossUpRows = 1;
+            pctA = 50.0d;
         }
+        summary.aPts = pctA;
+        summary.bPts = 100.0d - pctA;
         return summary;
     }
 
@@ -16259,7 +16384,7 @@ private View liveGameCard(LiveGame game) {
 
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(12), dp(12), dp(12), dp(12));
+        panel.setPadding(0, dp(12), 0, dp(12));
         panel.setBackground(roundedGradientStroke(
                 guardedDuelGradient(awayPalette, homePalette, true),
                 22,
@@ -16465,23 +16590,16 @@ private View liveGameCard(LiveGame game) {
 
         LinearLayout panel = bullpenPanelShell(game);
 
-        TextView eyebrow = text("BULLPEN MATCHUP", 10, Color.rgb(126, 235, 226), true);
-        eyebrow.setLetterSpacing(0.12f);
-        eyebrow.setGravity(Gravity.CENTER);
-        eyebrow.setPadding(0, dp(8), 0, 0);
-        panel.addView(eyebrow, matchWrap());
-
-        TextView title = text(away.abbr + " Bullpen vs " + home.abbr + " Bullpen", 20, Color.WHITE, true);
-        title.setGravity(Gravity.CENTER);
-        title.setPadding(0, dp(5), 0, 0);
-        panel.addView(title, matchWrap());
-
         panel.addView(bullpenEdgeHeroCards(away, home, awayColor, homeColor), matchWrap());
 
         LinearLayout detailContent = new LinearLayout(this);
         detailContent.setOrientation(LinearLayout.VERTICAL);
-        panel.addView(bullpenDetailSwitcher(detailContent, away, home, awayColor, homeColor), matchWrap());
-        panel.addView(detailContent, matchWrap());
+        LinearLayout detailWrap = new LinearLayout(this);
+        detailWrap.setOrientation(LinearLayout.VERTICAL);
+        detailWrap.setPadding(dp(12), 0, dp(12), 0);
+        detailWrap.addView(bullpenDetailSwitcher(detailContent, away, home, awayColor, homeColor), matchWrap());
+        detailWrap.addView(detailContent, matchWrap());
+        panel.addView(detailWrap, matchWrap());
 
 
         standingsBox.addView(panel, matchWrap());
@@ -16499,7 +16617,7 @@ private View liveGameCard(LiveGame game) {
         LinearLayout wrap = new LinearLayout(this);
         wrap.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams wrapLp = matchWrap();
-        wrapLp.setMargins(0, dp(10), 0, dp(8));
+        wrapLp.setMargins(0, dp(8), 0, dp(8));
         wrap.setLayoutParams(wrapLp);
 
         PremiumShareCardView card = bullpenPremiumShareCardView(away, home, awayColor, homeColor);
@@ -16826,8 +16944,14 @@ private View liveGameCard(LiveGame game) {
         s.put("bpERA", r == null ? null : r.era());
         s.put("bpWHIP", r == null ? null : r.whip());
         s.put("bpKMinusBB", r == null ? null : r.kMinusBbPct());
+        s.put("bpHR9", r == null ? null : r.hr9());
         s.put("bpStaffIP", r == null ? null : r.last2NonStarterIp());
         s.put("bpB2B", r == null ? null : (double) r.b2bArms);
+        int[] counts = bullpenAvailabilityCounts(r);
+        s.put("bpFreshArms", (double) counts[0]);
+        s.put("bpReadyArms", (double) counts[1]);
+        s.put("bpWatchArms", (double) counts[2]);
+        s.put("bpDownArms", (double) counts[3]);
     }
 
     private double bullpenHeroQualityScore(BullpenReport r) {
@@ -16999,6 +17123,22 @@ private View liveGameCard(LiveGame game) {
         if (r == null || !r.qualityAvailable()) return Double.NaN;
         return 70.0d - safeMetric(r.recent30Era(), safeMetric(r.era(), 4.50d)) * 5.0d
                 + safeMetric(r.recent14KMinusBbPct(), safeMetric(r.kMinusBbPct(), 11.0d)) * 1.1d;
+    }
+
+
+    private int[] bullpenAvailabilityCounts(BullpenReport r) {
+        int[] counts = new int[] { 0, 0, 0, 0 };
+        if (r == null) return counts;
+        ArrayList<BullpenArmUsage> arms = bullpenTopArms(r, 14);
+        for (BullpenArmUsage a : arms) {
+            if (a == null || !"BP".equals(a.role)) continue;
+            String status = a.status();
+            if ("Fresh".equals(status)) counts[0]++;
+            else if ("Ready".equals(status)) counts[1]++;
+            else if ("Watch".equals(status)) counts[2]++;
+            else counts[3]++;
+        }
+        return counts;
     }
 
     private String bullpenAvailabilitySummary(BullpenReport r) {
