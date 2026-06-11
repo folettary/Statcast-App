@@ -465,7 +465,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        // v177: v176 rescue; phone-first portrait app. Prevent rotation recreation from dumping the user
+        // v178: bullpen intelligence; phone-first portrait app. Prevent rotation recreation from dumping the user
         // back to Home while browsing a profile or matchup.
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
         getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
@@ -660,7 +660,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v177", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v178", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -12448,6 +12448,8 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         int hr = intFromJsonAny(stat, "homeRuns", "homeRunsAllowed", "hr", "HR");
         int saves = intFromJsonAny(stat, "saves", "sv", "SV");
         int games = intFromJsonAny(stat, "gamesPlayed", "games", "g", "G");
+        int starts = intFromJsonAny(stat, "gamesStarted", "gamesStartedPitching", "gs", "GS");
+        int pitchesThrown = intFromJsonAny(stat, "pitchesThrown", "numberOfPitches", "pitches", "NP");
         int wins = intFromJsonAny(stat, "wins", "w", "W");
         int losses = intFromJsonAny(stat, "losses", "l", "L");
 
@@ -12465,6 +12467,8 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         s.put("__pr", (double) runs);
         s.put("__phr", (double) hr);
         s.put("__pgames", (double) games);
+        s.put("__gs", (double) starts);
+        s.put("__pitches", (double) pitchesThrown);
 
         s.put("era", ip > 0 ? er * 9.0 / ip : num(stat.optString("era", "")));
         s.put("whip", ip > 0 ? (hits + bb) / ip : num(stat.optString("whip", "")));
@@ -16228,9 +16232,9 @@ private View liveGameCard(LiveGame game) {
         row2Lp.setMargins(0, dp(7), 0, 0);
         panel.addView(row2, row2Lp);
         row2.addView(gameMenuTile("Key Hitters", "Top OPS bats", "Auto-picks one hitter per team", Color.rgb(99, 166, 255), v -> openLiveTopHitterMatchup(game)), new LinearLayout.LayoutParams(0, dp(94), 1));
-        LinearLayout.LayoutParams trLp = new LinearLayout.LayoutParams(0, dp(94), 1);
-        trLp.setMargins(dp(7), 0, 0, 0);
-        row2.addView(gameMenuTile("Trending", "Coming soon", "Last 7/15 day hot hands", Color.rgb(120, 220, 207), v -> Toast.makeText(this, "Trending player matchups are next after the v1 flow.", Toast.LENGTH_SHORT).show()), trLp);
+        LinearLayout.LayoutParams bpLp = new LinearLayout.LayoutParams(0, dp(94), 1);
+        bpLp.setMargins(dp(7), 0, 0, 0);
+        row2.addView(gameMenuTile("Bullpens", "Quality + fatigue", "Relievers, usage, B2B arms", Color.rgb(120, 220, 207), v -> openLiveBullpenMatchup(game)), bpLp);
     }
 
     private LinearLayout gameMenuTile(String title, String value, String caption, int accent, View.OnClickListener click) {
@@ -16260,6 +16264,437 @@ private View liveGameCard(LiveGame game) {
         tile.addView(c, matchWrap());
         return tile;
     }
+
+
+    private void openLiveBullpenMatchup(LiveGame game) {
+        if (game == null) return;
+        final int requestToken = nextScreenRequestToken();
+        activeLiveGameMenu = game;
+        activePrimaryTab = TAB_MATCHUP;
+        matchupPathMode = MATCHUP_PATH_LIVE;
+        matchupResultMode = true;
+        headToHeadMode = true;
+        rankingsModeActive = false;
+        expectedMode = false;
+        hideKeyboard();
+        if (homeBox != null) homeBox.setVisibility(View.GONE);
+        if (form != null) form.setVisibility(View.GONE);
+        if (resultsBox != null) resultsBox.setVisibility(View.GONE);
+        if (standingsBox != null) standingsBox.setVisibility(View.VISIBLE);
+        updateBottomNavSelection();
+        refreshMatchupHub();
+        renderBullpenLoading(game);
+
+        io.execute(() -> {
+            try {
+                Team away = teamForLiveGame(game.awayTeamId, game.awayName, game.awayAbbr);
+                Team home = teamForLiveGame(game.homeTeamId, game.homeName, game.homeAbbr);
+                BullpenReport awayReport = fetchBullpenReport(away, currentSeason(), game.gamePk);
+                BullpenReport homeReport = fetchBullpenReport(home, currentSeason(), game.gamePk);
+                main.post(() -> {
+                    if (!isCurrentScreenRequest(requestToken) || activePrimaryTab != TAB_MATCHUP || !matchupResultMode) return;
+                    renderBullpenReport(game, awayReport, homeReport);
+                });
+            } catch (Exception e) {
+                main.post(() -> {
+                    if (!isCurrentScreenRequest(requestToken) || activePrimaryTab != TAB_MATCHUP || !matchupResultMode) return;
+                    renderBullpenError(game, e.getMessage());
+                });
+            }
+        });
+    }
+
+    private void renderBullpenLoading(LiveGame game) {
+        if (standingsBox == null) return;
+        standingsBox.removeAllViews();
+        LinearLayout panel = bullpenPanelShell(game);
+        TextView title = text("BULLPEN INTELLIGENCE", 18, Color.WHITE, true);
+        title.setGravity(Gravity.CENTER);
+        title.setPadding(0, dp(6), 0, 0);
+        panel.addView(title, matchWrap());
+        TextView sub = text("Loading reliever quality, recent usage, and fatigue signals…", 12, Color.rgb(190, 207, 229), false);
+        sub.setGravity(Gravity.CENTER);
+        sub.setPadding(0, dp(8), 0, dp(10));
+        panel.addView(sub, matchWrap());
+        standingsBox.addView(panel, matchWrap());
+    }
+
+    private void renderBullpenError(LiveGame game, String message) {
+        if (standingsBox == null) return;
+        standingsBox.removeAllViews();
+        LinearLayout panel = bullpenPanelShell(game);
+        TextView title = text("Bullpen data unavailable", 18, Color.WHITE, true);
+        title.setGravity(Gravity.CENTER);
+        panel.addView(title, matchWrap());
+        TextView sub = text("Could not load bullpen usage for this game. " + safe(message), 12, Color.rgb(202, 216, 234), false);
+        sub.setGravity(Gravity.CENTER);
+        sub.setPadding(0, dp(8), 0, 0);
+        panel.addView(sub, matchWrap());
+        standingsBox.addView(panel, matchWrap());
+    }
+
+    private LinearLayout bullpenPanelShell(LiveGame game) {
+        Team away = game == null ? null : teamForLiveGame(game.awayTeamId, game.awayName, game.awayAbbr);
+        Team home = game == null ? null : teamForLiveGame(game.homeTeamId, game.homeName, game.homeAbbr);
+        TeamPalette awayPalette = away == null ? paletteForAbbr(game == null ? "" : game.awayAbbr) : paletteForTeam(away);
+        TeamPalette homePalette = home == null ? paletteForAbbr(game == null ? "" : game.homeAbbr) : paletteForTeam(home);
+
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(12), dp(12), dp(12), dp(12));
+        panel.setBackground(roundedGradientStroke(
+                guardedDuelGradient(awayPalette, homePalette, true),
+                22,
+                guardedDuelStroke(awayPalette, homePalette, 128),
+                1));
+
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        TextView back = text("← Game", 10, Color.rgb(218, 232, 248), true);
+        back.setGravity(Gravity.CENTER);
+        back.setPadding(dp(8), dp(5), dp(8), dp(5));
+        back.setBackground(roundedStroke(Color.argb(50, 255, 255, 255), Color.argb(72, 255, 255, 255), 14, 1));
+        back.setForeground(ripple(true));
+        back.setClickable(true);
+        back.setOnClickListener(v -> renderLiveGameMenu(game));
+        top.addView(back);
+        TextView matchup = text(game == null ? "Bullpens" : displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr) + " @ " + displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr), 11, Color.rgb(222, 235, 249), true);
+        matchup.setGravity(Gravity.RIGHT);
+        top.addView(matchup, new LinearLayout.LayoutParams(0, -2, 1));
+        panel.addView(top, matchWrap());
+
+        LinearLayout.LayoutParams panelLp = matchWrap();
+        panelLp.setMargins(0, dp(9), 0, dp(8));
+        panel.setLayoutParams(panelLp);
+        return panel;
+    }
+
+    private void renderBullpenReport(LiveGame game, BullpenReport away, BullpenReport home) {
+        if (standingsBox == null) return;
+        standingsBox.removeAllViews();
+        if (away == null) away = new BullpenReport(displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr), game.awayName);
+        if (home == null) home = new BullpenReport(displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr), game.homeName);
+
+        Team awayTeam = teamForLiveGame(game.awayTeamId, game.awayName, game.awayAbbr);
+        Team homeTeam = teamForLiveGame(game.homeTeamId, game.homeName, game.homeAbbr);
+        TeamPalette awayPalette = awayTeam == null ? paletteForAbbr(game.awayAbbr) : paletteForTeam(awayTeam);
+        TeamPalette homePalette = homeTeam == null ? paletteForAbbr(game.homeAbbr) : paletteForTeam(homeTeam);
+        int awayColor = readableTeamColor(awayPalette.primary, awayPalette.secondary, true);
+        int homeColor = readableTeamColor(homePalette.primary, homePalette.secondary, true);
+
+        LinearLayout panel = bullpenPanelShell(game);
+
+        TextView eyebrow = text("BULLPEN INTELLIGENCE", 10, Color.rgb(126, 235, 226), true);
+        eyebrow.setLetterSpacing(0.12f);
+        eyebrow.setGravity(Gravity.CENTER);
+        eyebrow.setPadding(0, dp(8), 0, 0);
+        panel.addView(eyebrow, matchWrap());
+
+        TextView title = text(away.abbr + " Bullpen vs " + home.abbr + " Bullpen", 20, Color.WHITE, true);
+        title.setGravity(Gravity.CENTER);
+        title.setPadding(0, dp(5), 0, 0);
+        panel.addView(title, matchWrap());
+
+        String edge = bullpenEdgeLabel(away, home);
+        TextView edgePill = text(edge, 12, Color.rgb(7, 12, 20), true);
+        edgePill.setGravity(Gravity.CENTER);
+        edgePill.setPadding(dp(10), dp(7), dp(10), dp(7));
+        edgePill.setBackground(roundedGradientStroke(new int[] { Color.rgb(255, 255, 255), Color.rgb(126, 235, 226), Color.rgb(247, 197, 77) }, 999, Color.argb(180, 255, 255, 255), 1));
+        LinearLayout.LayoutParams edgeLp = new LinearLayout.LayoutParams(-1, -2);
+        edgeLp.setMargins(0, dp(10), 0, dp(8));
+        panel.addView(edgePill, edgeLp);
+
+        panel.addView(bullpenTeamSummaryRow(away, home, awayColor, homeColor), matchWrap());
+
+        bullpenSectionTitle(panel, "SEASON QUALITY", "Reliever-only proxy: pitchers with 0 starts");
+        bullpenCompareRow(panel, "ERA", bullpenFmt(away.era(), 2), bullpenFmt(home.era(), 2), compareLower(away.era(), home.era()), awayColor, homeColor);
+        bullpenCompareRow(panel, "WHIP", bullpenFmt(away.whip(), 2), bullpenFmt(home.whip(), 2), compareLower(away.whip(), home.whip()), awayColor, homeColor);
+        bullpenCompareRow(panel, "K-BB%", bullpenFmt(away.kMinusBbPct(), 1) + "%", bullpenFmt(home.kMinusBbPct(), 1) + "%", compareHigher(away.kMinusBbPct(), home.kMinusBbPct()), awayColor, homeColor);
+        bullpenCompareRow(panel, "HR/9", bullpenFmt(away.hr9(), 2), bullpenFmt(home.hr9(), 2), compareLower(away.hr9(), home.hr9()), awayColor, homeColor);
+
+        bullpenSectionTitle(panel, "RECENT USAGE / FATIGUE", "Boxscore bullpen appearances; current game excluded");
+        bullpenCompareRow(panel, "Today IP / pitches", bullpenIpPitches(away.todayIp, away.todayPitches), bullpenIpPitches(home.todayIp, home.todayPitches), compareLower(away.todayIp, home.todayIp), awayColor, homeColor);
+        bullpenCompareRow(panel, "Yesterday IP / pitches", bullpenIpPitches(away.yesterdayIp, away.yesterdayPitches), bullpenIpPitches(home.yesterdayIp, home.yesterdayPitches), compareLower(away.yesterdayIp, home.yesterdayIp), awayColor, homeColor);
+        bullpenCompareRow(panel, "Last 2d IP", bullpenFmt(away.last2Ip, 1), bullpenFmt(home.last2Ip, 1), compareLower(away.last2Ip, home.last2Ip), awayColor, homeColor);
+        bullpenCompareRow(panel, "B2B arms", String.valueOf(away.b2bArms), String.valueOf(home.b2bArms), compareLower(away.b2bArms, home.b2bArms), awayColor, homeColor);
+        bullpenCompareRow(panel, "Fatigue read", away.fatigueLabel(), home.fatigueLabel(), compareLower(away.fatiguePenalty(), home.fatiguePenalty()), awayColor, homeColor);
+
+        TextView foot = text("Quality is season reliever performance. Fatigue uses recent boxscores: IP, pitches, relievers used today/yesterday, and back-to-back usage.", 10, Color.rgb(168, 185, 207), false);
+        foot.setGravity(Gravity.CENTER);
+        foot.setPadding(dp(2), dp(10), dp(2), 0);
+        panel.addView(foot, matchWrap());
+
+        standingsBox.addView(panel, matchWrap());
+        if (mainScroll != null) mainScroll.post(() -> mainScroll.smoothScrollTo(0, 0));
+    }
+
+    private LinearLayout bullpenTeamSummaryRow(BullpenReport away, BullpenReport home, int awayColor, int homeColor) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setPadding(0, dp(4), 0, dp(4));
+        row.addView(bullpenSummaryCard(away, awayColor), new LinearLayout.LayoutParams(0, -2, 1));
+        LinearLayout.LayoutParams rightLp = new LinearLayout.LayoutParams(0, -2, 1);
+        rightLp.setMargins(dp(8), 0, 0, 0);
+        row.addView(bullpenSummaryCard(home, homeColor), rightLp);
+        return row;
+    }
+
+    private LinearLayout bullpenSummaryCard(BullpenReport r, int color) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(9), dp(8), dp(9), dp(8));
+        card.setBackground(roundedGradientStroke(new int[] {
+                Color.argb(118, Color.red(color), Color.green(color), Color.blue(color)),
+                Color.rgb(6, 10, 18)
+        }, 18, Color.argb(112, Color.red(color), Color.green(color), Color.blue(color)), 1));
+        TextView name = text(r.abbr, 17, Color.WHITE, true);
+        name.setGravity(Gravity.CENTER);
+        card.addView(name, matchWrap());
+        TextView era = text("ERA " + bullpenFmt(r.era(), 2) + " · WHIP " + bullpenFmt(r.whip(), 2), 9, Color.rgb(220, 233, 247), true);
+        era.setGravity(Gravity.CENTER);
+        era.setSingleLine(true);
+        card.addView(era, matchWrap());
+        TextView usage = text(r.fatigueLabel() + " · " + bullpenFmt(r.last2Ip, 1) + " IP last 2d", 9, Color.rgb(176, 196, 219), false);
+        usage.setGravity(Gravity.CENTER);
+        usage.setSingleLine(true);
+        usage.setEllipsize(TextUtils.TruncateAt.END);
+        usage.setPadding(0, dp(3), 0, 0);
+        card.addView(usage, matchWrap());
+        return card;
+    }
+
+    private void bullpenSectionTitle(LinearLayout panel, String title, String subtitle) {
+        TextView t = text(title, 10, Color.rgb(247, 197, 77), true);
+        t.setLetterSpacing(0.11f);
+        t.setPadding(dp(2), dp(12), 0, dp(2));
+        panel.addView(t, matchWrap());
+        TextView s = text(subtitle, 9, Color.rgb(156, 174, 197), false);
+        s.setPadding(dp(2), 0, 0, dp(5));
+        panel.addView(s, matchWrap());
+    }
+
+    private void bullpenCompareRow(LinearLayout panel, String label, String awayValue, String homeValue, int edge, int awayColor, int homeColor) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(8), dp(7), dp(8), dp(7));
+        row.setBackground(roundedStroke(Color.argb(34, 255, 255, 255), Color.argb(38, 255, 255, 255), 16, 1));
+
+        TextView left = text(awayValue, 12, edge < 0 ? awayColor : Color.rgb(220, 231, 245), true);
+        left.setGravity(Gravity.LEFT);
+        left.setSingleLine(true);
+        row.addView(left, new LinearLayout.LayoutParams(0, -2, 1));
+
+        TextView mid = text(label, 10, Color.rgb(163, 181, 205), true);
+        mid.setGravity(Gravity.CENTER);
+        mid.setSingleLine(true);
+        mid.setEllipsize(TextUtils.TruncateAt.END);
+        row.addView(mid, new LinearLayout.LayoutParams(dp(116), -2));
+
+        TextView right = text(homeValue, 12, edge > 0 ? homeColor : Color.rgb(220, 231, 245), true);
+        right.setGravity(Gravity.RIGHT);
+        right.setSingleLine(true);
+        row.addView(right, new LinearLayout.LayoutParams(0, -2, 1));
+
+        LinearLayout.LayoutParams lp = matchWrap();
+        lp.setMargins(0, dp(5), 0, 0);
+        panel.addView(row, lp);
+    }
+
+    private String bullpenEdgeLabel(BullpenReport away, BullpenReport home) {
+        double a = bullpenOverallScore(away);
+        double h = bullpenOverallScore(home);
+        if (Double.isNaN(a) || Double.isNaN(h) || Math.abs(a - h) < 3.0d) return "Bullpen edge: Even / unclear";
+        BullpenReport leader = a > h ? away : home;
+        return "Bullpen edge: " + leader.abbr + " · " + leader.edgeReason();
+    }
+
+    private double bullpenOverallScore(BullpenReport r) {
+        if (r == null || !r.qualityAvailable()) return Double.NaN;
+        double era = safeMetric(r.era(), 4.50d);
+        double whip = safeMetric(r.whip(), 1.35d);
+        double kbb = safeMetric(r.kMinusBbPct(), 11.0d);
+        double hr9 = safeMetric(r.hr9(), 1.10d);
+        return 100.0d - (era * 6.0d) - (whip * 8.0d) + (kbb * 1.15d) - (hr9 * 4.0d) - (r.fatiguePenalty() * 2.0d);
+    }
+
+    private double safeMetric(double v, double fallback) {
+        return Double.isNaN(v) ? fallback : v;
+    }
+
+    private int compareLower(double a, double b) {
+        if (Double.isNaN(a) || Double.isNaN(b) || Math.abs(a - b) < 0.0001d) return 0;
+        return a < b ? -1 : 1;
+    }
+
+    private int compareHigher(double a, double b) {
+        if (Double.isNaN(a) || Double.isNaN(b) || Math.abs(a - b) < 0.0001d) return 0;
+        return a > b ? -1 : 1;
+    }
+
+    private String bullpenFmt(double value, int decimals) {
+        if (Double.isNaN(value)) return "—";
+        String pattern = decimals <= 0 ? "0" : (decimals == 1 ? "0.0" : "0.00");
+        return new DecimalFormat(pattern).format(value);
+    }
+
+    private String bullpenIpPitches(double ip, int pitches) {
+        String left = Double.isNaN(ip) ? "—" : new DecimalFormat("0.0").format(ip);
+        return left + " / " + pitches;
+    }
+
+    private BullpenReport fetchBullpenReport(Team team, int season, int excludeGamePk) {
+        if (team == null) return new BullpenReport("—", "Unknown");
+        BullpenReport report = new BullpenReport(team.abbr, team.name);
+        mergeBullpenSeasonQuality(report, team, season);
+        mergeRecentBullpenUsage(report, team, excludeGamePk);
+        report.finalizeFatigue();
+        return report;
+    }
+
+    private void mergeBullpenSeasonQuality(BullpenReport report, Team team, int season) {
+        if (report == null || team == null) return;
+        try {
+            ArrayList<LeaderboardEntry> entries = fetchStandardLeaderboard(season, true);
+            for (LeaderboardEntry e : entries) {
+                if (e == null || e.stats == null) continue;
+                String key = teamKeyFromEntry(e);
+                if (!team.key().equals(key)) continue;
+                int starts = intVal(e.stats.vals.get("__gs"));
+                if (starts > 0) continue; // clean first pass: pure reliever-season lines only
+                double ip = valueOrZero(e.stats.vals.get("__pip"));
+                if (ip <= 0.0d) continue;
+                report.addSeason(
+                        ip,
+                        valueOrZero(e.stats.vals.get("__er")),
+                        valueOrZero(e.stats.vals.get("__ph")),
+                        valueOrZero(e.stats.vals.get("__pbb")),
+                        valueOrZero(e.stats.vals.get("__pk")),
+                        valueOrZero(e.stats.vals.get("__bf")),
+                        valueOrZero(e.stats.vals.get("__phr")),
+                        valueOrZero(e.stats.vals.get("__pr")),
+                        intVal(e.stats.vals.get("__pitches"))
+                );
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private void mergeRecentBullpenUsage(BullpenReport report, Team team, int excludeGamePk) {
+        if (report == null || team == null || team.id <= 0) return;
+        try {
+            Date now = new Date();
+            String start = scheduleDate(addDays(now, -4));
+            String end = scheduleDate(now);
+            String url = "https://statsapi.mlb.com/api/v1/schedule?sportId=1&teamId=" + team.id
+                    + "&startDate=" + URLEncoder.encode(start, "UTF-8")
+                    + "&endDate=" + URLEncoder.encode(end, "UTF-8");
+            JSONObject root = new JSONObject(httpGet(url));
+            JSONArray dates = root.optJSONArray("dates");
+            if (dates == null) return;
+            for (int d = 0; d < dates.length(); d++) {
+                JSONObject dateObj = dates.optJSONObject(d);
+                if (dateObj == null) continue;
+                String dateKey = safe(dateObj.optString("date", ""));
+                int daysAgo = daysAgoFromDateKey(dateKey);
+                if (daysAgo < 0 || daysAgo > 3) continue;
+                JSONArray games = dateObj.optJSONArray("games");
+                if (games == null) continue;
+                for (int i = 0; i < games.length(); i++) {
+                    JSONObject game = games.optJSONObject(i);
+                    if (game == null) continue;
+                    int gamePk = game.optInt("gamePk", 0);
+                    if (gamePk <= 0 || gamePk == excludeGamePk) continue;
+                    JSONObject status = game.optJSONObject("status");
+                    String state = safe(status == null ? "" : status.optString("abstractGameState", "")).toLowerCase(Locale.US);
+                    String detail = safe(status == null ? "" : status.optString("detailedState", "")).toLowerCase(Locale.US);
+                    if (!(state.contains("final") || detail.contains("final") || detail.contains("completed"))) continue;
+                    mergeBullpenUsageFromBoxscore(report, team, gamePk, dateKey, daysAgo);
+                }
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private void mergeBullpenUsageFromBoxscore(BullpenReport report, Team team, int gamePk, String dateKey, int daysAgo) {
+        if (report == null || team == null || gamePk <= 0) return;
+        try {
+            JSONObject box = new JSONObject(httpGet("https://statsapi.mlb.com/api/v1/game/" + gamePk + "/boxscore"));
+            JSONObject teamsObj = box.optJSONObject("teams");
+            if (teamsObj == null) return;
+            JSONObject side = null;
+            JSONObject away = teamsObj.optJSONObject("away");
+            JSONObject home = teamsObj.optJSONObject("home");
+            if (away != null && teamMatchesBoxscoreTeam(away.optJSONObject("team"), team)) side = away;
+            else if (home != null && teamMatchesBoxscoreTeam(home.optJSONObject("team"), team)) side = home;
+            if (side == null) return;
+
+            JSONArray pitchers = side.optJSONArray("pitchers");
+            JSONObject players = side.optJSONObject("players");
+            if (pitchers == null || players == null || pitchers.length() <= 1) return;
+            int starterId = pitchers.optInt(0, 0);
+            for (int i = 0; i < pitchers.length(); i++) {
+                int pid = pitchers.optInt(i, 0);
+                if (pid <= 0 || pid == starterId) continue;
+                JSONObject pObj = players.optJSONObject("ID" + pid);
+                if (pObj == null) continue;
+                JSONObject stats = pObj.optJSONObject("stats");
+                JSONObject pitching = stats == null ? null : stats.optJSONObject("pitching");
+                if (pitching == null) continue;
+                double ip = inningsToDouble(pitching.optString("inningsPitched", "0"));
+                int pitches = intFromJsonAny(pitching, "pitchesThrown", "numberOfPitches", "pitches", "NP");
+                if (ip <= 0.0d && pitches <= 0) continue;
+                report.addUsage(dateKey, daysAgo, pid, ip, pitches);
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private boolean teamMatchesBoxscoreTeam(JSONObject obj, Team team) {
+        if (obj == null || team == null) return false;
+        int id = obj.optInt("id", 0);
+        if (id > 0 && id == team.id) return true;
+        String abbr = canonicalMlbAbbr(id, obj.optString("name", ""), obj.optString("abbreviation", obj.optString("teamCode", "")));
+        return safe(abbr).equalsIgnoreCase(team.abbr);
+    }
+
+    private Date addDays(Date base, int days) {
+        Calendar cal = Calendar.getInstance();
+        cal.setTime(base == null ? new Date() : base);
+        cal.add(Calendar.DATE, days);
+        return cal.getTime();
+    }
+
+    private String scheduleDate(Date date) {
+        return new SimpleDateFormat("MM/dd/yyyy", Locale.US).format(date == null ? new Date() : date);
+    }
+
+    private int daysAgoFromDateKey(String key) {
+        try {
+            SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
+            Calendar target = Calendar.getInstance();
+            target.setTime(fmt.parse(key));
+            zeroTime(target);
+            Calendar today = Calendar.getInstance();
+            zeroTime(today);
+            long diff = today.getTimeInMillis() - target.getTimeInMillis();
+            return (int) Math.round(diff / (24d * 60d * 60d * 1000d));
+        } catch (Exception e) {
+            return 99;
+        }
+    }
+
+    private void zeroTime(Calendar cal) {
+        if (cal == null) return;
+        cal.set(Calendar.HOUR_OF_DAY, 0);
+        cal.set(Calendar.MINUTE, 0);
+        cal.set(Calendar.SECOND, 0);
+        cal.set(Calendar.MILLISECOND, 0);
+    }
+
+    private double valueOrZero(Double v) {
+        return v == null || Double.isNaN(v) ? 0.0d : v;
+    }
+
+
 
     private void openLiveTeamMatchup(LiveGame game) {
         Team away = teamForLiveGame(game.awayTeamId, game.awayName, game.awayAbbr);
@@ -17358,9 +17793,135 @@ private View liveGameCard(LiveGame game) {
         final Date date; final String label; final Stats stats;
         GameLogEntry(Date date, String label, Stats stats) { this.date = date; this.label = label; this.stats = stats; }
     }
+
+    static class BullpenReport {
+        final String abbr;
+        final String name;
+        double seasonIp = 0.0d;
+        double seasonEr = 0.0d;
+        double seasonHits = 0.0d;
+        double seasonWalks = 0.0d;
+        double seasonK = 0.0d;
+        double seasonBf = 0.0d;
+        double seasonHr = 0.0d;
+        double seasonRuns = 0.0d;
+        int seasonPitches = 0;
+        int relieverLines = 0;
+
+        double todayIp = 0.0d;
+        int todayPitches = 0;
+        int usedToday = 0;
+        double yesterdayIp = 0.0d;
+        int yesterdayPitches = 0;
+        int usedYesterday = 0;
+        double last2Ip = 0.0d;
+        int last2Pitches = 0;
+        int usedLast2 = 0;
+        double last3Ip = 0.0d;
+        int last3Pitches = 0;
+        int usedLast3 = 0;
+        int b2bArms = 0;
+        int threeInFourArms = 0;
+        final Map<Integer, Set<Integer>> pitcherDayOffsets = new HashMap<>();
+
+        BullpenReport(String abbr, String name) {
+            this.abbr = (abbr == null || abbr.isEmpty()) ? "—" : abbr;
+            this.name = name == null ? "" : name;
+        }
+
+        void addSeason(double ip, double er, double hits, double walks, double k, double bf, double hr, double runs, int pitches) {
+            seasonIp += ip;
+            seasonEr += er;
+            seasonHits += hits;
+            seasonWalks += walks;
+            seasonK += k;
+            seasonBf += bf;
+            seasonHr += hr;
+            seasonRuns += runs;
+            seasonPitches += Math.max(0, pitches);
+            relieverLines++;
+        }
+
+        void addUsage(String dateKey, int daysAgo, int pitcherId, double ip, int pitches) {
+            if (daysAgo < 0 || daysAgo > 3) return;
+            if (daysAgo == 0) {
+                todayIp += ip;
+                todayPitches += Math.max(0, pitches);
+                usedToday++;
+            }
+            if (daysAgo == 1) {
+                yesterdayIp += ip;
+                yesterdayPitches += Math.max(0, pitches);
+                usedYesterday++;
+            }
+            if (daysAgo <= 1) {
+                last2Ip += ip;
+                last2Pitches += Math.max(0, pitches);
+                usedLast2++;
+            }
+            if (daysAgo <= 2) {
+                last3Ip += ip;
+                last3Pitches += Math.max(0, pitches);
+                usedLast3++;
+            }
+            if (pitcherId > 0) {
+                Set<Integer> days = pitcherDayOffsets.get(pitcherId);
+                if (days == null) {
+                    days = new HashSet<>();
+                    pitcherDayOffsets.put(pitcherId, days);
+                }
+                days.add(daysAgo);
+            }
+        }
+
+        void finalizeFatigue() {
+            int b2b = 0;
+            int three = 0;
+            for (Set<Integer> days : pitcherDayOffsets.values()) {
+                if (days == null || days.isEmpty()) continue;
+                if ((days.contains(0) && days.contains(1)) || (days.contains(1) && days.contains(2)) || (days.contains(2) && days.contains(3))) b2b++;
+                if (days.size() >= 3) three++;
+            }
+            b2bArms = b2b;
+            threeInFourArms = three;
+        }
+
+        boolean qualityAvailable() { return seasonIp > 0.0d; }
+        double era() { return seasonIp > 0.0d ? seasonEr * 9.0d / seasonIp : Double.NaN; }
+        double whip() { return seasonIp > 0.0d ? (seasonHits + seasonWalks) / seasonIp : Double.NaN; }
+        double kPct() { return seasonBf > 0.0d ? seasonK * 100.0d / seasonBf : Double.NaN; }
+        double bbPct() { return seasonBf > 0.0d ? seasonWalks * 100.0d / seasonBf : Double.NaN; }
+        double kMinusBbPct() {
+            double k = kPct();
+            double bb = bbPct();
+            return Double.isNaN(k) || Double.isNaN(bb) ? Double.NaN : k - bb;
+        }
+        double hr9() { return seasonIp > 0.0d ? seasonHr * 9.0d / seasonIp : Double.NaN; }
+        double ra9() { return seasonIp > 0.0d ? seasonRuns * 9.0d / seasonIp : Double.NaN; }
+
+        double fatiguePenalty() {
+            return (todayIp * 1.15d) + (yesterdayIp * 0.85d) + (last2Ip * 0.42d) + (b2bArms * 1.65d)
+                    + (threeInFourArms * 1.85d) + (usedToday * 0.45d) + (usedYesterday * 0.35d) + (last2Pitches / 70.0d);
+        }
+
+        String fatigueLabel() {
+            double p = fatiguePenalty();
+            if (p >= 12.0d || b2bArms >= 4 || last2Ip >= 9.0d || last2Pitches >= 150) return "Heavy";
+            if (p >= 6.5d || b2bArms >= 2 || last2Ip >= 5.0d || usedYesterday >= 4) return "Moderate";
+            return "Rested";
+        }
+
+        String edgeReason() {
+            String fatigue = fatigueLabel();
+            if ("Rested".equals(fatigue) && qualityAvailable()) return "quality + rested";
+            if ("Heavy".equals(fatigue)) return "quality despite usage";
+            return qualityAvailable() ? "quality edge" : "usage edge";
+        }
+    }
+
     static class WeightedStatsBuilder {
         final Metric[] metrics; final boolean sumCounts; int pa = 0; int bbe = 0; double ip = 0; final Map<String, Double> sums = new HashMap<>(); final Map<String, Double> weights = new HashMap<>();
-        static final String[] RAW_KEYS = new String[] { "__ab", "__h", "__tb", "__bb", "__hbp", "__sf", "__so", "__2b", "__3b", "__hr", "__runs", "__rbi", "__sb", "__games", "__pip", "__bf", "__pk", "__pbb", "__ph", "__er", "__pr", "__phr", "__pgames" };
+        static final String[] RAW_KEYS = new String[] { "__ab", "__h", "__tb", "__bb", "__hbp", "__sf", "__so", "__2b", "__3b", "__hr", "__runs", "__rbi", "__sb", "__games", "__pip", "__bf", "__pk", "__pbb", "__ph", "__er", "__pr", "__phr", "__pgames", "__gs", "__pitches" };
         WeightedStatsBuilder(Metric[] metrics) { this(metrics, false); }
         WeightedStatsBuilder(Metric[] metrics, boolean sumCounts) { this.metrics = metrics; this.sumCounts = sumCounts; }
         private static boolean isTeamPitchMetricKey(String key) {
