@@ -281,6 +281,7 @@ public class MainActivity extends Activity {
     private LinearLayout matchupHubBox;
     private TextView matchupHubTitle;
     private TextView matchupHubSubtitle;
+    private LinearLayout matchupHubSwitcher;
     private TextView matchupLivePathButton;
     private TextView matchupCreatePathButton;
 
@@ -465,7 +466,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        // v197: bullpen usage matrix + scouting structure; phone-first portrait app. Prevent rotation recreation from dumping the user
+        // v199: bullpen usage matrix + scouting structure; phone-first portrait app. Prevent rotation recreation from dumping the user
         // back to Home while browsing a profile or matchup.
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
         getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
@@ -660,7 +661,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v197", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v199", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -1020,6 +1021,7 @@ public class MainActivity extends Activity {
         hub.addView(titleRow, matchWrap());
 
         LinearLayout switcher = new LinearLayout(this);
+        matchupHubSwitcher = switcher;
         switcher.setOrientation(LinearLayout.HORIZONTAL);
         switcher.setPadding(dp(3), dp(3), dp(3), dp(3));
         switcher.setBackground(roundedStroke(Color.argb(30, 255, 255, 255), Color.argb(56, 190, 214, 236), 17, 1));
@@ -1055,6 +1057,17 @@ public class MainActivity extends Activity {
         boolean show = activePrimaryTab == TAB_MATCHUP;
         matchupHubBox.setVisibility(show ? View.VISIBLE : View.GONE);
         if (!show) return;
+        matchupHubBox.setPadding(dp(matchupResultMode ? 8 : 11), dp(matchupResultMode ? 8 : 10), dp(matchupResultMode ? 8 : 11), dp(matchupResultMode ? 8 : 10));
+        if (matchupHubTitle != null) matchupHubTitle.setTextSize(matchupResultMode ? 13f : 14f);
+        if (matchupHubSubtitle != null) matchupHubSubtitle.setVisibility(matchupResultMode ? View.GONE : View.VISIBLE);
+        if (matchupHubSwitcher != null) {
+            ViewGroup.LayoutParams baseLp = matchupHubSwitcher.getLayoutParams();
+            if (baseLp instanceof ViewGroup.MarginLayoutParams) {
+                ViewGroup.MarginLayoutParams mlp = (ViewGroup.MarginLayoutParams) baseLp;
+                mlp.topMargin = dp(matchupResultMode ? 5 : 9);
+                matchupHubSwitcher.setLayoutParams(mlp);
+            }
+        }
         if (matchupResultMode) {
             if (matchupHubTitle != null) matchupHubTitle.setText("MATCHUP CARD");
             if (matchupHubSubtitle != null) matchupHubSubtitle.setText("Card-first view. Use the buttons below only when you want to change paths.");
@@ -7973,8 +7986,8 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             if (isBullpenHeroComparison(h)) {
                 showBullpenInfoSheet("Bullpen Matchup Type",
                         "This card uses the same premium matchup framework, but Bullpen is a fixed matchup type instead of a normal lens.\n\n"
-                                + "Overall bullpen edge is weighted 70% Quality and 30% Freshness. Quality uses ERA, WHIP, K-BB%, and HR/9. Freshness uses recent non-starter workload, pitch counts, back-to-back relievers, and watch/down usage signals.\n\n"
-                                + "The detailed Freshness and Quality panels below show the supporting data.");
+                                + "Overall bullpen edge is weighted 70% Quality and 30% Freshness. Quality uses ERA, WHIP, K-BB%, and HR/9. Freshness uses recent relief workload, total non-starter pitches, back-to-back relievers, and broader usage strain signals.\n\n"
+                                + "Freshness penalties are capped by category so one busy night does not wipe out the score by itself. Tap the info buttons below for the row-by-row definitions.");
             } else {
                 showMetricPicker();
             }
@@ -9936,7 +9949,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         double bScore = qb * 0.70d + fb * 0.30d;
         double gap = aScore - bScore;
 
-        // v197: bullpen edge share is a softened weighted-gap read, not winner-take-all.
+        // v199: bullpen edge share is a softened weighted-gap read, not winner-take-all.
         // A 15 point category-score gap should feel like a clear edge, not 100-0 domination.
         double pctA = 50.0d + clampDouble(gap * 0.92d, -38.0d, 38.0d);
         if (Math.abs(gap) < 1.5d) {
@@ -16656,7 +16669,12 @@ private View liveGameCard(LiveGame game) {
 
 
         standingsBox.addView(panel, matchWrap());
-        if (mainScroll != null) mainScroll.post(() -> mainScroll.smoothScrollTo(0, 0));
+        if (mainScroll != null) {
+            mainScroll.post(() -> {
+                int targetY = Math.max(0, standingsBox.getTop() - dp(8));
+                mainScroll.smoothScrollTo(0, targetY);
+            });
+        }
     }
 
 
@@ -16876,8 +16894,14 @@ private View liveGameCard(LiveGame game) {
 
     private double bullpenFreshnessScore(BullpenReport r) {
         if (r == null) return Double.NaN;
-        return 100.0d - (r.last2NonStarterIp() * 4.0d) - (r.last2Pitches * 0.05d) - (r.last2BulkIp * 1.2d)
-                - (r.last2LongIp * 0.9d) - (r.b2bArms * 4.0d) - (r.fatiguePenalty() * 0.8d);
+        double score = 100.0d;
+        score -= clampDouble(r.last2Ip * 2.3d, 0.0d, 22.0d);
+        score -= clampDouble(r.last2BulkIp * 1.4d, 0.0d, 8.0d);
+        score -= clampDouble(r.last2LongIp * 1.1d, 0.0d, 7.0d);
+        score -= clampDouble(r.last2NonStarterPitches() * 0.055d, 0.0d, 16.0d);
+        score -= clampDouble(r.b2bArms * 4.5d, 0.0d, 18.0d);
+        score -= clampDouble(r.fatiguePenalty(), 0.0d, 20.0d);
+        return score;
     }
 
     private int bullpenWinnerSide(String winner, BullpenReport away, BullpenReport home) {
@@ -17996,13 +18020,13 @@ private View liveGameCard(LiveGame game) {
     private String bullpenHelpText(String title) {
         String t = safe(title).toUpperCase(Locale.US);
         if (t.contains("FRESHNESS DETAILS")) {
-            return "Freshness estimates how rested each bullpen is tonight. It uses recent pitch counts, reliever usage, back-to-back appearances, watch/down arms, and total non-starter workload. In the hero, freshness is 30% of the overall bullpen edge.";
+            return "Freshness estimates how rested each bullpen is tonight. In the hero, freshness is 30% of the overall bullpen edge. The freshness score starts at 100, then applies capped penalties for recent relief innings, total non-starter pitches, back-to-back arms, and broader usage strain. That keeps freshness important without letting one variable overwhelm the score.";
         }
         if (t.contains("RELIEVER")) {
-            return "Each cell is pitches thrown on that date. Ready means used recently but likely fine. Watch means workload concern. Follower is the main arm after an opener; Long is a later extended outing.";
+            return "Each cell is pitches thrown on that date. Ready means used recently but likely fine. Watch means workload concern. Follower is the main arm after an opener; Long is a later extended outing. B2B Arms means relievers who worked on back-to-back days inside the recent window.";
         }
         if (t.contains("WORKLOAD")) {
-            return "Relievers are normal relief appearances. Follower is the main arm after an opener. Long relief is a later extended outing. Non-starter IP combines reliever, follower, and long-relief workload.";
+            return "Relievers are normal relief appearances. Follower is the main arm after an opener. Long relief is a later extended outing. Non-starter IP combines reliever, follower, and long-relief workload. B2B Arms means relievers who pitched on back-to-back days; the freshness score also factors overall usage strain, not just raw innings.";
         }
         if (t.contains("QUALITY")) {
             return "Quality compares bullpen performance from actual relief appearances. The hero quality score uses ERA, WHIP, K-BB%, and HR/9, and quality is 70% of the overall bullpen edge. The main rates exclude starters/openers, follower outings, and long relief so the quality edge reflects normal bullpen work.";
