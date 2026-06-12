@@ -689,7 +689,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v222", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v223", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -4412,6 +4412,8 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         } else if ("runPrevention".equals(preset)) {
             if (team) order = new String[] { "teamRAPG", "teamERA", "teamWHIP", "teamOppOps", "teamPXWOBA", "teamPitchKMinusBBPct", "teamPBarrelPct", "teamPHardHitPct" };
             else order = new String[] { "era", "whip", "pxwOBA", "pOppOps", "pBarrelPct", "pHardHitPct", "bb9" };
+        } else if ("speedBaserunning".equals(preset)) {
+            order = new String[] { "sprintSpeed", "sb" };
         } else if ("teamOverall".equals(preset)) {
             order = new String[] { "teamWinPct", "teamRunDiff", "teamRPG", "teamRAPG", "teamOPS", "teamOppOps", "teamERA", "teamWHIP" };
         } else if ("all".equals(preset) && "pitch".equals(role) && !team) {
@@ -4429,6 +4431,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         // mixed rows just because fewer than 8 rows scored.
         if (team && isCuratedTeamLensPreset(preset)) return out;
         if (!team && "pitch".equals(role) && isCuratedPitcherLensPreset(preset)) return out;
+        if (!team && "hit".equals(role) && isCuratedHitterLensPreset(preset)) return out;
 
         for (String key : defaultKeyEdgeOrder()) {
             Metric m = findMetricByKey(key);
@@ -4453,6 +4456,17 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 || "plateDiscipline".equals(preset)
                 || "powerContact".equals(preset)
                 || "runPrevention".equals(preset);
+    }
+
+    private boolean isCuratedHitterLensPreset(String preset) {
+        preset = normalizePresetKey(preset);
+        return "recommended".equals(preset)
+                || "traditional".equals(preset)
+                || "statcastAdvanced".equals(preset)
+                || "plateDiscipline".equals(preset)
+                || "powerContact".equals(preset)
+                || "speedBaserunning".equals(preset)
+                || "luck".equals(preset);
     }
 
     private boolean isCuratedPitcherLensPreset(String preset) {
@@ -4548,7 +4562,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 return;
             }
             if (isHotBatsComparison(lastHeadToHead)) {
-                showSpecialModelTip("Hot Bats Model", "This card compares each team’s best active recent-form hitter.\n\nIt uses recent OPS, wOBA, xwOBA, hard-hit rate, barrel rate, and exit velocity.\n\nThe lens is locked because this is a recent-form spotlight, not a normal stat lens.");
+                showSpecialModelTip("Hot Bats Model", "This card compares each team’s best active recent-form hitter.\n\nIt uses a Hot Bat Score plus recent OPS, wOBA, xwOBA, hard-hit rate, barrel rate, and exit velocity.\n\nThe lens is locked because this is a recent-form spotlight, not a normal stat lens.");
                 return;
             }
         }
@@ -10195,6 +10209,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         private String premiumCardScoreMetaLine() {
             if (isBullpenHeroComparison(h)) return "WEIGHTED BULLPEN EDGE";
             if (isOffenseVsStarterComparison(h)) return keyScore.scoredRows + " MODEL FACTORS";
+            if (isHotBatsComparison(h)) return keyScore.scoredRows + " MODEL FACTORS";
             int scored = Math.max(0, keyScore.scoredRows);
             int ctx = Math.max(0, keyScore.contextRows);
             if (ctx > 0) return scored + " SCORING STATS · " + ctx + " CONTEXT";
@@ -10610,7 +10625,20 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 }
             }
         }
+        applyOrdinaryEdgeCap(h, summary);
         return summary;
+    }
+
+    private void applyOrdinaryEdgeCap(HeadToHeadComparison h, StatScoreSummary summary) {
+        if (h == null || summary == null || summary.scoredRows <= 0) return;
+        if (isBullpenHeroComparison(h) || isOffenseVsStarterComparison(h)) return;
+        double total = summary.aPts + summary.bPts;
+        if (total <= 0d) return;
+        double pctA = 100d * summary.aPts / total;
+        double capped = clampDouble(pctA, 12.0d, 88.0d);
+        if (Math.abs(capped - pctA) < 0.0001d) return;
+        summary.aPts = capped;
+        summary.bPts = 100.0d - capped;
     }
 
     private StatScoreSummary summarizeBullpenHeroEdges(HeadToHeadComparison h, ArrayList<Metric> metricList) {
@@ -10791,7 +10819,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     private boolean isNormalizedMatchupScoreMetric(Metric m) {
         if (m == null) return false;
         String key = safe(m.key);
-        return key.startsWith("ovs") || "matchup".equalsIgnoreCase(safe(m.group));
+        return key.startsWith("ovs") || key.startsWith("hb") || "matchup".equalsIgnoreCase(safe(m.group)) || "Hot Bats".equalsIgnoreCase(safe(m.group));
     }
 
     private boolean isOffenseVsStarterComparison(HeadToHeadComparison h) {
@@ -21032,8 +21060,32 @@ private View liveGameCard(LiveGame game) {
             else if (s7 != null) { chosen = copyStats(s7); label = "Last 7d"; }
             else if (s30 != null) { chosen = copyStats(s30); label = "Last 30d"; }
         }
+        chosen = hydrateHotBatStats(chosen, seasonStats);
         double score = hotBatScore(chosen);
+        chosen.put("hbScore", score);
         return new HotHitterPick(player, chosen, label, score);
+    }
+
+    private Stats hydrateHotBatStats(Stats recent, Stats seasonStats) {
+        Stats out = recent == null ? new Stats() : copyStats(recent);
+        Stats fallback = seasonStats == null ? new Stats() : seasonStats;
+        copyMissingHotBatValue(out, fallback, "ops", 0.730d);
+        copyMissingHotBatValue(out, fallback, "wOBA", 0.320d);
+        copyMissingHotBatValue(out, fallback, "xwOBA", 0.320d);
+        copyMissingHotBatValue(out, fallback, "hardHitPct", 39d);
+        copyMissingHotBatValue(out, fallback, "barrelPct", 8d);
+        copyMissingHotBatValue(out, fallback, "avgEV", 89d);
+        if (out.pa <= 0 && fallback != null && fallback.pa > 0) out.pa = Math.min(fallback.pa, 30);
+        if (out.bbe <= 0 && fallback != null && fallback.bbe > 0) out.bbe = Math.min(fallback.bbe, 20);
+        return out;
+    }
+
+    private void copyMissingHotBatValue(Stats target, Stats fallback, String key, double leagueDefault) {
+        if (target == null || key == null) return;
+        Double existing = target.get(key);
+        if (existing != null && !Double.isNaN(existing)) return;
+        Double fallbackValue = fallback == null ? null : fallback.get(key);
+        target.put(key, fallbackValue == null || Double.isNaN(fallbackValue) ? leagueDefault : fallbackValue);
     }
 
     private double hotBatScore(Stats s) {
@@ -21049,6 +21101,7 @@ private View liveGameCard(LiveGame game) {
 
     private Stats hotBatsLeagueBaseline() {
         Stats s = new Stats();
+        s.put("hbScore", 50d);
         s.put("ops", 0.730d);
         s.put("wOBA", 0.320d);
         s.put("xwOBA", 0.320d);
@@ -21060,6 +21113,7 @@ private View liveGameCard(LiveGame game) {
 
     private ArrayList<Metric> hotBatMetrics() {
         ArrayList<Metric> out = new ArrayList<>();
+        out.add(new Metric("hbScore", "Hot Bat Score", "", 0, true, "rate", "Hot Bats", "hit"));
         addMetricIfPresent(out, "ops");
         addMetricIfPresent(out, "wOBA");
         addMetricIfPresent(out, "xwOBA");
