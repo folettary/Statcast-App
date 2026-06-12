@@ -689,7 +689,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v224", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v225", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -17387,8 +17387,8 @@ private View liveGameCard(LiveGame game) {
         String pitchers = (safe(game.awayPitcher).isEmpty() ? "Away SP TBD" : lastNameOnly(game.awayPitcher))
                 + " vs " + (safe(game.homePitcher).isEmpty() ? "Home SP TBD" : lastNameOnly(game.homePitcher));
 
-        LinearLayout.LayoutParams heroLp = new LinearLayout.LayoutParams(-1, dp(172)); // v212: fixed hero height so the card cannot balloon and hide matchup options
-        heroLp.setMargins(dp(12), dp(10), dp(12), dp(12));
+        LinearLayout.LayoutParams heroLp = new LinearLayout.LayoutParams(-1, dp(132)); // v225: shorter orientation hero; menu sections below do the explaining
+        heroLp.setMargins(dp(12), dp(8), dp(12), dp(10));
         panel.addView(gameMatchupHeroCard(game, away, home, awayPalette, homePalette, pitchers), heroLp);
 
         LinearLayout lensHeader = new LinearLayout(this);
@@ -17398,33 +17398,32 @@ private View liveGameCard(LiveGame game) {
         TextView lensTitle = text("CHOOSE MATCHUP TYPE", 10, Color.rgb(214, 226, 242), true);
         lensTitle.setLetterSpacing(0.16f);
         lensHeader.addView(lensTitle, new LinearLayout.LayoutParams(0, -2, 1));
-        TextView lensHint = text("Grouped for quick scan", 9, Color.rgb(146, 165, 190), true);
-        lensHint.setGravity(Gravity.RIGHT);
-        lensHeader.addView(lensHint);
         panel.addView(lensHeader, matchWrap());
 
-        addMatchupHubSection(panel, "COMPLETE", "Broadest single read");
+        addMatchupHubSection(panel, "COMPLETE", "Broadest read");
         LinearLayout.LayoutParams overallLp = new LinearLayout.LayoutParams(-1, dp(82));
         overallLp.setMargins(dp(12), 0, dp(12), dp(3));
         panel.addView(gameMenuTile("Team Overall", displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr) + " vs " + displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr), "Composite edge across record, lineup, and prevention", accent, v -> openLiveTeamMatchup(game)), overallLp);
 
-        addMatchupHubSection(panel, "TEAM UNITS", "Which group has the edge?");
+        addMatchupHubSection(panel, "TEAM UNITS", "Offense · pitching · bullpen");
         LinearLayout unitRow = matchupHubTileRow(panel);
         unitRow.addView(gameMenuTile("Team Offense", "Lineup vs lineup", "Runs, discipline, and contact quality", Color.rgb(99, 166, 255), v -> openLiveTeamOffenseMatchup(game)), new LinearLayout.LayoutParams(0, -1, 1));
         LinearLayout.LayoutParams pdLp = new LinearLayout.LayoutParams(0, -1, 1);
         pdLp.setMargins(dp(7), 0, 0, 0);
         unitRow.addView(gameMenuTile("Pitching/Defense", "Staff prevention", "Run prevention and contact allowed", Color.rgb(120, 220, 207), v -> openLiveTeamPitchingDefenseMatchup(game)), pdLp);
         LinearLayout bullpenOnlyRow = matchupHubTileRow(panel);
-        bullpenOnlyRow.addView(gameMenuTile("Bullpens", "Reliever edge", "Freshness + quality by available arms", Color.rgb(120, 220, 207), v -> openLiveBullpenMatchup(game)), new LinearLayout.LayoutParams(0, -1, 1));
+        bullpenOnlyRow.addView(new View(this), new LinearLayout.LayoutParams(0, -1, 0.5f));
+        bullpenOnlyRow.addView(gameMenuTile("Bullpens", "Reliever edge", "Freshness + quality by available arms", Color.rgb(120, 220, 207), v -> openLiveBullpenMatchup(game)), new LinearLayout.LayoutParams(0, -1, 1f));
+        bullpenOnlyRow.addView(new View(this), new LinearLayout.LayoutParams(0, -1, 0.5f));
 
-        addMatchupHubSection(panel, "GAME MATCHUPS", "Today's matchup-specific cards");
+        addMatchupHubSection(panel, "GAME MATCHUPS", "Today-specific");
         LinearLayout gameRow = matchupHubTileRow(panel);
         gameRow.addView(gameMenuTile("Starting Pitchers", pitchers, "Probable starter duel", Color.rgb(247, 197, 77), v -> openLivePitcherMatchup(game)), new LinearLayout.LayoutParams(0, -1, 1));
         LinearLayout.LayoutParams ovsLp = new LinearLayout.LayoutParams(0, -1, 1);
         ovsLp.setMargins(dp(7), 0, 0, 0);
         gameRow.addView(gameMenuTile("Offense vs SP", "Lineups vs probable starters", "Fixed model built for this game", Color.rgb(255, 155, 92), v -> openLiveOffenseVsStarterMatchup(game)), ovsLp);
 
-        addMatchupHubSection(panel, "PLAYER SPOTLIGHTS", "Best bats and recent form");
+        addMatchupHubSection(panel, "PLAYER SPOTLIGHTS", "Top bats · recent form");
         LinearLayout hitterRow = matchupHubTileRow(panel);
         hitterRow.addView(gameMenuTile("Key Hitters", "Active season bats", "Best available hitter per team", Color.rgb(99, 166, 255), v -> openLiveTopHitterMatchup(game)), new LinearLayout.LayoutParams(0, -1, 1));
         LinearLayout.LayoutParams hotLp = new LinearLayout.LayoutParams(0, -1, 1);
@@ -17434,50 +17433,43 @@ private View liveGameCard(LiveGame game) {
 
     private View gameMatchupHeroCard(LiveGame game, Team away, Team home, TeamPalette awayPalette, TeamPalette homePalette, String pitchers) {
         FrameLayout hero = buildLiveLogoDuelShell(away, home, awayPalette, homePalette, 24, true, null);
-        hero.setMinimumHeight(dp(172));
+        hero.setMinimumHeight(dp(132));
 
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(14), dp(10), dp(14), dp(10));
+        content.setPadding(dp(14), dp(9), dp(14), dp(8));
         hero.addView(content, new FrameLayout.LayoutParams(-1, -1));
 
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.HORIZONTAL);
         top.setGravity(Gravity.CENTER_VERTICAL);
-        TextView label = text("GAME MATCHUP HUB", 9, Color.rgb(222, 235, 250), true);
+        TextView label = text("GAME MATCHUP HUB", 8, Color.rgb(222, 235, 250), true);
         label.setLetterSpacing(0.14f);
         top.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
         int sc = statusColor(game);
-        TextView status = text(game.statusLabel() + (safe(game.timeLabel()).isEmpty() ? "" : " · " + game.timeLabel()), 9, sc, true);
+        TextView status = text(game.statusLabel() + (safe(game.timeLabel()).isEmpty() ? "" : " · " + game.timeLabel()), 8, sc, true);
         status.setGravity(Gravity.CENTER);
         status.setSingleLine(true);
         status.setEllipsize(TextUtils.TruncateAt.END);
-        status.setPadding(dp(9), dp(4), dp(9), dp(4));
+        status.setPadding(dp(8), dp(3), dp(8), dp(3));
         status.setBackground(roundedStroke(Color.argb(86, 8, 13, 22), Color.argb(122, Color.red(sc), Color.green(sc), Color.blue(sc)), 13, 1));
         top.addView(status);
         content.addView(top, matchWrap());
 
         String awayAbbr = displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr);
         String homeAbbr = displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr);
-        TextView title = text(awayAbbr + "  @  " + homeAbbr, 26, Color.WHITE, true);
+        TextView title = text(awayAbbr + "  @  " + homeAbbr, 24, Color.WHITE, true);
         title.setGravity(Gravity.CENTER);
         title.setLetterSpacing(0.04f);
-        title.setPadding(0, dp(12), 0, 0);
+        title.setPadding(0, dp(8), 0, 0);
         content.addView(title, matchWrap());
 
-        TextView sp = text(pitchers, 12, Color.rgb(205, 218, 236), true);
+        TextView sp = text(pitchers, 11, Color.rgb(205, 218, 236), true);
         sp.setGravity(Gravity.CENTER);
         sp.setSingleLine(true);
         sp.setEllipsize(TextUtils.TruncateAt.END);
-        sp.setPadding(0, dp(4), 0, 0);
+        sp.setPadding(0, dp(3), 0, 0);
         content.addView(sp, matchWrap());
-
-        TextView guide = text("Complete · Team Units · Game Matchups · Player Spotlights", 9, Color.rgb(180, 198, 222), true);
-        guide.setGravity(Gravity.CENTER);
-        guide.setSingleLine(true);
-        guide.setEllipsize(TextUtils.TruncateAt.END);
-        guide.setPadding(dp(10), dp(8), dp(10), 0);
-        content.addView(guide, matchWrap());
 
         return hero;
     }
@@ -17496,19 +17488,19 @@ private View liveGameCard(LiveGame game) {
 
     private void addMatchupHubSection(LinearLayout panel, String title, String subtitle) {
         LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(14), dp(10), dp(14), dp(6));
+        row.setOrientation(LinearLayout.VERTICAL);
+        row.setGravity(Gravity.LEFT);
+        row.setPadding(dp(14), dp(9), dp(14), dp(5));
 
         TextView label = text(title, 9, Color.rgb(244, 207, 100), true);
         label.setLetterSpacing(0.18f);
-        row.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
+        row.addView(label, matchWrap());
 
-        TextView sub = text(subtitle, 8, Color.rgb(151, 170, 196), true);
-        sub.setGravity(Gravity.RIGHT);
+        TextView sub = text(subtitle, 7, Color.rgb(118, 137, 163), false);
         sub.setSingleLine(true);
         sub.setEllipsize(TextUtils.TruncateAt.END);
-        row.addView(sub, new LinearLayout.LayoutParams(0, -2, 1));
+        sub.setPadding(0, dp(2), 0, 0);
+        row.addView(sub, matchWrap());
         panel.addView(row, matchWrap());
     }
 
@@ -17516,8 +17508,8 @@ private View liveGameCard(LiveGame game) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.TOP);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(84));
-        lp.setMargins(dp(12), 0, dp(12), dp(7));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(86));
+        lp.setMargins(dp(12), 0, dp(12), dp(6));
         panel.addView(row, lp);
         return row;
     }
@@ -17549,16 +17541,16 @@ private View liveGameCard(LiveGame game) {
         top.addView(arrow, new LinearLayout.LayoutParams(dp(18), -2));
         tile.addView(top, matchWrap());
 
-        TextView v = text(value, 9, Color.rgb(218, 230, 245), true);
+        TextView v = text(value, 9, Color.rgb(222, 233, 247), true);
         v.setSingleLine(true);
         v.setEllipsize(TextUtils.TruncateAt.END);
         v.setPadding(0, dp(5), 0, 0);
         tile.addView(v, matchWrap());
 
-        TextView c = text(caption, 7, Color.rgb(138, 158, 184), false);
+        TextView c = text(caption, 8, Color.rgb(146, 164, 188), false);
         c.setSingleLine(true);
         c.setEllipsize(TextUtils.TruncateAt.END);
-        c.setPadding(0, dp(4), 0, 0);
+        c.setPadding(0, dp(3), 0, 0);
         tile.addView(c, matchWrap());
 
         View rail = new View(this);
