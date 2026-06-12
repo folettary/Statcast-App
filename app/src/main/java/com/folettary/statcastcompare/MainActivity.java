@@ -685,7 +685,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v206", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v207", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -5778,7 +5778,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         resetTrendDefaults();
         StatScope scope = scopeForPlayers(a, b);
         constrainSelectedMetricsToPlayerRole(roleForScope(scope), true);
-        renderPremiumPlayerMatchupLoading(a, b, season, scope);
+        showProfileSkeleton();  // v207: fast player matchups use the original lightweight loader again
         setBusy(true, scope == StatScope.BOTH ? "Loading player side-by-side · hitting + pitching…" : "Loading player side-by-side…");
         final int requestToken = nextScreenRequestToken();
         io.execute(() -> {
@@ -5823,7 +5823,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         resetTrendDefaults();
         StatScope scope = StatScope.BOTH;
         constrainSelectedMetricsToPlayerRole("both", true);
-        renderPremiumTeamMatchupLoading(a, b, season, scope);
+        showProfileSkeleton();  // v207: fast team matchups use the original lightweight loader again
         setBusy(true, "Loading team side-by-side · hitting + pitching…");
         final int requestToken = nextScreenRequestToken();
         io.execute(() -> {
@@ -16670,62 +16670,165 @@ private View liveGameCard(LiveGame game) {
         top.addView(status, new LinearLayout.LayoutParams(0, -2, 1));
         panel.addView(top, matchWrap());
 
-        TextView title = text(displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr) + " @ " + displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr), 24, Color.WHITE, true);
-        title.setGravity(Gravity.CENTER);
-        title.setLetterSpacing(0.02f);
-        title.setPadding(0, dp(8), 0, 0);
-        panel.addView(title, matchWrap());
         String pitchers = (safe(game.awayPitcher).isEmpty() ? "Away SP TBD" : lastNameOnly(game.awayPitcher))
                 + " vs " + (safe(game.homePitcher).isEmpty() ? "Home SP TBD" : lastNameOnly(game.homePitcher));
-        TextView sub = text(pitchers, 12, Color.rgb(190, 207, 229), true);
-        sub.setGravity(Gravity.CENTER);
-        sub.setPadding(0, dp(3), 0, dp(9));
-        panel.addView(sub, matchWrap());
+
+        LinearLayout.LayoutParams heroLp = matchWrap();
+        heroLp.setMargins(dp(12), dp(10), dp(12), dp(12));
+        panel.addView(gameMatchupHeroCard(game, away, home, awayPalette, homePalette, pitchers), heroLp);
+
+        LinearLayout lensHeader = new LinearLayout(this);
+        lensHeader.setOrientation(LinearLayout.HORIZONTAL);
+        lensHeader.setGravity(Gravity.CENTER_VERTICAL);
+        lensHeader.setPadding(dp(14), 0, dp(14), dp(8));
+        TextView lensTitle = text("MATCHUP LENSES", 10, Color.rgb(214, 226, 242), true);
+        lensTitle.setLetterSpacing(0.16f);
+        lensHeader.addView(lensTitle, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView lensHint = text("Pick the card to build", 9, Color.rgb(146, 165, 190), true);
+        lensHint.setGravity(Gravity.RIGHT);
+        lensHeader.addView(lensHint);
+        panel.addView(lensHeader, matchWrap());
 
         LinearLayout row1 = new LinearLayout(this);
         row1.setOrientation(LinearLayout.HORIZONTAL);
-        panel.addView(row1, matchWrap());
-        row1.addView(gameMenuTile("Team Overall", displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr) + " vs " + displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr), "Compare the two teams", accent, v -> openLiveTeamMatchup(game)), new LinearLayout.LayoutParams(0, dp(94), 1));
-        LinearLayout.LayoutParams spLp = new LinearLayout.LayoutParams(0, dp(94), 1);
+        LinearLayout.LayoutParams row1Lp = matchWrap();
+        row1Lp.setMargins(dp(12), 0, dp(12), 0);
+        panel.addView(row1, row1Lp);
+        row1.addView(gameMenuTile("Team Overall", displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr) + " vs " + displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr), "Compare the two teams", accent, v -> openLiveTeamMatchup(game)), new LinearLayout.LayoutParams(0, dp(104), 1));
+        LinearLayout.LayoutParams spLp = new LinearLayout.LayoutParams(0, dp(104), 1);
         spLp.setMargins(dp(7), 0, 0, 0);
         row1.addView(gameMenuTile("Starting Pitchers", pitchers, "Preselected SP matchup", Color.rgb(247, 197, 77), v -> openLivePitcherMatchup(game)), spLp);
 
         LinearLayout row2 = new LinearLayout(this);
         row2.setOrientation(LinearLayout.HORIZONTAL);
         LinearLayout.LayoutParams row2Lp = matchWrap();
-        row2Lp.setMargins(0, dp(7), 0, 0);
+        row2Lp.setMargins(dp(12), dp(8), dp(12), 0);
         panel.addView(row2, row2Lp);
         row2.addView(gameMenuTile("Key Hitters", "Top OPS bats", "Auto-picks one hitter per team", Color.rgb(99, 166, 255), v -> openLiveTopHitterMatchup(game)), new LinearLayout.LayoutParams(0, dp(94), 1));
-        LinearLayout.LayoutParams bpLp = new LinearLayout.LayoutParams(0, dp(94), 1);
+        LinearLayout.LayoutParams bpLp = new LinearLayout.LayoutParams(0, dp(104), 1);
         bpLp.setMargins(dp(7), 0, 0, 0);
         row2.addView(gameMenuTile("Bullpens", "Quality + fatigue", "Relievers, usage, B2B arms", Color.rgb(120, 220, 207), v -> openLiveBullpenMatchup(game)), bpLp);
+    }
+
+    private View gameMatchupHeroCard(LiveGame game, Team away, Team home, TeamPalette awayPalette, TeamPalette homePalette, String pitchers) {
+        FrameLayout hero = buildLiveLogoDuelShell(away, home, awayPalette, homePalette, 24, true, null);
+        hero.setMinimumHeight(dp(190));
+
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(14), dp(12), dp(14), dp(12));
+        hero.addView(content, new FrameLayout.LayoutParams(-1, -1));
+
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        TextView label = text("GAME MATCHUP HUB", 9, Color.rgb(222, 235, 250), true);
+        label.setLetterSpacing(0.14f);
+        top.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
+        int sc = statusColor(game);
+        TextView status = text(game.statusLabel() + (safe(game.timeLabel()).isEmpty() ? "" : " · " + game.timeLabel()), 9, sc, true);
+        status.setGravity(Gravity.CENTER);
+        status.setSingleLine(true);
+        status.setEllipsize(TextUtils.TruncateAt.END);
+        status.setPadding(dp(9), dp(4), dp(9), dp(4));
+        status.setBackground(roundedStroke(Color.argb(86, 8, 13, 22), Color.argb(122, Color.red(sc), Color.green(sc), Color.blue(sc)), 13, 1));
+        top.addView(status);
+        content.addView(top, matchWrap());
+
+        String awayAbbr = displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr);
+        String homeAbbr = displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr);
+        TextView title = text(awayAbbr + "  @  " + homeAbbr, 28, Color.WHITE, true);
+        title.setGravity(Gravity.CENTER);
+        title.setLetterSpacing(0.04f);
+        title.setPadding(0, dp(17), 0, 0);
+        content.addView(title, matchWrap());
+
+        TextView sp = text(pitchers, 12, Color.rgb(205, 218, 236), true);
+        sp.setGravity(Gravity.CENTER);
+        sp.setSingleLine(true);
+        sp.setEllipsize(TextUtils.TruncateAt.END);
+        sp.setPadding(0, dp(5), 0, 0);
+        content.addView(sp, matchWrap());
+
+        LinearLayout chipRow = new LinearLayout(this);
+        chipRow.setOrientation(LinearLayout.HORIZONTAL);
+        chipRow.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams chipRowLp = matchWrap();
+        chipRowLp.setMargins(0, dp(15), 0, 0);
+        content.addView(chipRow, chipRowLp);
+        chipRow.addView(gameHeroChip("TEAM", awayPalette.primary), new LinearLayout.LayoutParams(0, dp(28), 1));
+        LinearLayout.LayoutParams c2 = new LinearLayout.LayoutParams(0, dp(28), 1);
+        c2.setMargins(dp(6), 0, 0, 0);
+        chipRow.addView(gameHeroChip("SP", Color.rgb(247, 197, 77)), c2);
+        LinearLayout.LayoutParams c3 = new LinearLayout.LayoutParams(0, dp(28), 1);
+        c3.setMargins(dp(6), 0, 0, 0);
+        chipRow.addView(gameHeroChip("BATS", Color.rgb(99, 166, 255)), c3);
+        LinearLayout.LayoutParams c4 = new LinearLayout.LayoutParams(0, dp(28), 1);
+        c4.setMargins(dp(6), 0, 0, 0);
+        chipRow.addView(gameHeroChip("BULLPEN", homePalette.primary), c4);
+
+        return hero;
+    }
+
+    private TextView gameHeroChip(String label, int accent) {
+        TextView chip = text(label, 9, Color.rgb(226, 237, 250), true);
+        chip.setGravity(Gravity.CENTER);
+        chip.setSingleLine(true);
+        chip.setLetterSpacing(0.08f);
+        chip.setBackground(roundedGradientStroke(new int[] {
+                Color.argb(44, Color.red(accent), Color.green(accent), Color.blue(accent)),
+                Color.argb(20, 255, 255, 255)
+        }, 999, Color.argb(86, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
+        return chip;
     }
 
     private LinearLayout gameMenuTile(String title, String value, String caption, int accent, View.OnClickListener click) {
         LinearLayout tile = new LinearLayout(this);
         tile.setOrientation(LinearLayout.VERTICAL);
         tile.setGravity(Gravity.CENTER_VERTICAL);
-        tile.setPadding(dp(9), dp(8), dp(9), dp(8));
+        tile.setPadding(dp(10), dp(9), dp(10), dp(9));
         tile.setClickable(true);
         tile.setForeground(ripple(true));
         tile.setOnClickListener(click);
         tile.setBackground(roundedGradientStroke(new int[] {
-                mixColor(accent, Color.rgb(6, 10, 18), 0.80f),
-                Color.rgb(6, 11, 20)
-        }, 18, Color.argb(104, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
+                Color.argb(230, 5, 10, 18),
+                mixColor(accent, Color.rgb(6, 10, 18), 0.76f),
+                Color.argb(232, 6, 11, 20)
+        }, 20, Color.argb(128, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
+
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
         TextView t = text(title, 12, Color.WHITE, true);
         t.setSingleLine(true);
-        tile.addView(t, matchWrap());
-        TextView v = text(value, 10, Color.rgb(210, 224, 241), true);
+        top.addView(t, new LinearLayout.LayoutParams(0, -2, 1));
+
+        TextView arrow = text("›", 18, softColor(accent, 0.08f), true);
+        arrow.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        top.addView(arrow, new LinearLayout.LayoutParams(dp(18), -2));
+        tile.addView(top, matchWrap());
+
+        TextView v = text(value, 10, Color.rgb(218, 230, 245), true);
         v.setSingleLine(true);
         v.setEllipsize(TextUtils.TruncateAt.END);
-        v.setPadding(0, dp(4), 0, 0);
+        v.setPadding(0, dp(5), 0, 0);
         tile.addView(v, matchWrap());
-        TextView c = text(caption + "  ❯", 8, Color.rgb(158, 176, 199), false);
+
+        TextView c = text(caption, 8, Color.rgb(150, 170, 195), false);
         c.setSingleLine(true);
         c.setEllipsize(TextUtils.TruncateAt.END);
         c.setPadding(0, dp(4), 0, 0);
         tile.addView(c, matchWrap());
+
+        View rail = new View(this);
+        rail.setBackground(roundedGradient(new int[] {
+                Color.argb(0, Color.red(accent), Color.green(accent), Color.blue(accent)),
+                Color.argb(176, Color.red(accent), Color.green(accent), Color.blue(accent)),
+                Color.argb(0, Color.red(accent), Color.green(accent), Color.blue(accent))
+        }, 99));
+        LinearLayout.LayoutParams railLp = new LinearLayout.LayoutParams(-1, dp(3));
+        railLp.setMargins(0, dp(8), 0, 0);
+        tile.addView(rail, railLp);
         return tile;
     }
 
