@@ -390,6 +390,7 @@ public class MainActivity extends Activity {
             new Metric("ip", "IP", "", 1, true, "pitching", "Volume Pitching", "pitch"),
             new Metric("pHitsAllowed", "H Allowed", "", 0, false, "count", "Standard Pitching", "pitch"),
             new Metric("pHrAllowed", "HR Allowed", "", 0, false, "count", "Standard Pitching", "pitch"),
+            new Metric("pHr9", "HR/9", "", 2, false, "pitching", "Standard Pitching", "pitch"),
             new Metric("pOppAvg", "Opp AVG", "", 3, false, "pitching", "Standard Pitching", "pitch"),
             new Metric("pOppOps", "Opp OPS", "", 3, false, "pitching", "Standard Pitching", "pitch"),
 
@@ -685,7 +686,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v213", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v214", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -4126,7 +4127,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     private String[] recommendedKeysForRole(String role) {
         boolean team = isTeamMetricContext();
         if (team) return new String[] { "teamWinPct", "teamRunDiff", "teamRPG", "teamRAPG", "teamOPS", "teamOppOps", "teamXWOBA", "teamPXWOBA", "teamBBMinusKPct", "teamPitchKMinusBBPct" };
-        if ("pitch".equals(role)) return new String[] { "era", "whip", "pxwOBA", "pitchKPct", "pitchBBPct", "pitchKMinusBBPct", "pWhiffPct", "pBarrelPct", "pHardHitPct", "pAvgEV" };
+        if ("pitch".equals(role)) return new String[] { "pxwOBA", "pitchKMinusBBPct", "pWhiffPct", "pBarrelPct", "pHardHitPct", "era", "whip" };
         if ("hit".equals(role)) return new String[] { "ops", "wOBA", "xwOBA", "obp", "slg", "bbPct", "kPct", "barrelPct", "hardHitPct", "whiffPct" };
         return new String[] { "ops", "xwOBA", "barrelPct", "hardHitPct", "era", "whip", "pitchKMinusBBPct", "pxwOBA" };
     }
@@ -4137,36 +4138,36 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         if ("recommended".equals(preset)) return recommendedKeysForRole(role);
         if ("traditional".equals(preset)) {
             if (team) return new String[] { "teamWinPct", "teamRunsScored", "teamRunsAllowed", "teamRunDiff", "teamAVG", "teamOPS", "teamERA", "teamWHIP", "teamHR", "teamHrAllowed", "teamHits", "teamHitsAllowed", "teamWalks", "teamWalksAllowed", "teamStrikeouts", "teamPitchStrikeouts" };
-            if ("pitch".equals(role)) return new String[] { "era", "whip", "ip", "pitchK", "pitchBB", "saves", "k9", "bb9", "kbb", "pHitsAllowed", "pHrAllowed", "pOppAvg", "pOppOps" };
+            if ("pitch".equals(role)) return new String[] { "era", "whip", "k9", "bb9", "pHr9", "ip" };
             return new String[] { "avg", "obp", "slg", "ops", "h", "doubles", "triples", "hr", "xbh", "rbi", "r", "sb", "bb", "so", "tb", "bbPct", "kPct" };
         }
         if ("teamOffense".equals(preset) && team) return new String[] { "teamAVG", "teamOBP", "teamSLG", "teamOPS", "teamISO", "teamBABIP", "teamHits", "teamDoubles", "teamTriples", "teamHR", "teamXbh", "teamRBI", "teamRunsScored", "teamRPG", "teamSB", "teamWalks", "teamStrikeouts", "teamTB", "teamKPct", "teamBBPct", "teamBBMinusKPct", "teamWhiffPct", "teamChasePct", "teamZoneContactPct", "teamWOBA", "teamXWOBA", "teamXBA", "teamXOBP", "teamXSLG", "teamXISO", "teamAvgEV", "teamHardHitPct", "teamBarrelPct", "teamSweetSpotPct", "teamGbPct", "teamFbPct", "teamLdPct", "teamPullPct", "teamOppoPct" };
         if ("teamPitchingDefense".equals(preset) && team) return new String[] { "teamRunsAllowed", "teamRAPG", "teamERA", "teamWHIP", "teamK9", "teamBB9", "teamKBB", "teamPitchKPct", "teamPitchBBPct", "teamPitchKMinusBBPct", "teamPitchStrikeouts", "teamHitsAllowed", "teamHrAllowed", "teamWalksAllowed", "teamOppAvg", "teamOppOps", "teamPXBA", "teamPXSLG", "teamPWOBA", "teamPXWOBA", "teamPAvgEV", "teamPHardHitPct", "teamPBarrelPct", "teamPWhiffPct", "teamPChasePct", "teamPFirstStrikePct", "teamPZonePct", "teamPGbPct", "teamPFbPct", "teamPLdPct" };
         if ("statcastAdvanced".equals(preset)) {
             if (team) return new String[] { "teamXWOBA", "teamPXWOBA", "teamXBA", "teamPXBA", "teamXSLG", "teamPXSLG", "teamXOBP", "teamXISO", "teamAvgEV", "teamPAvgEV", "teamBarrelPct", "teamPBarrelPct", "teamHardHitPct", "teamPHardHitPct", "teamSweetSpotPct", "teamWhiffPct", "teamPWhiffPct", "teamChasePct", "teamPChasePct", "teamPFirstStrikePct", "teamPZonePct" };
-            if ("pitch".equals(role)) return new String[] { "pxBA", "pxSLG", "pwOBA", "pxwOBA", "pAvgEV", "pHardHitPct", "pBarrelPct", "pWhiffPct", "pChasePct", "pFirstStrikePct", "pZonePct" };
+            if ("pitch".equals(role)) return new String[] { "pxwOBA", "pxSLG", "pBarrelPct", "pHardHitPct", "pWhiffPct", "pxBA", "pChasePct", "pAvgEV" };
             return new String[] { "wOBA", "xwOBA", "xBA", "xOBP", "xSLG", "xISO", "wOBAcon", "xwOBAcon", "avgEV", "avgLA", "hardHitPct", "barrelPct", "sweetSpotPct", "whiffPct", "chasePct" };
         }
         if ("plateDiscipline".equals(preset)) {
             if (team) return new String[] { "teamKPct", "teamBBPct", "teamBBMinusKPct", "teamWhiffPct", "teamChasePct", "teamSwingPct", "teamZoneContactPct", "teamPitchKPct", "teamPitchBBPct", "teamPitchKMinusBBPct", "teamPWhiffPct", "teamPChasePct", "teamPFirstStrikePct", "teamPZonePct" };
-            if ("pitch".equals(role)) return new String[] { "pitchKPct", "pitchBBPct", "pitchKMinusBBPct", "pWhiffPct", "pChasePct", "pFirstStrikePct", "pZonePct" };
+            if ("pitch".equals(role)) return new String[] { "pitchKMinusBBPct", "pWhiffPct", "pChasePct", "pFirstStrikePct", "pitchBBPct", "pZonePct" };
             return new String[] { "kPct", "bbPct", "bbMinusKPct", "whiffPct", "chasePct", "swingPct", "zoneContactPct" };
         }
         if ("powerContact".equals(preset)) {
             if (team) return new String[] { "teamSLG", "teamISO", "teamHR", "teamXbh", "teamXSLG", "teamAvgEV", "teamBarrelPct", "teamHardHitPct", "teamSweetSpotPct", "teamGbPct", "teamFbPct", "teamLdPct", "teamPullPct", "teamOppoPct", "teamOppOps", "teamHrAllowed", "teamPXSLG", "teamPAvgEV", "teamPBarrelPct", "teamPHardHitPct", "teamPGbPct", "teamPFbPct", "teamPLdPct" };
-            if ("pitch".equals(role)) return new String[] { "pHrAllowed", "pOppOps", "pxSLG", "pAvgEV", "pHardHitPct", "pBarrelPct", "pGbPct", "pFbPct", "pLdPct" };
+            if ("pitch".equals(role)) return new String[] { "pxSLG", "pOppOps", "pBarrelPct", "pHardHitPct", "pAvgEV", "pHr9", "pGbPct", "pFbPct" };
             return new String[] { "slg", "iso", "hr", "xbh", "xSLG", "avgEV", "hardHitPct", "barrelPct", "sweetSpotPct", "gbPct", "fbPct", "ldPct", "pullPct", "oppoPct" };
         }
         if ("runPrevention".equals(preset)) {
             if (team) return new String[] { "teamRunsAllowed", "teamRAPG", "teamERA", "teamWHIP", "teamOppAvg", "teamOppOps", "teamPXWOBA", "teamPXBA", "teamHitsAllowed", "teamHrAllowed", "teamWalksAllowed", "teamPitchKMinusBBPct", "teamPBarrelPct", "teamPHardHitPct", "teamPGbPct" };
-            if ("pitch".equals(role)) return new String[] { "era", "whip", "pxwOBA", "pxBA", "pOppAvg", "pOppOps", "pHitsAllowed", "pHrAllowed", "bb9", "pitchKMinusBBPct", "pBarrelPct", "pHardHitPct", "pGbPct" };
+            if ("pitch".equals(role)) return new String[] { "era", "whip", "pxwOBA", "pOppOps", "pBarrelPct", "pHardHitPct", "bb9" };
             return recommendedKeysForRole(role);
         }
         if ("teamOverall".equals(preset) && team) return new String[] { "teamWinPct", "teamRunDiff", "teamRunsScored", "teamRunsAllowed", "teamRPG", "teamRAPG", "teamOPS", "teamOppOps", "teamERA", "teamWHIP", "teamBBMinusKPct", "teamPitchKMinusBBPct" };
         if ("speedBaserunning".equals(preset)) return new String[] { "sb", "sprintSpeed" };
         if ("moreStats".equals(preset)) {
             if (team) return new String[] { "teamRunsScored", "teamRunsAllowed", "teamHits", "teamDoubles", "teamTriples", "teamHR", "teamXbh", "teamRBI", "teamSB", "teamWalks", "teamStrikeouts", "teamTB", "teamPitchStrikeouts", "teamHitsAllowed", "teamHrAllowed", "teamWalksAllowed", "teamBABIP", "teamGbPct", "teamFbPct", "teamPullPct", "teamOppoPct", "teamSwingPct" };
-            if ("pitch".equals(role)) return new String[] { "ip", "pitchK", "pitchBB", "saves", "pHitsAllowed", "pHrAllowed", "babip", "luck" };
+            if ("pitch".equals(role)) return new String[] { "ip", "pitchK", "pitchBB", "saves", "pHitsAllowed", "pHrAllowed", "pHr9", "babip", "luck" };
             return new String[] { "h", "doubles", "triples", "hr", "xbh", "rbi", "r", "sb", "bb", "so", "tb", "babip", "luck", "avgLA", "gbPct", "fbPct", "pullPct", "oppoPct", "swingPct" };
         }
         return null;
@@ -4250,7 +4251,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         String[] order;
         if ("traditional".equals(preset)) {
             if (team) order = new String[] { "teamWinPct", "teamRunDiff", "teamRunsScored", "teamRunsAllowed", "teamOPS", "teamOppOps", "teamERA", "teamWHIP" };
-            else if ("pitch".equals(role)) order = new String[] { "era", "whip", "ip", "pitchK", "pitchBB", "saves", "k9", "bb9" };
+            else if ("pitch".equals(role)) order = new String[] { "era", "whip", "k9", "bb9", "pHr9", "ip" };
             else order = new String[] { "avg", "obp", "slg", "ops", "hr", "rbi", "r", "sb" };
         } else if ("teamOffense".equals(preset)) {
             order = new String[] { "teamRPG", "teamOPS", "teamWOBA", "teamXWOBA", "teamBBMinusKPct", "teamSLG", "teamBarrelPct", "teamHardHitPct" };
@@ -4258,21 +4259,23 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             order = new String[] { "teamRAPG", "teamERA", "teamWHIP", "teamOppOps", "teamPXWOBA", "teamPitchKMinusBBPct", "teamPBarrelPct", "teamPHardHitPct" };
         } else if ("statcastAdvanced".equals(preset)) {
             if (team) order = new String[] { "teamXWOBA", "teamPXWOBA", "teamBarrelPct", "teamPBarrelPct", "teamHardHitPct", "teamPHardHitPct", "teamWhiffPct", "teamPWhiffPct" };
-            else if ("pitch".equals(role)) order = new String[] { "pxwOBA", "pxBA", "pxSLG", "pWhiffPct", "pChasePct", "pBarrelPct", "pHardHitPct", "pAvgEV" };
+            else if ("pitch".equals(role)) order = new String[] { "pxwOBA", "pxSLG", "pBarrelPct", "pHardHitPct", "pWhiffPct", "pxBA", "pChasePct", "pAvgEV" };
             else order = new String[] { "xwOBA", "xBA", "xSLG", "wOBA", "barrelPct", "hardHitPct", "avgEV", "whiffPct" };
         } else if ("plateDiscipline".equals(preset)) {
             if (team) order = new String[] { "teamBBPct", "teamKPct", "teamBBMinusKPct", "teamPitchKPct", "teamPitchBBPct", "teamPitchKMinusBBPct", "teamPFirstStrikePct", "teamPZonePct" };
-            else if ("pitch".equals(role)) order = new String[] { "pitchKPct", "pitchBBPct", "pitchKMinusBBPct", "pWhiffPct", "pChasePct", "pFirstStrikePct", "pZonePct" };
+            else if ("pitch".equals(role)) order = new String[] { "pitchKMinusBBPct", "pWhiffPct", "pChasePct", "pFirstStrikePct", "pitchBBPct", "pZonePct" };
             else order = new String[] { "bbPct", "kPct", "bbMinusKPct", "chasePct", "whiffPct", "zoneContactPct" };
         } else if ("powerContact".equals(preset)) {
             if (team) order = new String[] { "teamSLG", "teamISO", "teamBarrelPct", "teamHardHitPct", "teamAvgEV", "teamXSLG", "teamPBarrelPct", "teamPHardHitPct" };
-            else if ("pitch".equals(role)) order = new String[] { "pxSLG", "pOppOps", "pBarrelPct", "pHardHitPct", "pAvgEV", "pHrAllowed", "pGbPct", "pFbPct" };
+            else if ("pitch".equals(role)) order = new String[] { "pxSLG", "pOppOps", "pBarrelPct", "pHardHitPct", "pAvgEV", "pHr9", "pGbPct", "pFbPct" };
             else order = new String[] { "slg", "iso", "barrelPct", "hardHitPct", "avgEV", "xSLG", "sweetSpotPct", "hr" };
         } else if ("runPrevention".equals(preset)) {
             if (team) order = new String[] { "teamRAPG", "teamERA", "teamWHIP", "teamOppOps", "teamPXWOBA", "teamPitchKMinusBBPct", "teamPBarrelPct", "teamPHardHitPct" };
-            else order = new String[] { "teamRAPG", "era", "whip", "teamOppOps", "pxwOBA", "pitchKMinusBBPct", "pBarrelPct", "pHardHitPct" };
+            else order = new String[] { "era", "whip", "pxwOBA", "pOppOps", "pBarrelPct", "pHardHitPct", "bb9" };
         } else if ("teamOverall".equals(preset)) {
             order = new String[] { "teamWinPct", "teamRunDiff", "teamRPG", "teamRAPG", "teamOPS", "teamOppOps", "teamERA", "teamWHIP" };
+        } else if ("all".equals(preset) && "pitch".equals(role) && !team) {
+            order = new String[] { "era", "whip", "pxwOBA", "pitchKMinusBBPct", "pWhiffPct", "pBarrelPct", "pHardHitPct", "bb9", "ip" };
         } else {
             order = recommendedKeysForRole(role);
         }
@@ -4353,7 +4356,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     }
 
     private String[] defaultKeyEdgeOrder() {
-        return new String[] { "teamRunDiff", "teamRPG", "teamRAPG", "teamOPS", "teamOppOps", "teamXWOBA", "teamPXWOBA", "teamBBMinusKPct", "teamPitchKMinusBBPct", "ops", "wOBA", "xwOBA", "obp", "slg", "barrelPct", "hardHitPct", "whiffPct", "bbPct", "kPct", "bbMinusKPct", "era", "whip", "pxwOBA", "pitchKMinusBBPct", "pitchKPct", "pitchBBPct", "pWhiffPct", "pBarrelPct", "pHardHitPct" };
+        return new String[] { "teamRunDiff", "teamRPG", "teamRAPG", "teamOPS", "teamOppOps", "teamXWOBA", "teamPXWOBA", "teamBBMinusKPct", "teamPitchKMinusBBPct", "ops", "wOBA", "xwOBA", "obp", "slg", "barrelPct", "hardHitPct", "whiffPct", "bbPct", "kPct", "bbMinusKPct", "era", "whip", "pxwOBA", "pitchKMinusBBPct", "pWhiffPct", "pBarrelPct", "pHardHitPct", "bb9", "k9", "pHr9" };
     }
 
     private LinkedHashSet<String> firstKeyEdgeFrom(Set<String> keys) {
@@ -4418,9 +4421,9 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         scroller.addView(lensList);
 
         addLensChoiceCard(lensList, "recommended", "Recommended", "Balanced overall profile", role, dialog);
-        addLensChoiceCard(lensList, "traditional", "Traditional", "Classic production", role, dialog);
+        addLensChoiceCard(lensList, "traditional", "Traditional", "Classic rate results", role, dialog);
         addLensChoiceCard(lensList, "statcastAdvanced", "Statcast", "Expected stats and contact quality", role, dialog);
-        addLensChoiceCard(lensList, "plateDiscipline", "Plate Discipline", "Swing decisions and contact control", role, dialog);
+        addLensChoiceCard(lensList, "plateDiscipline", "Plate Discipline", "Command, whiffs, and count control", role, dialog);
         addLensChoiceCard(lensList, "powerContact", "Power/Contact", "Damage and contact quality", role, dialog);
         if (isTeamMetricContext() || "pitch".equals(role)) {
             addLensChoiceCard(lensList, "runPrevention", "Run Prevention", "Run prevention and allowed contact", role, dialog);
@@ -10037,6 +10040,80 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         return new int[] { (int)Math.round(summary.aPts), (int)Math.round(summary.bPts), 0 };
     }
 
+    private double headToHeadScoringWeight(HeadToHeadComparison h, Metric m) {
+        if (h == null || m == null) return 1d;
+        if (isBullpenHeroComparison(h) || isOffenseVsStarterComparison(h)) return 1d;
+        String role = h.isTeam ? "both" : roleForScope(h.scope);
+        String preset = normalizePresetKey(activeComparisonPreset);
+
+        // If the user is on a custom lens, keep custom rows equal-weighted.
+        if ("custom".equals(preset)) return 1d;
+
+        // v214: pitcher lenses use explicit category weights so overlapping stats do not
+        // accidentally double-count the same story. These are intentionally conservative:
+        // rate/quality stats score; raw volume is context only.
+        if (!h.isTeam && "pitch".equals(role)) {
+            String key = safe(m.key);
+            if ("recommended".equals(preset)) {
+                if ("pxwOBA".equals(key)) return 0.24d;
+                if ("pitchKMinusBBPct".equals(key)) return 0.20d;
+                if ("pWhiffPct".equals(key)) return 0.16d;
+                if ("pBarrelPct".equals(key)) return 0.14d;
+                if ("pHardHitPct".equals(key)) return 0.10d;
+                if ("era".equals(key)) return 0.10d;
+                if ("whip".equals(key)) return 0.06d;
+            } else if ("traditional".equals(preset)) {
+                if ("era".equals(key)) return 0.35d;
+                if ("whip".equals(key)) return 0.25d;
+                if ("k9".equals(key)) return 0.15d;
+                if ("bb9".equals(key)) return 0.15d;
+                if ("pHr9".equals(key)) return 0.10d;
+            } else if ("runPrevention".equals(preset)) {
+                if ("era".equals(key)) return 0.28d;
+                if ("whip".equals(key)) return 0.20d;
+                if ("pxwOBA".equals(key)) return 0.18d;
+                if ("pOppOps".equals(key)) return 0.12d;
+                if ("pBarrelPct".equals(key)) return 0.08d;
+                if ("pHardHitPct".equals(key)) return 0.08d;
+                if ("bb9".equals(key)) return 0.06d;
+            } else if ("powerContact".equals(preset)) {
+                if ("pxSLG".equals(key)) return 0.24d;
+                if ("pOppOps".equals(key)) return 0.18d;
+                if ("pBarrelPct".equals(key)) return 0.18d;
+                if ("pHardHitPct".equals(key)) return 0.16d;
+                if ("pAvgEV".equals(key)) return 0.12d;
+                if ("pHr9".equals(key)) return 0.08d;
+                if ("pGbPct".equals(key)) return 0.04d;
+            } else if ("plateDiscipline".equals(preset)) {
+                if ("pitchKMinusBBPct".equals(key)) return 0.25d;
+                if ("pWhiffPct".equals(key)) return 0.20d;
+                if ("pChasePct".equals(key)) return 0.18d;
+                if ("pFirstStrikePct".equals(key)) return 0.15d;
+                if ("pitchBBPct".equals(key)) return 0.12d;
+                if ("pZonePct".equals(key)) return 0.10d;
+            } else if ("statcastAdvanced".equals(preset)) {
+                if ("pxwOBA".equals(key)) return 0.24d;
+                if ("pxSLG".equals(key)) return 0.16d;
+                if ("pBarrelPct".equals(key)) return 0.16d;
+                if ("pHardHitPct".equals(key)) return 0.12d;
+                if ("pWhiffPct".equals(key)) return 0.12d;
+                if ("pxBA".equals(key)) return 0.08d;
+                if ("pChasePct".equals(key)) return 0.07d;
+                if ("pAvgEV".equals(key)) return 0.05d;
+            } else if ("all".equals(preset)) {
+                if ("era".equals(key)) return 0.12d;
+                if ("whip".equals(key)) return 0.10d;
+                if ("pxwOBA".equals(key)) return 0.18d;
+                if ("pitchKMinusBBPct".equals(key)) return 0.16d;
+                if ("pWhiffPct".equals(key)) return 0.12d;
+                if ("pBarrelPct".equals(key)) return 0.12d;
+                if ("pHardHitPct".equals(key)) return 0.08d;
+                if ("bb9".equals(key)) return 0.07d;
+            }
+        }
+        return 1d;
+    }
+
     private StatScoreSummary summarizeHeadToHeadEdges(HeadToHeadComparison h, ArrayList<Metric> metricList) {
         // v130: keep the math weighted, but expose it as a clearer edge-share visual.
         // This keeps quick-glance behavior while avoiding a misleading row-count scoreboard.
@@ -10054,19 +10131,21 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 continue;
             }
             summary.scoredRows++;
+            double weight = headToHeadScoringWeight(h, m);
+            if (weight <= 0d || Double.isNaN(weight)) weight = 1d;
             if (edge.winner == 0) {
                 summary.tossUpRows++;
-                summary.aPts += 0.5d;
-                summary.bPts += 0.5d;
+                summary.aPts += 0.5d * weight;
+                summary.bPts += 0.5d * weight;
             } else {
                 double winnerShare = 0.5d + 0.5d * Math.max(0d, Math.min(1d, edge.scoreStrength));
                 double loserShare = 1d - winnerShare;
                 if (edge.winner < 0) {
-                    summary.aPts += winnerShare;
-                    summary.bPts += loserShare;
+                    summary.aPts += winnerShare * weight;
+                    summary.bPts += loserShare * weight;
                 } else {
-                    summary.aPts += loserShare;
-                    summary.bPts += winnerShare;
+                    summary.aPts += loserShare * weight;
+                    summary.bPts += winnerShare * weight;
                 }
             }
         }
@@ -10226,7 +10305,14 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     }
 
     private boolean isContextOnlyMetric(Metric m) {
-        return m != null && ("luck".equals(m.key) || "context".equals(m.type));
+        if (m == null) return false;
+        String key = safe(m.key);
+        // v214: raw pitcher volume and batted-ball shape rows can help interpret the card,
+        // but they should not move the matchup score. Use rate/quality versions for scoring.
+        if ("ip".equals(key) || "pitchK".equals(key) || "pitchBB".equals(key) || "saves".equals(key)
+                || "pHitsAllowed".equals(key) || "pHrAllowed".equals(key) || "pFbPct".equals(key)
+                || "pLdPct".equals(key)) return true;
+        return "luck".equals(key) || "context".equals(m.type);
     }
 
     private boolean isTargetRangeMetric(Metric m) {
@@ -10464,6 +10550,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             case "teamK9": return 4.00d;
             case "bb9":
             case "teamBB9": return 1.75d;
+            case "pHr9": return 0.55d;
             case "kbb":
             case "teamKBB": return 1.50d;
             case "pOppAvg":
@@ -12897,6 +12984,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         s.put("whip", ip > 0 ? (hits + bb) / ip : num(stat.optString("whip", "")));
         s.put("k9", ip > 0 ? k * 9.0 / ip : num(stat.optString("strikeoutsPer9Inn", "")));
         s.put("bb9", ip > 0 ? bb * 9.0 / ip : num(stat.optString("walksPer9Inn", "")));
+        s.put("pHr9", ip > 0 ? hr * 9.0 / ip : numFromJsonAny(stat, "homeRunsPer9", "homeRunsPer9Inn", "hr9"));
         s.put("kbb", bb > 0 ? k / (double) bb : (k > 0 ? (double) k : num(stat.optString("strikeoutWalkRatio", ""))));
         s.put("pitchK", (double) k);
         s.put("pitchBB", (double) bb);
@@ -14325,6 +14413,8 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 lo = 5.0; hi = 14.0; break;
             case "bb9":
                 lo = 1.0; hi = 6.0; break;
+            case "pHr9":
+                lo = 0.4; hi = 2.2; break;
             case "kbb":
                 lo = 1.0; hi = 8.0; break;
             case "ip":
@@ -21854,6 +21944,7 @@ private View liveGameCard(LiveGame game) {
                 s.put("whip", (ph + pbb) / pip);
                 s.put("k9", pk * 9.0 / pip);
                 s.put("bb9", pbb * 9.0 / pip);
+                s.put("pHr9", phr * 9.0 / pip);
                 s.put("ip", pip);
             }
             if (pbb > 0) s.put("kbb", pk / pbb);
