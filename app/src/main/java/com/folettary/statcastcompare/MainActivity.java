@@ -685,7 +685,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v205", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v206", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -18413,6 +18413,39 @@ private View liveGameCard(LiveGame game) {
 
 
 
+    private static String loadingSafe(String value) {
+        return value == null ? "" : value;
+    }
+
+    private static String loadingRoleLabel(StatScope scope) {
+        if (scope == StatScope.HIT_ONLY) return "hitting";
+        if (scope == StatScope.PITCH_ONLY) return "pitching";
+        return "hitting + pitching";
+    }
+
+    private static String loadingShortName(String full, boolean firstPart) {
+        String s = loadingSafe(full).trim();
+        if (s.isEmpty()) return firstPart ? "" : "PLAYER";
+        int sp = s.lastIndexOf(' ');
+        if (sp <= 0) return firstPart ? "" : s;
+        return firstPart ? s.substring(0, sp) : s.substring(sp + 1);
+    }
+
+    private static String loadingCityPart(String full) {
+        String s = loadingSafe(full).trim();
+        int sp = s.lastIndexOf(' ');
+        return (sp > 0 ? s.substring(0, sp) : s).toUpperCase(Locale.US);
+    }
+
+    private static String loadingMascotPart(String full, String fallback) {
+        String s = loadingSafe(full).trim();
+        int sp = s.lastIndexOf(' ');
+        String out = sp > 0 ? s.substring(sp + 1) : loadingSafe(fallback);
+        if (out.isEmpty()) out = "TEAM";
+        return out.toUpperCase(Locale.US);
+    }
+
+
     class PremiumMatchupLoadingView extends View {
         final int season;
         final String title;
@@ -18962,37 +18995,6 @@ private View liveGameCard(LiveGame game) {
             return loadingSteps[idx];
         }
 
-        private static String loadingSafe(String value) {
-            return value == null ? "" : value;
-        }
-
-        private static String loadingRoleLabel(StatScope scope) {
-            if (scope == StatScope.HIT_ONLY) return "hitting";
-            if (scope == StatScope.PITCH_ONLY) return "pitching";
-            return "hitting + pitching";
-        }
-
-        private static String loadingShortName(String full, boolean firstPart) {
-            String s = loadingSafe(full).trim();
-            if (s.isEmpty()) return firstPart ? "" : "PLAYER";
-            int sp = s.lastIndexOf(' ');
-            if (sp <= 0) return firstPart ? "" : s;
-            return firstPart ? s.substring(0, sp) : s.substring(sp + 1);
-        }
-
-        private static String loadingCityPart(String full) {
-            String s = loadingSafe(full).trim();
-            int sp = s.lastIndexOf(' ');
-            return (sp > 0 ? s.substring(0, sp) : s).toUpperCase(Locale.US);
-        }
-
-        private static String loadingMascotPart(String full, String fallback) {
-            String s = loadingSafe(full).trim();
-            int sp = s.lastIndexOf(' ');
-            String out = sp > 0 ? s.substring(sp + 1) : loadingSafe(fallback);
-            if (out.isEmpty()) out = "TEAM";
-            return out.toUpperCase(Locale.US);
-        }
     }
 
 
