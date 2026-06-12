@@ -685,7 +685,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v207", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v211", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -9952,50 +9952,75 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
     private ArrayList<Metric> collectHeadToHeadMetrics(HeadToHeadComparison h, int max, boolean keyEdgeOnly) {
         ArrayList<Metric> ordered = new ArrayList<>();
+        boolean lockedSnapshot = usesLockedHeadToHeadMetricSnapshot(h);
+
+        // v211: normal player/team matchup cards should follow the CURRENT lens/key-edge
+        // selections every time the card re-renders. Earlier versions prioritized the
+        // snapshot captured when the matchup was first built, so the stat rows changed but
+        // the hero card percentages stayed stuck on the old lens. Custom cards with
+        // synthetic metrics (bullpen, offense-vs-starter) still keep their locked snapshots.
+        if (!lockedSnapshot) {
+            String role = h == null ? allowedMetricRoleForCurrentContext() : roleForScope(h.scope);
+            LinkedHashSet<String> sourceKeys = keyEdgeOnly ? keyEdgeMetricKeys : selectedMetricKeys;
+            if (sourceKeys == null || sourceKeys.isEmpty()) sourceKeys = selectedMetricKeys;
+
+            if (sourceKeys != null) {
+                for (String key : sourceKeys) {
+                    Metric m = findMetricByKey(key);
+                    if (m == null || ordered.contains(m)) continue;
+                    if (!roleAllowsMetric(role, m)) continue;
+                    if (h != null && !hasHeadToHeadMetricValue(h, m)) continue;
+                    ordered.add(m);
+                    if (ordered.size() >= max) return ordered;
+                }
+            }
+
+            if (keyEdgeOnly && ordered.isEmpty()) {
+                LinkedHashSet<String> fallback = defaultKeyEdgeForRole(role, selectedMetricKeys);
+                for (String key : fallback) {
+                    Metric m = findMetricByKey(key);
+                    if (m == null || ordered.contains(m)) continue;
+                    if (!roleAllowsMetric(role, m)) continue;
+                    if (h != null && !hasHeadToHeadMetricValue(h, m)) continue;
+                    ordered.add(m);
+                    if (ordered.size() >= max) return ordered;
+                }
+            }
+
+            if (!keyEdgeOnly && ordered.isEmpty() && h != null) {
+                for (Metric m : selectedMetricsForScope(h.scope)) {
+                    if (m == null || ordered.contains(m)) continue;
+                    if (!hasHeadToHeadMetricValue(h, m)) continue;
+                    ordered.add(m);
+                    if (ordered.size() >= max) return ordered;
+                }
+            }
+        }
+
         if (h != null) {
             ArrayList<Metric> snapshot = keyEdgeOnly ? h.keyEdgeMetricsSnapshot : h.selectedMetricsSnapshot;
             if (snapshot != null && !snapshot.isEmpty()) {
                 for (Metric m : snapshot) {
                     if (m == null || ordered.contains(m)) continue;
+                    if (h != null && !hasHeadToHeadMetricValue(h, m)) continue;
                     ordered.add(m);
                     if (ordered.size() >= max) return ordered;
                 }
-                return ordered;
-            }
-        }
-        String role = h == null ? allowedMetricRoleForCurrentContext() : roleForScope(h.scope);
-        LinkedHashSet<String> sourceKeys = keyEdgeOnly ? keyEdgeMetricKeys : selectedMetricKeys;
-        if (sourceKeys == null || sourceKeys.isEmpty()) sourceKeys = selectedMetricKeys;
-
-        if (sourceKeys != null) {
-            for (String key : sourceKeys) {
-                Metric m = findMetricByKey(key);
-                if (m == null || ordered.contains(m)) continue;
-                if (!roleAllowsMetric(role, m)) continue;
-                ordered.add(m);
-                if (ordered.size() >= max) return ordered;
-            }
-        }
-
-        if (keyEdgeOnly && ordered.isEmpty()) {
-            LinkedHashSet<String> fallback = defaultKeyEdgeForRole(role, selectedMetricKeys);
-            for (String key : fallback) {
-                Metric m = findMetricByKey(key);
-                if (m == null || ordered.contains(m)) continue;
-                if (!roleAllowsMetric(role, m)) continue;
-                ordered.add(m);
-                if (ordered.size() >= max) return ordered;
-            }
-        }
-
-        if (!keyEdgeOnly && ordered.isEmpty() && h != null) {
-            for (Metric m : selectedMetricsForScope(h.scope)) {
-                if (m == null || ordered.contains(m)) continue;
-                ordered.add(m);
-                if (ordered.size() >= max) return ordered;
             }
         }
         return ordered;
+    }
+
+    private boolean usesLockedHeadToHeadMetricSnapshot(HeadToHeadComparison h) {
+        if (h == null || h.selectedMetricsSnapshot == null || h.selectedMetricsSnapshot.isEmpty()) return false;
+        if (isBullpenHeroComparison(h)) return true;
+        for (Metric m : h.selectedMetricsSnapshot) {
+            if (m == null) continue;
+            // Synthetic live-game cards create metrics that are not in the global picker.
+            // Those cannot be rebuilt from selectedMetricKeys, so keep their card snapshot.
+            if (findMetricByKey(m.key) == null) return true;
+        }
+        return false;
     }
 
     private int[] countHeadToHeadWins(HeadToHeadComparison h, ArrayList<Metric> metricList) {
@@ -10605,7 +10630,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         }
         rail.setBackground(roundedGradient(railColors, 6));
         LinearLayout.LayoutParams railLp = new LinearLayout.LayoutParams(-1, dp(6));
-        railLp.setMargins(0, dp(8), 0, 0);
+        railLp.setMargins(0, dp(6), 0, 0);
         row.addView(rail, railLp);
         return row;
     }
@@ -16635,6 +16660,7 @@ private View liveGameCard(LiveGame game) {
         standingsBox.setVisibility(View.VISIBLE);
         standingsBox.removeAllViews();
         refreshMatchupHub();
+        if (matchupHubBox != null) matchupHubBox.setVisibility(View.GONE); // v208: game hub owns this screen; no duplicate top path buttons
 
         Team away = teamForLiveGame(game.awayTeamId, game.awayName, game.awayAbbr);
         Team home = teamForLiveGame(game.homeTeamId, game.homeName, game.homeAbbr);
@@ -16657,17 +16683,14 @@ private View liveGameCard(LiveGame game) {
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.HORIZONTAL);
         top.setGravity(Gravity.CENTER_VERTICAL);
-        TextView back = text("← Games", 10, Color.rgb(218, 232, 248), true);
+        TextView back = text("‹ Games", 9, Color.rgb(205, 219, 238), true);
         back.setGravity(Gravity.CENTER);
-        back.setPadding(dp(8), dp(5), dp(8), dp(5));
-        back.setBackground(roundedStroke(Color.argb(50, 255, 255, 255), Color.argb(72, 255, 255, 255), 14, 1));
+        back.setPadding(dp(7), dp(4), dp(7), dp(4));
+        back.setBackground(roundedStroke(Color.argb(24, 255, 255, 255), Color.argb(48, 255, 255, 255), 999, 1));
         back.setForeground(ripple(true));
         back.setClickable(true);
         back.setOnClickListener(v -> openLiveMatchupsPath());
         top.addView(back);
-        TextView status = text(game.statusLabel() + (safe(game.timeLabel()).isEmpty() ? "" : " · " + game.timeLabel()), 10, statusColor(game), true);
-        status.setGravity(Gravity.RIGHT);
-        top.addView(status, new LinearLayout.LayoutParams(0, -2, 1));
         panel.addView(top, matchWrap());
 
         String pitchers = (safe(game.awayPitcher).isEmpty() ? "Away SP TBD" : lastNameOnly(game.awayPitcher))
@@ -16681,42 +16704,55 @@ private View liveGameCard(LiveGame game) {
         lensHeader.setOrientation(LinearLayout.HORIZONTAL);
         lensHeader.setGravity(Gravity.CENTER_VERTICAL);
         lensHeader.setPadding(dp(14), 0, dp(14), dp(8));
-        TextView lensTitle = text("MATCHUP LENSES", 10, Color.rgb(214, 226, 242), true);
+        TextView lensTitle = text("BUILD A MATCHUP CARD", 10, Color.rgb(214, 226, 242), true);
         lensTitle.setLetterSpacing(0.16f);
         lensHeader.addView(lensTitle, new LinearLayout.LayoutParams(0, -2, 1));
-        TextView lensHint = text("Pick the card to build", 9, Color.rgb(146, 165, 190), true);
+        TextView lensHint = text("Choose one", 9, Color.rgb(146, 165, 190), true);
         lensHint.setGravity(Gravity.RIGHT);
         lensHeader.addView(lensHint);
         panel.addView(lensHeader, matchWrap());
 
         LinearLayout row1 = new LinearLayout(this);
         row1.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams row1Lp = matchWrap();
+        row1.setGravity(Gravity.TOP);
+        LinearLayout.LayoutParams row1Lp = new LinearLayout.LayoutParams(-1, dp(86));
         row1Lp.setMargins(dp(12), 0, dp(12), 0);
         panel.addView(row1, row1Lp);
-        row1.addView(gameMenuTile("Team Overall", displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr) + " vs " + displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr), "Compare the two teams", accent, v -> openLiveTeamMatchup(game)), new LinearLayout.LayoutParams(0, dp(104), 1));
-        LinearLayout.LayoutParams spLp = new LinearLayout.LayoutParams(0, dp(104), 1);
+        row1.addView(gameMenuTile("Team Overall", displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr) + " vs " + displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr), "Compare both teams", accent, v -> openLiveTeamMatchup(game)), new LinearLayout.LayoutParams(0, -1, 1));
+        LinearLayout.LayoutParams spLp = new LinearLayout.LayoutParams(0, -1, 1);
         spLp.setMargins(dp(7), 0, 0, 0);
-        row1.addView(gameMenuTile("Starting Pitchers", pitchers, "Preselected SP matchup", Color.rgb(247, 197, 77), v -> openLivePitcherMatchup(game)), spLp);
+        row1.addView(gameMenuTile("Starting Pitchers", pitchers, "Probable starter duel", Color.rgb(247, 197, 77), v -> openLivePitcherMatchup(game)), spLp);
 
         LinearLayout row2 = new LinearLayout(this);
         row2.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams row2Lp = matchWrap();
+        row2.setGravity(Gravity.TOP);
+        LinearLayout.LayoutParams row2Lp = new LinearLayout.LayoutParams(-1, dp(86));
         row2Lp.setMargins(dp(12), dp(8), dp(12), 0);
         panel.addView(row2, row2Lp);
-        row2.addView(gameMenuTile("Key Hitters", "Top OPS bats", "Auto-picks one hitter per team", Color.rgb(99, 166, 255), v -> openLiveTopHitterMatchup(game)), new LinearLayout.LayoutParams(0, dp(94), 1));
-        LinearLayout.LayoutParams bpLp = new LinearLayout.LayoutParams(0, dp(104), 1);
+        row2.addView(gameMenuTile("Offense vs SP", "Lineup vs opposing SP", "Each team bats vs starter", Color.rgb(255, 155, 92), v -> openLiveOffenseVsStarterMatchup(game)), new LinearLayout.LayoutParams(0, -1, 1));
+        LinearLayout.LayoutParams bpLp = new LinearLayout.LayoutParams(0, -1, 1);
         bpLp.setMargins(dp(7), 0, 0, 0);
-        row2.addView(gameMenuTile("Bullpens", "Quality + fatigue", "Relievers, usage, B2B arms", Color.rgb(120, 220, 207), v -> openLiveBullpenMatchup(game)), bpLp);
+        row2.addView(gameMenuTile("Bullpens", "Freshness + quality", "Reliever edge", Color.rgb(120, 220, 207), v -> openLiveBullpenMatchup(game)), bpLp);
+
+        LinearLayout row3 = new LinearLayout(this);
+        row3.setOrientation(LinearLayout.HORIZONTAL);
+        row3.setGravity(Gravity.TOP);
+        LinearLayout.LayoutParams row3Lp = new LinearLayout.LayoutParams(-1, dp(86));
+        row3Lp.setMargins(dp(12), dp(8), dp(12), 0);
+        panel.addView(row3, row3Lp);
+        row3.addView(gameMenuTile("Key Hitters", "Best season bats", "Auto-picks one hitter per team", Color.rgb(99, 166, 255), v -> openLiveTopHitterMatchup(game)), new LinearLayout.LayoutParams(0, -1, 1));
+        LinearLayout.LayoutParams hotLp = new LinearLayout.LayoutParams(0, -1, 1);
+        hotLp.setMargins(dp(7), 0, 0, 0);
+        row3.addView(gameMenuTile("Hot Bats", "Recent hitter form", "Uses last-15d form", Color.rgb(255, 109, 131), v -> openLiveHotBatsMatchup(game)), hotLp);
     }
 
     private View gameMatchupHeroCard(LiveGame game, Team away, Team home, TeamPalette awayPalette, TeamPalette homePalette, String pitchers) {
         FrameLayout hero = buildLiveLogoDuelShell(away, home, awayPalette, homePalette, 24, true, null);
-        hero.setMinimumHeight(dp(190));
+        hero.setMinimumHeight(dp(170));
 
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(14), dp(12), dp(14), dp(12));
+        content.setPadding(dp(14), dp(10), dp(14), dp(10));
         hero.addView(content, new FrameLayout.LayoutParams(-1, -1));
 
         LinearLayout top = new LinearLayout(this);
@@ -16737,33 +16773,33 @@ private View liveGameCard(LiveGame game) {
 
         String awayAbbr = displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr);
         String homeAbbr = displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr);
-        TextView title = text(awayAbbr + "  @  " + homeAbbr, 28, Color.WHITE, true);
+        TextView title = text(awayAbbr + "  @  " + homeAbbr, 26, Color.WHITE, true);
         title.setGravity(Gravity.CENTER);
         title.setLetterSpacing(0.04f);
-        title.setPadding(0, dp(17), 0, 0);
+        title.setPadding(0, dp(12), 0, 0);
         content.addView(title, matchWrap());
 
         TextView sp = text(pitchers, 12, Color.rgb(205, 218, 236), true);
         sp.setGravity(Gravity.CENTER);
         sp.setSingleLine(true);
         sp.setEllipsize(TextUtils.TruncateAt.END);
-        sp.setPadding(0, dp(5), 0, 0);
+        sp.setPadding(0, dp(4), 0, 0);
         content.addView(sp, matchWrap());
 
         LinearLayout chipRow = new LinearLayout(this);
         chipRow.setOrientation(LinearLayout.HORIZONTAL);
         chipRow.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams chipRowLp = matchWrap();
-        chipRowLp.setMargins(0, dp(15), 0, 0);
+        chipRowLp.setMargins(0, dp(10), 0, 0);
         content.addView(chipRow, chipRowLp);
-        chipRow.addView(gameHeroChip("TEAM", awayPalette.primary), new LinearLayout.LayoutParams(0, dp(28), 1));
-        LinearLayout.LayoutParams c2 = new LinearLayout.LayoutParams(0, dp(28), 1);
+        chipRow.addView(gameHeroChip("TEAM", awayPalette.primary), new LinearLayout.LayoutParams(0, dp(24), 1));
+        LinearLayout.LayoutParams c2 = new LinearLayout.LayoutParams(0, dp(24), 1);
         c2.setMargins(dp(6), 0, 0, 0);
         chipRow.addView(gameHeroChip("SP", Color.rgb(247, 197, 77)), c2);
-        LinearLayout.LayoutParams c3 = new LinearLayout.LayoutParams(0, dp(28), 1);
+        LinearLayout.LayoutParams c3 = new LinearLayout.LayoutParams(0, dp(24), 1);
         c3.setMargins(dp(6), 0, 0, 0);
         chipRow.addView(gameHeroChip("BATS", Color.rgb(99, 166, 255)), c3);
-        LinearLayout.LayoutParams c4 = new LinearLayout.LayoutParams(0, dp(28), 1);
+        LinearLayout.LayoutParams c4 = new LinearLayout.LayoutParams(0, dp(24), 1);
         c4.setMargins(dp(6), 0, 0, 0);
         chipRow.addView(gameHeroChip("BULLPEN", homePalette.primary), c4);
 
@@ -16786,7 +16822,8 @@ private View liveGameCard(LiveGame game) {
         LinearLayout tile = new LinearLayout(this);
         tile.setOrientation(LinearLayout.VERTICAL);
         tile.setGravity(Gravity.CENTER_VERTICAL);
-        tile.setPadding(dp(10), dp(9), dp(10), dp(9));
+        tile.setMinimumHeight(0);
+        tile.setPadding(dp(9), dp(7), dp(9), dp(7));
         tile.setClickable(true);
         tile.setForeground(ripple(true));
         tile.setOnClickListener(click);
@@ -16799,22 +16836,22 @@ private View liveGameCard(LiveGame game) {
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.HORIZONTAL);
         top.setGravity(Gravity.CENTER_VERTICAL);
-        TextView t = text(title, 12, Color.WHITE, true);
+        TextView t = text(title, 11, Color.WHITE, true);
         t.setSingleLine(true);
         top.addView(t, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView arrow = text("›", 18, softColor(accent, 0.08f), true);
+        TextView arrow = text("›", 16, softColor(accent, 0.08f), true);
         arrow.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
         top.addView(arrow, new LinearLayout.LayoutParams(dp(18), -2));
         tile.addView(top, matchWrap());
 
-        TextView v = text(value, 10, Color.rgb(218, 230, 245), true);
+        TextView v = text(value, 9, Color.rgb(218, 230, 245), true);
         v.setSingleLine(true);
         v.setEllipsize(TextUtils.TruncateAt.END);
         v.setPadding(0, dp(5), 0, 0);
         tile.addView(v, matchWrap());
 
-        TextView c = text(caption, 8, Color.rgb(150, 170, 195), false);
+        TextView c = text(caption, 7, Color.rgb(138, 158, 184), false);
         c.setSingleLine(true);
         c.setEllipsize(TextUtils.TruncateAt.END);
         c.setPadding(0, dp(4), 0, 0);
@@ -16826,7 +16863,7 @@ private View liveGameCard(LiveGame game) {
                 Color.argb(176, Color.red(accent), Color.green(accent), Color.blue(accent)),
                 Color.argb(0, Color.red(accent), Color.green(accent), Color.blue(accent))
         }, 99));
-        LinearLayout.LayoutParams railLp = new LinearLayout.LayoutParams(-1, dp(3));
+        LinearLayout.LayoutParams railLp = new LinearLayout.LayoutParams(-1, dp(2));
         railLp.setMargins(0, dp(8), 0, 0);
         tile.addView(rail, railLp);
         return tile;
@@ -20093,6 +20130,344 @@ private View liveGameCard(LiveGame game) {
         });
     }
 
+
+    private void openLiveHotBatsMatchup(LiveGame game) {
+        Team awayTeam = teamForLiveGame(game.awayTeamId, game.awayName, game.awayAbbr);
+        Team homeTeam = teamForLiveGame(game.homeTeamId, game.homeName, game.homeAbbr);
+        if (awayTeam == null || homeTeam == null) {
+            Toast.makeText(this, "Could not match game teams to app teams.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        teamMode = false;
+        headToHeadMode = true;
+        rankingsModeActive = false;
+        expectedMode = false;
+        constrainSelectedMetricsToPlayerRole("hit", true);
+        applyHeadToHeadVisibility();
+        updateAnalysisModeButtons();
+        updateViewModeButtons();
+        if (standingsBox != null) standingsBox.removeAllViews();
+        if (resultsBox != null) resultsBox.setVisibility(View.VISIBLE);
+        showProfileSkeleton();
+        setBusy(true, "Loading hot bats · recent hitter form…");
+        final int season = currentSeason();
+        final int requestToken = nextScreenRequestToken();
+        io.execute(() -> {
+            try {
+                ArrayList<LeaderboardEntry> entries = eligiblePlayerEntries(fetchLeaderboardForScope(season, StatScope.HIT_ONLY), season, metricByKey("ops"));
+                HotHitterPick awayPick = hottestHitterForTeam(entries, awayTeam, season);
+                HotHitterPick homePick = hottestHitterForTeam(entries, homeTeam, season);
+                if (awayPick == null || homePick == null || awayPick.player == null || homePick.player == null) {
+                    throw new Exception("Could not find hot hitters for both teams");
+                }
+                Player away = awayPick.player;
+                Player home = homePick.player;
+                selectedPlayer = away;
+                comparePlayer = home;
+                renderSelectionPreview();
+                renderComparePreview();
+                HeadToHeadComparison h = buildHotBatsComparison(awayPick, homePick, season);
+                main.post(() -> {
+                    if (!isCurrentScreenRequest(requestToken) || activePrimaryTab != TAB_MATCHUP || !headToHeadMode) return;
+                    lastComparison = null;
+                    lastHeadToHead = h;
+                    renderHeadToHead(h);
+                    setBusy(false, "Loaded hot bats");
+                    statusView.setText("Live hot bats · recent form leaders for " + awayTeam.abbr + " and " + homeTeam.abbr + ".");
+                    enterMatchupResultMode();
+                    if (mainScroll != null) mainScroll.post(() -> mainScroll.smoothScrollTo(0, 0));
+                });
+            } catch (Exception e) {
+                main.post(() -> {
+                    if (!isCurrentScreenRequest(requestToken) || activePrimaryTab != TAB_MATCHUP) return;
+                    setBusy(false, null);
+                    showError("Could not load hot bats matchup. " + e.getMessage());
+                });
+            }
+        });
+    }
+
+    private void openLiveOffenseVsStarterMatchup(LiveGame game) {
+        Team awayTeam = teamForLiveGame(game.awayTeamId, game.awayName, game.awayAbbr);
+        Team homeTeam = teamForLiveGame(game.homeTeamId, game.homeName, game.homeAbbr);
+        Player awayStarter = findPlayerByName(game.awayPitcher);
+        Player homeStarter = findPlayerByName(game.homePitcher);
+        if (awayTeam == null || homeTeam == null || awayStarter == null || homeStarter == null) {
+            Toast.makeText(this, "Could not line up both offenses and probable starters yet.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        teamMode = true;
+        headToHeadMode = true;
+        rankingsModeActive = false;
+        expectedMode = false;
+        selectedTeam = awayTeam;
+        compareTeam = homeTeam;
+        constrainSelectedMetricsToPlayerRole("both", true);
+        applyHeadToHeadVisibility();
+        updateAnalysisModeButtons();
+        updateViewModeButtons();
+        buildTeamChips();
+        updateTeamPickerButtons();
+        renderSelectionPreview();
+        renderComparePreview();
+        if (standingsBox != null) standingsBox.removeAllViews();
+        if (resultsBox != null) resultsBox.setVisibility(View.VISIBLE);
+        showProfileSkeleton();
+        setBusy(true, "Loading offense vs starter…");
+        final int season = currentSeason();
+        final int requestToken = nextScreenRequestToken();
+        io.execute(() -> {
+            try {
+                HeadToHeadComparison h = buildOffenseVsStarterComparison(game, awayTeam, homeTeam, awayStarter, homeStarter, season);
+                main.post(() -> {
+                    if (!isCurrentScreenRequest(requestToken) || activePrimaryTab != TAB_MATCHUP || !headToHeadMode) return;
+                    lastComparison = null;
+                    lastHeadToHead = h;
+                    renderHeadToHead(h);
+                    setBusy(false, "Loaded offense vs starter");
+                    statusView.setText("Live offense vs starter · " + awayTeam.abbr + " bats vs " + lastNameOnly(homeStarter.fullName) + " / " + homeTeam.abbr + " bats vs " + lastNameOnly(awayStarter.fullName) + ".");
+                    enterMatchupResultMode();
+                    if (mainScroll != null) mainScroll.post(() -> mainScroll.smoothScrollTo(0, 0));
+                });
+            } catch (Exception e) {
+                main.post(() -> {
+                    if (!isCurrentScreenRequest(requestToken) || activePrimaryTab != TAB_MATCHUP) return;
+                    setBusy(false, null);
+                    showError("Could not load offense vs starter matchup. " + e.getMessage());
+                });
+            }
+        });
+    }
+
+    private HeadToHeadComparison buildHotBatsComparison(HotHitterPick awayPick, HotHitterPick homePick, int season) {
+        Player away = awayPick.player;
+        Player home = homePick.player;
+        Stats statsA = copyStats(awayPick.stats);
+        Stats statsB = copyStats(homePick.stats);
+        Stats league = hotBatsLeagueBaseline();
+        ArrayList<Metric> metrics = hotBatMetrics();
+        ArrayList<Metric> key = new ArrayList<>();
+        for (int i = 0; i < Math.min(4, metrics.size()); i++) key.add(metrics.get(i));
+        return new HeadToHeadComparison(false,
+                away.fullName,
+                home.fullName,
+                away.teamAbbr + " · " + away.position + " · " + awayPick.windowLabel,
+                home.teamAbbr + " · " + home.position + " · " + homePick.windowLabel,
+                away.id, home.id, season,
+                statsA, statsB, league,
+                away, home, null, null,
+                new HashMap<>(), new HashMap<>(), new HashMap<>(), new HashMap<>(), new HashMap<>(), new HashMap<>(),
+                StatScope.HIT_ONLY, metrics, key);
+    }
+
+    private HeadToHeadComparison buildOffenseVsStarterComparison(LiveGame game, Team awayTeam, Team homeTeam, Player awayStarter, Player homeStarter, int season) throws Exception {
+        ArrayList<LeaderboardEntry> teamEntries = fetchLeaderboardForScope(season, StatScope.HIT_ONLY);
+        Map<String, Stats> aggregateSeeds = aggregateTeamStats(teamEntries);
+        Map<String, Stats> teamStats = fetchLeagueTeamStatsForScope(season, StatScope.HIT_ONLY, aggregateSeeds);
+        Stats awayOffense = teamStats.get(awayTeam.key());
+        Stats homeOffense = teamStats.get(homeTeam.key());
+
+        ArrayList<LeaderboardEntry> pitcherEntries = fetchLeaderboardForScope(season, StatScope.PITCH_ONLY);
+        Stats awayStarterStats = pitcherStatsForLiveCard(pitcherEntries, awayStarter, season);
+        Stats homeStarterStats = pitcherStatsForLiveCard(pitcherEntries, homeStarter, season);
+
+        if (awayOffense == null || homeOffense == null || awayStarterStats == null || homeStarterStats == null) {
+            throw new Exception("Missing team offense or starter data");
+        }
+
+        Stats sideA = offenseVsStarterStats(awayOffense, homeStarterStats);
+        Stats sideB = offenseVsStarterStats(homeOffense, awayStarterStats);
+        Stats league = offenseVsStarterLeagueBaseline();
+        ArrayList<Metric> metrics = offenseVsStarterMetrics();
+        ArrayList<Metric> key = new ArrayList<>();
+        for (int i = 0; i < Math.min(4, metrics.size()); i++) key.add(metrics.get(i));
+
+        return new HeadToHeadComparison(true,
+                awayTeam.name,
+                homeTeam.name,
+                "Bats vs " + lastNameOnly(homeStarter.fullName),
+                "Bats vs " + lastNameOnly(awayStarter.fullName),
+                0, 0, season,
+                sideA, sideB, league,
+                null, null, awayTeam, homeTeam,
+                new HashMap<>(), new HashMap<>(), new HashMap<>(), new HashMap<>(), new HashMap<>(), new HashMap<>(),
+                StatScope.BOTH, metrics, key);
+    }
+
+    private Stats pitcherStatsForLiveCard(ArrayList<LeaderboardEntry> entries, Player pitcher, int season) {
+        if (pitcher == null) return null;
+        Stats stats = new Stats();
+        LeaderboardEntry entry = findPlayerEntry(entries, pitcher);
+        if (entry != null && entry.stats != null) stats.mergeFrom(copyStats(entry.stats));
+        ensureDirectPlayerStatsForScope(pitcher, season, stats, StatScope.PITCH_ONLY);
+        return stats.anyValue() ? stats : null;
+    }
+
+    private HotHitterPick hottestHitterForTeam(ArrayList<LeaderboardEntry> entries, Team team, int season) {
+        if (entries == null || team == null) return null;
+        ArrayList<LeaderboardEntry> teamEntries = new ArrayList<>();
+        for (LeaderboardEntry e : entries) {
+            if (e == null || e.stats == null) continue;
+            if (!team.key().equals(teamKeyFromEntry(e))) continue;
+            Player p = playerFromEntry(e);
+            if (p == null || isPitcher(p)) continue;
+            teamEntries.add(e);
+        }
+        teamEntries.sort((a, b) -> {
+            int paA = a.stats == null ? 0 : a.stats.pa;
+            int paB = b.stats == null ? 0 : b.stats.pa;
+            if (paA != paB) return Integer.compare(paB, paA);
+            Double opsA = a.stats == null ? null : a.stats.get("ops");
+            Double opsB = b.stats == null ? null : b.stats.get("ops");
+            return Double.compare(opsB == null ? -999d : opsB, opsA == null ? -999d : opsA);
+        });
+        HotHitterPick best = null;
+        int limit = Math.min(10, teamEntries.size());
+        for (int i = 0; i < limit; i++) {
+            LeaderboardEntry e = teamEntries.get(i);
+            Player p = playerFromEntry(e);
+            if (p == null) continue;
+            HotHitterPick pick = recentHotHitterPick(p, season, e.stats);
+            if (pick == null) continue;
+            if (best == null || pick.score > best.score) best = pick;
+        }
+        return best;
+    }
+
+    private HotHitterPick recentHotHitterPick(Player player, int season, Stats seasonStats) {
+        LinkedHashMap<String, Stats> windows = fetchPlayerRecentWindows(player, season);
+        String label = "Season";
+        Stats chosen = seasonStats == null ? new Stats() : copyStats(seasonStats);
+        if (windows != null) {
+            Stats s15 = windows.get("Last 15d");
+            Stats s7 = windows.get("Last 7d");
+            Stats s30 = windows.get("Last 30d");
+            if (s15 != null && s15.pa >= 8) { chosen = copyStats(s15); label = "Last 15d"; }
+            else if (s7 != null && s7.pa >= 5) { chosen = copyStats(s7); label = "Last 7d"; }
+            else if (s30 != null && s30.pa >= 10) { chosen = copyStats(s30); label = "Last 30d"; }
+            else if (s15 != null) { chosen = copyStats(s15); label = "Last 15d"; }
+            else if (s7 != null) { chosen = copyStats(s7); label = "Last 7d"; }
+            else if (s30 != null) { chosen = copyStats(s30); label = "Last 30d"; }
+        }
+        double score = hotBatScore(chosen);
+        return new HotHitterPick(player, chosen, label, score);
+    }
+
+    private double hotBatScore(Stats s) {
+        if (s == null) return 0d;
+        double ops = scoreRange(s.get("ops"), 0.550d, 1.100d, true);
+        double woba = scoreRange(s.get("wOBA"), 0.250d, 0.440d, true);
+        double xwoba = scoreRange(s.get("xwOBA"), 0.250d, 0.440d, true);
+        double hardHit = scoreRange(s.get("hardHitPct"), 25d, 60d, true);
+        double barrel = scoreRange(s.get("barrelPct"), 2d, 18d, true);
+        double sampleBoost = 0.65d + 0.35d * clamp01((s.pa - 4d) / 16d);
+        return (0.34d * ops + 0.24d * woba + 0.20d * xwoba + 0.12d * hardHit + 0.10d * barrel) * sampleBoost;
+    }
+
+    private Stats hotBatsLeagueBaseline() {
+        Stats s = new Stats();
+        s.put("ops", 0.730d);
+        s.put("wOBA", 0.320d);
+        s.put("xwOBA", 0.320d);
+        s.put("hardHitPct", 39d);
+        s.put("barrelPct", 8d);
+        s.put("avgEV", 89d);
+        return s;
+    }
+
+    private ArrayList<Metric> hotBatMetrics() {
+        ArrayList<Metric> out = new ArrayList<>();
+        addMetricIfPresent(out, "ops");
+        addMetricIfPresent(out, "wOBA");
+        addMetricIfPresent(out, "xwOBA");
+        addMetricIfPresent(out, "hardHitPct");
+        addMetricIfPresent(out, "barrelPct");
+        addMetricIfPresent(out, "avgEV");
+        return out;
+    }
+
+    private Stats offenseVsStarterStats(Stats offense, Stats starter) {
+        Stats out = new Stats();
+        double onBase = mean(
+                scoreRange(offense.get("teamOBP"), 0.290d, 0.360d, true),
+                scoreRange(offense.get("teamBBPct"), 5d, 11d, true),
+                scoreRange(starter.get("pitchBBPct"), 4d, 12d, true),
+                scoreRange(starter.get("pxBA"), 0.210d, 0.300d, true));
+        double power = mean(
+                scoreRange(offense.get("teamSLG"), 0.360d, 0.500d, true),
+                scoreRange(offense.get("teamBarrelPct"), 3d, 12d, true),
+                scoreRange(starter.get("pxSLG"), 0.330d, 0.520d, true),
+                scoreRange(starter.get("pBarrelPct"), 3d, 12d, true));
+        double discipline = mean(
+                scoreRange(offense.get("teamWOBA"), 0.280d, 0.360d, true),
+                scoreRange(offense.get("teamXWOBA"), 0.280d, 0.360d, true),
+                scoreRange(offense.get("teamKPct"), 16d, 28d, false),
+                scoreRange(starter.get("pitchKPct"), 17d, 33d, false));
+        double starterVuln = mean(
+                scoreRange(starter.get("era"), 2.50d, 5.80d, true),
+                scoreRange(starter.get("whip"), 1.00d, 1.55d, true),
+                scoreRange(starter.get("pxwOBA"), 0.270d, 0.380d, true),
+                scoreRange(starter.get("pHardHitPct"), 28d, 52d, true));
+        double overall = mean(onBase, power, discipline, starterVuln);
+
+        out.put("ovsOverall", overall);
+        out.put("ovsOnBase", onBase);
+        out.put("ovsPower", power);
+        out.put("ovsDiscipline", discipline);
+        out.put("ovsStarterVuln", starterVuln);
+        return out;
+    }
+
+    private Stats offenseVsStarterLeagueBaseline() {
+        Stats s = new Stats();
+        s.put("ovsOverall", 50d);
+        s.put("ovsOnBase", 50d);
+        s.put("ovsPower", 50d);
+        s.put("ovsDiscipline", 50d);
+        s.put("ovsStarterVuln", 50d);
+        return s;
+    }
+
+    private ArrayList<Metric> offenseVsStarterMetrics() {
+        ArrayList<Metric> out = new ArrayList<>();
+        out.add(new Metric("ovsOverall", "Matchup Score", "", 0, true, "rate", "matchup", "both"));
+        out.add(new Metric("ovsOnBase", "On-Base Edge", "", 0, true, "rate", "matchup", "both"));
+        out.add(new Metric("ovsPower", "Power Edge", "", 0, true, "rate", "matchup", "both"));
+        out.add(new Metric("ovsDiscipline", "Discipline Edge", "", 0, true, "rate", "matchup", "both"));
+        out.add(new Metric("ovsStarterVuln", "Starter Vulnerability", "", 0, true, "rate", "matchup", "both"));
+        return out;
+    }
+
+    private void addMetricIfPresent(ArrayList<Metric> out, String key) {
+        Metric m = findMetricByKey(key);
+        if (m != null) out.add(m);
+    }
+
+    private double scoreRange(Double value, double low, double high, boolean higherGood) {
+        if (value == null || Double.isNaN(value)) return 50d;
+        if (high <= low) return 50d;
+        double pct = clamp01((value - low) / (high - low));
+        if (!higherGood) pct = 1d - pct;
+        return pct * 100d;
+    }
+
+    private double clamp01(double value) {
+        if (Double.isNaN(value)) return 0d;
+        return Math.max(0d, Math.min(1d, value));
+    }
+
+    private double mean(double... values) {
+        if (values == null || values.length == 0) return 0d;
+        double sum = 0d;
+        int count = 0;
+        for (double v : values) {
+            if (Double.isNaN(v)) continue;
+            sum += v;
+            count++;
+        }
+        return count == 0 ? 0d : sum / count;
+    }
+
     private LeaderboardEntry topHitterForTeam(ArrayList<LeaderboardEntry> entries, Team team) {
         if (entries == null || team == null) return null;
         Metric ops = metricByKey("ops");
@@ -21087,6 +21462,20 @@ private View liveGameCard(LiveGame game) {
             this.isTeam = isTeam; this.nameA = nameA; this.nameB = nameB; this.metaA = metaA; this.metaB = metaB; this.idA = idA; this.idB = idB; this.season = season; this.statsA = statsA; this.statsB = statsB; this.leagueStats = leagueStats; this.playerA = playerA; this.playerB = playerB; this.teamA = teamA; this.teamB = teamB; this.rankA = rankA == null ? new HashMap<>() : rankA; this.rankB = rankB == null ? new HashMap<>() : rankB; this.rankTotalA = rankTotalA == null ? new HashMap<>() : rankTotalA; this.rankTotalB = rankTotalB == null ? new HashMap<>() : rankTotalB; this.percentileA = percentileA == null ? new HashMap<>() : percentileA; this.percentileB = percentileB == null ? new HashMap<>() : percentileB; this.scope = scope == null ? StatScope.BOTH : scope; this.selectedMetricsSnapshot = selectedMetricsSnapshot == null ? new ArrayList<>() : selectedMetricsSnapshot; this.keyEdgeMetricsSnapshot = keyEdgeMetricsSnapshot == null ? new ArrayList<>() : keyEdgeMetricsSnapshot;
         }
     }
+
+    static class HotHitterPick {
+        final Player player;
+        final Stats stats;
+        final String windowLabel;
+        final double score;
+        HotHitterPick(Player player, Stats stats, String windowLabel, double score) {
+            this.player = player;
+            this.stats = stats;
+            this.windowLabel = windowLabel == null ? "Recent" : windowLabel;
+            this.score = score;
+        }
+    }
+
     static class AllRankRow {
         final Metric metric; final int rank, total, playerId; final String subjectName, leaderName; final Double value, leaderValue; final Team team;
         AllRankRow(Metric metric, int rank, int total, String subjectName, Double value, String leaderName, Double leaderValue, int playerId, Team team) {
