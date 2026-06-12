@@ -685,7 +685,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v211", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v212", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -16696,7 +16696,7 @@ private View liveGameCard(LiveGame game) {
         String pitchers = (safe(game.awayPitcher).isEmpty() ? "Away SP TBD" : lastNameOnly(game.awayPitcher))
                 + " vs " + (safe(game.homePitcher).isEmpty() ? "Home SP TBD" : lastNameOnly(game.homePitcher));
 
-        LinearLayout.LayoutParams heroLp = matchWrap();
+        LinearLayout.LayoutParams heroLp = new LinearLayout.LayoutParams(-1, dp(172)); // v212: fixed hero height so the card cannot balloon and hide matchup options
         heroLp.setMargins(dp(12), dp(10), dp(12), dp(12));
         panel.addView(gameMatchupHeroCard(game, away, home, awayPalette, homePalette, pitchers), heroLp);
 
@@ -16748,7 +16748,7 @@ private View liveGameCard(LiveGame game) {
 
     private View gameMatchupHeroCard(LiveGame game, Team away, Team home, TeamPalette awayPalette, TeamPalette homePalette, String pitchers) {
         FrameLayout hero = buildLiveLogoDuelShell(away, home, awayPalette, homePalette, 24, true, null);
-        hero.setMinimumHeight(dp(170));
+        hero.setMinimumHeight(dp(172));
 
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
@@ -16792,22 +16792,28 @@ private View liveGameCard(LiveGame game) {
         LinearLayout.LayoutParams chipRowLp = matchWrap();
         chipRowLp.setMargins(0, dp(10), 0, 0);
         content.addView(chipRow, chipRowLp);
-        chipRow.addView(gameHeroChip("TEAM", awayPalette.primary), new LinearLayout.LayoutParams(0, dp(24), 1));
-        LinearLayout.LayoutParams c2 = new LinearLayout.LayoutParams(0, dp(24), 1);
-        c2.setMargins(dp(6), 0, 0, 0);
+        chipRow.addView(gameHeroChip("TEAM", awayPalette.primary), new LinearLayout.LayoutParams(0, dp(22), 1));
+        LinearLayout.LayoutParams c2 = new LinearLayout.LayoutParams(0, dp(22), 1);
+        c2.setMargins(dp(4), 0, 0, 0);
         chipRow.addView(gameHeroChip("SP", Color.rgb(247, 197, 77)), c2);
-        LinearLayout.LayoutParams c3 = new LinearLayout.LayoutParams(0, dp(24), 1);
-        c3.setMargins(dp(6), 0, 0, 0);
-        chipRow.addView(gameHeroChip("BATS", Color.rgb(99, 166, 255)), c3);
-        LinearLayout.LayoutParams c4 = new LinearLayout.LayoutParams(0, dp(24), 1);
-        c4.setMargins(dp(6), 0, 0, 0);
-        chipRow.addView(gameHeroChip("BULLPEN", homePalette.primary), c4);
+        LinearLayout.LayoutParams c3 = new LinearLayout.LayoutParams(0, dp(22), 1);
+        c3.setMargins(dp(4), 0, 0, 0);
+        chipRow.addView(gameHeroChip("OVS", Color.rgb(255, 155, 92)), c3);
+        LinearLayout.LayoutParams c4 = new LinearLayout.LayoutParams(0, dp(22), 1);
+        c4.setMargins(dp(4), 0, 0, 0);
+        chipRow.addView(gameHeroChip("BP", homePalette.primary), c4);
+        LinearLayout.LayoutParams c5 = new LinearLayout.LayoutParams(0, dp(22), 1);
+        c5.setMargins(dp(4), 0, 0, 0);
+        chipRow.addView(gameHeroChip("KEY", Color.rgb(99, 166, 255)), c5);
+        LinearLayout.LayoutParams c6 = new LinearLayout.LayoutParams(0, dp(22), 1);
+        c6.setMargins(dp(4), 0, 0, 0);
+        chipRow.addView(gameHeroChip("HOT", Color.rgb(255, 109, 131)), c6);
 
         return hero;
     }
 
     private TextView gameHeroChip(String label, int accent) {
-        TextView chip = text(label, 9, Color.rgb(226, 237, 250), true);
+        TextView chip = text(label, 8, Color.rgb(226, 237, 250), true);
         chip.setGravity(Gravity.CENTER);
         chip.setSingleLine(true);
         chip.setLetterSpacing(0.08f);
