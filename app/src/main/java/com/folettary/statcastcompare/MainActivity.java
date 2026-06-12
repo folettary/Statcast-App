@@ -685,7 +685,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v204", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v205", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -18440,13 +18440,13 @@ private View liveGameCard(LiveGame game) {
             this(context,
                     season,
                     "MATCHUP CARD",
-                    scope == StatScope.BOTH ? "Player lens · hitting + pitching" : "Player lens · " + roleLabelForLoading(scope),
-                    shortNameForLoading(left == null ? "" : left.fullName, true),
-                    shortNameForLoading(left == null ? "Player" : left.fullName, false),
-                    safe(left == null ? "" : left.teamAbbr) + (left == null || safe(left.position).isEmpty() ? "" : " · " + left.position),
-                    shortNameForLoading(right == null ? "" : right.fullName, true),
-                    shortNameForLoading(right == null ? "Player" : right.fullName, false),
-                    safe(right == null ? "" : right.teamAbbr) + (right == null || safe(right.position).isEmpty() ? "" : " · " + right.position),
+                    scope == StatScope.BOTH ? "Player lens · hitting + pitching" : "Player lens · " + loadingRoleLabel(scope),
+                    loadingShortName(left == null ? "" : left.fullName, true),
+                    loadingShortName(left == null ? "Player" : left.fullName, false),
+                    loadingSafe(left == null ? "" : left.teamAbbr) + (left == null || loadingSafe(left.position).isEmpty() ? "" : " · " + left.position),
+                    loadingShortName(right == null ? "" : right.fullName, true),
+                    loadingShortName(right == null ? "Player" : right.fullName, false),
+                    loadingSafe(right == null ? "" : right.teamAbbr) + (right == null || loadingSafe(right.position).isEmpty() ? "" : " · " + right.position),
                     new String[] { "Selected Lens", "Percentile Edge", "League Context", "Recent Form", "Key Stat Rail", "Final Card" },
                     new String[] { "Loading player profiles...", "Scoring selected lens...", "Reviewing league context...", "Finalizing matchup edge..." },
                     leftColor,
@@ -18462,11 +18462,11 @@ private View liveGameCard(LiveGame game) {
                     season,
                     "MATCHUP CARD",
                     "Team lens · offense + pitching",
-                    cityPartForLoading(left == null ? "" : left.name),
-                    mascotPartForLoading(left == null ? safe(left == null ? "" : left.abbr) : left.name, left == null ? "" : left.abbr),
+                    loadingCityPart(left == null ? "" : left.name),
+                    loadingMascotPart(left == null ? loadingSafe(left == null ? "" : left.abbr) : left.name, left == null ? "" : left.abbr),
                     "TEAM",
-                    cityPartForLoading(right == null ? "" : right.name),
-                    mascotPartForLoading(right == null ? safe(right == null ? "" : right.abbr) : right.name, right == null ? "" : right.abbr),
+                    loadingCityPart(right == null ? "" : right.name),
+                    loadingMascotPart(right == null ? loadingSafe(right == null ? "" : right.abbr) : right.name, right == null ? "" : right.abbr),
                     "TEAM",
                     new String[] { "Offense Lens", "Pitching Lens", "League Ranks", "Weighted Edge", "Spark Rails", "Final Card" },
                     new String[] { "Loading team context...", "Building offense + pitching lens...", "Scoring weighted edge...", "Finalizing matchup card..." },
@@ -18485,11 +18485,11 @@ private View liveGameCard(LiveGame game) {
                     season,
                     "BULLPEN INTELLIGENCE",
                     "Matchup type · bullpen",
-                    cityPartForLoading(game == null ? "" : safe(game.awayName)),
-                    mascotPartForLoading(game == null ? "" : safe(game.awayName), game == null ? "" : game.awayAbbr),
+                    loadingCityPart(game == null ? "" : loadingSafe(game.awayName)),
+                    loadingMascotPart(game == null ? "" : loadingSafe(game.awayName), game == null ? "" : game.awayAbbr),
                     "BULLPEN",
-                    cityPartForLoading(game == null ? "" : safe(game.homeName)),
-                    mascotPartForLoading(game == null ? "" : safe(game.homeName), game == null ? "" : game.homeAbbr),
+                    loadingCityPart(game == null ? "" : loadingSafe(game.homeName)),
+                    loadingMascotPart(game == null ? "" : loadingSafe(game.homeName), game == null ? "" : game.homeAbbr),
                     "BULLPEN",
                     new String[] { "Quality Score", "ERA", "WHIP", "Freshness Score", "IP Last 2d", "Watch Arms" },
                     new String[] { "Checking recent relief usage...", "Scoring bullpen quality...", "Measuring freshness and strain...", "Finalizing bullpen edge..." },
@@ -18962,30 +18962,34 @@ private View liveGameCard(LiveGame game) {
             return loadingSteps[idx];
         }
 
-        private String roleLabelForLoading(StatScope scope) {
+        private static String loadingSafe(String value) {
+            return value == null ? "" : value;
+        }
+
+        private static String loadingRoleLabel(StatScope scope) {
             if (scope == StatScope.HIT_ONLY) return "hitting";
             if (scope == StatScope.PITCH_ONLY) return "pitching";
             return "hitting + pitching";
         }
 
-        private String shortNameForLoading(String full, boolean firstPart) {
-            String s = safe(full).trim();
+        private static String loadingShortName(String full, boolean firstPart) {
+            String s = loadingSafe(full).trim();
             if (s.isEmpty()) return firstPart ? "" : "PLAYER";
             int sp = s.lastIndexOf(' ');
             if (sp <= 0) return firstPart ? "" : s;
             return firstPart ? s.substring(0, sp) : s.substring(sp + 1);
         }
 
-        private String cityPartForLoading(String full) {
-            String s = safe(full).trim();
+        private static String loadingCityPart(String full) {
+            String s = loadingSafe(full).trim();
             int sp = s.lastIndexOf(' ');
             return (sp > 0 ? s.substring(0, sp) : s).toUpperCase(Locale.US);
         }
 
-        private String mascotPartForLoading(String full, String fallback) {
-            String s = safe(full).trim();
+        private static String loadingMascotPart(String full, String fallback) {
+            String s = loadingSafe(full).trim();
             int sp = s.lastIndexOf(' ');
-            String out = sp > 0 ? s.substring(sp + 1) : safe(fallback);
+            String out = sp > 0 ? s.substring(sp + 1) : loadingSafe(fallback);
             if (out.isEmpty()) out = "TEAM";
             return out.toUpperCase(Locale.US);
         }
