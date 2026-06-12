@@ -686,7 +686,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v214", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v215", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -4284,6 +4284,12 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             if (keys.contains(key) && roleAllowsMetric(role, m) && ("traditional".equals(preset) || !isContextOnlyMetric(m))) out.add(key);
             if (out.size() >= 8) return out;
         }
+
+        // v215: pitcher lens presets are intentionally curated. Do not top them off with
+        // generic default metrics just because fewer than 8 rows scored. That was causing
+        // Traditional to quietly add xwOBA/K-BB and Run Prevention to add K-BB, muddying the story.
+        if (!team && "pitch".equals(role) && isCuratedPitcherLensPreset(preset)) return out;
+
         for (String key : defaultKeyEdgeOrder()) {
             Metric m = findMetricByKey(key);
             if (keys.contains(key) && roleAllowsMetric(role, m) && isDefaultKeyEdgeMetric(m)) out.add(key);
@@ -4294,6 +4300,16 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             if (out.size() >= 8) return out;
         }
         return out;
+    }
+
+    private boolean isCuratedPitcherLensPreset(String preset) {
+        preset = normalizePresetKey(preset);
+        return "recommended".equals(preset)
+                || "traditional".equals(preset)
+                || "runPrevention".equals(preset)
+                || "powerContact".equals(preset)
+                || "plateDiscipline".equals(preset)
+                || "statcastAdvanced".equals(preset);
     }
 
     private boolean isDefaultKeyEdgeMetric(Metric m) {
@@ -10049,7 +10065,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         // If the user is on a custom lens, keep custom rows equal-weighted.
         if ("custom".equals(preset)) return 1d;
 
-        // v214: pitcher lenses use explicit category weights so overlapping stats do not
+        // v215: pitcher lenses use explicit category weights so overlapping stats do not
         // accidentally double-count the same story. These are intentionally conservative:
         // rate/quality stats score; raw volume is context only.
         if (!h.isTeam && "pitch".equals(role)) {
@@ -10063,19 +10079,19 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 if ("era".equals(key)) return 0.10d;
                 if ("whip".equals(key)) return 0.06d;
             } else if ("traditional".equals(preset)) {
-                if ("era".equals(key)) return 0.35d;
+                if ("era".equals(key)) return 0.40d;
                 if ("whip".equals(key)) return 0.25d;
-                if ("k9".equals(key)) return 0.15d;
                 if ("bb9".equals(key)) return 0.15d;
-                if ("pHr9".equals(key)) return 0.10d;
+                if ("pHr9".equals(key)) return 0.15d;
+                if ("k9".equals(key)) return 0.05d;
             } else if ("runPrevention".equals(preset)) {
-                if ("era".equals(key)) return 0.28d;
-                if ("whip".equals(key)) return 0.20d;
-                if ("pxwOBA".equals(key)) return 0.18d;
-                if ("pOppOps".equals(key)) return 0.12d;
+                if ("era".equals(key)) return 0.38d;
+                if ("whip".equals(key)) return 0.23d;
+                if ("pOppOps".equals(key)) return 0.14d;
+                if ("pHardHitPct".equals(key)) return 0.10d;
                 if ("pBarrelPct".equals(key)) return 0.08d;
-                if ("pHardHitPct".equals(key)) return 0.08d;
-                if ("bb9".equals(key)) return 0.06d;
+                if ("bb9".equals(key)) return 0.05d;
+                if ("pxwOBA".equals(key)) return 0.02d;
             } else if ("powerContact".equals(preset)) {
                 if ("pxSLG".equals(key)) return 0.24d;
                 if ("pOppOps".equals(key)) return 0.18d;
