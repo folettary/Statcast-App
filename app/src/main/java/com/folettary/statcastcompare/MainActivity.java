@@ -686,7 +686,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v216", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v217", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -4128,7 +4128,10 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         boolean team = isTeamMetricContext();
         if (team) return new String[] { "teamWinPct", "teamRunDiff", "teamRPG", "teamRAPG", "teamOPS", "teamOppOps", "teamXWOBA", "teamPXWOBA", "teamBBMinusKPct", "teamPitchKMinusBBPct" };
         if ("pitch".equals(role)) return new String[] { "pxwOBA", "pitchKMinusBBPct", "pWhiffPct", "pBarrelPct", "pHardHitPct", "era", "whip" };
-        if ("hit".equals(role)) return new String[] { "ops", "wOBA", "xwOBA", "obp", "slg", "bbPct", "kPct", "barrelPct", "hardHitPct", "whiffPct" };
+        // v217: reordered so the scored eight lead with one production story (OPS/wOBA/xwOBA)
+        // plus contact quality and discipline. OBP and SLG stay as display rows but no longer
+        // give the slash-line family five of eight scored votes.
+        if ("hit".equals(role)) return new String[] { "ops", "wOBA", "xwOBA", "barrelPct", "hardHitPct", "bbPct", "kPct", "whiffPct", "obp", "slg" };
         return new String[] { "ops", "xwOBA", "barrelPct", "hardHitPct", "era", "whip", "pitchKMinusBBPct", "pxwOBA" };
     }
 
@@ -4262,8 +4265,10 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             else if ("pitch".equals(role)) order = new String[] { "pxwOBA", "pxSLG", "pBarrelPct", "pHardHitPct", "pWhiffPct", "pxBA", "pChasePct", "pAvgEV" };
             else order = new String[] { "xwOBA", "xBA", "xSLG", "wOBA", "barrelPct", "hardHitPct", "avgEV", "whiffPct" };
         } else if ("plateDiscipline".equals(preset)) {
-            if (team) order = new String[] { "teamBBPct", "teamKPct", "teamBBMinusKPct", "teamPitchKPct", "teamPitchBBPct", "teamPitchKMinusBBPct", "teamPFirstStrikePct", "teamPZonePct" };
-            else if ("pitch".equals(role)) order = new String[] { "pitchKMinusBBPct", "pWhiffPct", "pChasePct", "pFirstStrikePct", "pitchBBPct", "pZonePct" };
+            // v217: Zone% removed from the scored set on both contexts — it has no consistent
+            // good direction. Teams score induced Chase% instead.
+            if (team) order = new String[] { "teamBBPct", "teamKPct", "teamBBMinusKPct", "teamPitchKPct", "teamPitchBBPct", "teamPitchKMinusBBPct", "teamPFirstStrikePct", "teamPChasePct" };
+            else if ("pitch".equals(role)) order = new String[] { "pitchKMinusBBPct", "pWhiffPct", "pChasePct", "pFirstStrikePct", "pitchBBPct" };
             else order = new String[] { "bbPct", "kPct", "bbMinusKPct", "chasePct", "whiffPct", "zoneContactPct" };
         } else if ("powerContact".equals(preset)) {
             if (team) order = new String[] { "teamSLG", "teamISO", "teamBarrelPct", "teamHardHitPct", "teamAvgEV", "teamXSLG", "teamPBarrelPct", "teamPHardHitPct" };
@@ -10105,7 +10110,16 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
     private double headToHeadScoringWeight(HeadToHeadComparison h, Metric m) {
         if (h == null || m == null) return 1d;
-        if (isBullpenHeroComparison(h) || isOffenseVsStarterComparison(h)) return 1d;
+        if (isBullpenHeroComparison(h)) return 1d;
+        // v217: the offense-vs-starter card scored its Overall row and the four sub-categories
+        // equally — but Overall is BUILT from those sub-categories, so each component counted
+        // twice and the summary number had only 1/5 of the say. Overall now anchors the card.
+        if (isOffenseVsStarterComparison(h)) {
+            String key = safe(m.key);
+            if ("ovsOverall".equals(key)) return 0.40d;
+            if (key.startsWith("ovs")) return 0.15d;
+            return 0.10d;
+        }
         String role = h.isTeam ? "both" : roleForScope(h.scope);
         String preset = normalizePresetKey(activeComparisonPreset);
 
@@ -10113,47 +10127,67 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         if ("custom".equals(preset)) return 1d;
 
         // v215: pitcher lenses use explicit category weights so overlapping stats do not
-        // accidentally double-count the same story. These are intentionally conservative:
-        // rate/quality stats score; raw volume is context only.
+        // accidentally double-count the same story.
+        // v217: weights retuned where the baseball logic was off (see per-lens notes), and the
+        // same curation extended to hitter and team lenses, which were still equal-weighted —
+        // that let families of near-duplicate stats (OPS/wOBA/xwOBA/OBP/SLG, or Win%/Run
+        // Diff/RPG/RAPG) decide a card by sheer row count. Every curated block ends with a
+        // small floor instead of falling through to 1.0, so a stray scored row can never
+        // outweigh the curated ones.
         if (!h.isTeam && "pitch".equals(role)) {
             String key = safe(m.key);
             if ("recommended".equals(preset)) {
-                if ("pxwOBA".equals(key)) return 0.24d;
+                // v217: results (ERA) up from .10, whiff down — Whiff% is a component of K%,
+                // which is already inside K-BB%, so swing-and-miss was counted ~.36 combined.
+                if ("pxwOBA".equals(key)) return 0.26d;
                 if ("pitchKMinusBBPct".equals(key)) return 0.20d;
-                if ("pWhiffPct".equals(key)) return 0.16d;
+                if ("era".equals(key)) return 0.14d;
                 if ("pBarrelPct".equals(key)) return 0.14d;
-                if ("pHardHitPct".equals(key)) return 0.10d;
-                if ("era".equals(key)) return 0.10d;
+                if ("pWhiffPct".equals(key)) return 0.12d;
+                if ("pHardHitPct".equals(key)) return 0.08d;
                 if ("whip".equals(key)) return 0.06d;
+                return 0.08d;
             } else if ("traditional".equals(preset)) {
-                if ("era".equals(key)) return 0.40d;
-                if ("whip".equals(key)) return 0.25d;
-                if ("bb9".equals(key)) return 0.15d;
-                if ("pHr9".equals(key)) return 0.15d;
-                if ("k9".equals(key)) return 0.05d;
-            } else if ("runPrevention".equals(preset)) {
-                if ("era".equals(key)) return 0.38d;
-                if ("whip".equals(key)) return 0.23d;
-                if ("pOppOps".equals(key)) return 0.14d;
-                if ("pHardHitPct".equals(key)) return 0.10d;
-                if ("pBarrelPct".equals(key)) return 0.08d;
-                if ("bb9".equals(key)) return 0.05d;
-                if ("pxwOBA".equals(key)) return 0.02d;
-            } else if ("powerContact".equals(preset)) {
-                if ("pxSLG".equals(key)) return 0.20d;
-                if ("pOppOps".equals(key)) return 0.16d;
-                if ("pBarrelPct".equals(key)) return 0.16d;
-                if ("pHardHitPct".equals(key)) return 0.18d;
-                if ("pAvgEV".equals(key)) return 0.12d;
+                // v217: K/9 was 0.05 — a 12-K/9 ace got almost no credit for strikeouts on the
+                // one lens where classic rate stats are the point. ERA/WHIP still lead (they
+                // overlap, so together they shouldn't exceed ~.58).
+                if ("era".equals(key)) return 0.36d;
+                if ("whip".equals(key)) return 0.22d;
+                if ("k9".equals(key)) return 0.14d;
+                if ("bb9".equals(key)) return 0.14d;
                 if ("pHr9".equals(key)) return 0.14d;
-                if ("pGbPct".equals(key)) return 0.00d;
+                return 0.08d;
+            } else if ("runPrevention".equals(preset)) {
+                // v217: pxwOBA was 0.02 — the best single estimate of prevention quality was
+                // decorative while ERA+WHIP (heavily overlapping results) held .61. Results
+                // still lead on this lens, but quality now has a real voice.
+                if ("era".equals(key)) return 0.34d;
+                if ("whip".equals(key)) return 0.18d;
+                if ("pxwOBA".equals(key)) return 0.14d;
+                if ("pOppOps".equals(key)) return 0.12d;
+                if ("pBarrelPct".equals(key)) return 0.09d;
+                if ("pHardHitPct".equals(key)) return 0.09d;
+                if ("bb9".equals(key)) return 0.04d;
+                return 0.08d;
+            } else if ("powerContact".equals(preset)) {
+                // v217: barrels are more damage-predictive than hard-hit, and HR/9 is THE
+                // power-allowed result; both were under their hard-hit weight.
+                if ("pxSLG".equals(key)) return 0.22d;
+                if ("pBarrelPct".equals(key)) return 0.18d;
+                if ("pHr9".equals(key)) return 0.18d;
+                if ("pOppOps".equals(key)) return 0.16d;
+                if ("pHardHitPct".equals(key)) return 0.14d;
+                if ("pAvgEV".equals(key)) return 0.12d;
+                return 0.08d;
             } else if ("plateDiscipline".equals(preset)) {
-                if ("pitchKMinusBBPct".equals(key)) return 0.25d;
-                if ("pWhiffPct".equals(key)) return 0.20d;
-                if ("pChasePct".equals(key)) return 0.18d;
-                if ("pFirstStrikePct".equals(key)) return 0.15d;
+                // v217: Zone% no longer scores (no consistent good direction — elite chase
+                // pitchers live off the plate); its share moves to the real signals.
+                if ("pitchKMinusBBPct".equals(key)) return 0.28d;
+                if ("pWhiffPct".equals(key)) return 0.22d;
+                if ("pChasePct".equals(key)) return 0.20d;
+                if ("pFirstStrikePct".equals(key)) return 0.18d;
                 if ("pitchBBPct".equals(key)) return 0.12d;
-                if ("pZonePct".equals(key)) return 0.10d;
+                return 0.08d;
             } else if ("statcastAdvanced".equals(preset)) {
                 if ("pxwOBA".equals(key)) return 0.24d;
                 if ("pxSLG".equals(key)) return 0.16d;
@@ -10163,6 +10197,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 if ("pxBA".equals(key)) return 0.08d;
                 if ("pChasePct".equals(key)) return 0.07d;
                 if ("pAvgEV".equals(key)) return 0.05d;
+                return 0.08d;
             } else if ("all".equals(preset)) {
                 if ("era".equals(key)) return 0.12d;
                 if ("whip".equals(key)) return 0.10d;
@@ -10172,7 +10207,164 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 if ("pBarrelPct".equals(key)) return 0.12d;
                 if ("pHardHitPct".equals(key)) return 0.08d;
                 if ("bb9".equals(key)) return 0.07d;
+                return 0.08d;
             }
+            return 1d;
+        }
+
+        // v217: hitter lenses. Previously all-equal, so the production family (OPS, wOBA,
+        // xwOBA, OBP, SLG — five views of nearly the same number) outvoted everything 5-to-3.
+        // One production story now carries one production-sized weight.
+        if (!h.isTeam && "hit".equals(role)) {
+            String key = safe(m.key);
+            if ("recommended".equals(preset)) {
+                if ("xwOBA".equals(key)) return 0.22d;
+                if ("wOBA".equals(key)) return 0.16d;
+                if ("ops".equals(key)) return 0.14d;
+                if ("barrelPct".equals(key)) return 0.12d;
+                if ("kPct".equals(key)) return 0.12d;
+                if ("bbPct".equals(key)) return 0.10d;
+                if ("hardHitPct".equals(key)) return 0.08d;
+                if ("whiffPct".equals(key)) return 0.06d;
+                return 0.08d;
+            } else if ("traditional".equals(preset)) {
+                // OPS already contains OBP and SLG; the slash family caps near half the card.
+                // RBI and R are lineup-context counts and should season the score, not run it.
+                if ("ops".equals(key)) return 0.20d;
+                if ("obp".equals(key)) return 0.16d;
+                if ("hr".equals(key)) return 0.16d;
+                if ("slg".equals(key)) return 0.12d;
+                if ("avg".equals(key)) return 0.10d;
+                if ("rbi".equals(key)) return 0.10d;
+                if ("r".equals(key)) return 0.08d;
+                if ("sb".equals(key)) return 0.08d;
+                return 0.08d;
+            } else if ("statcastAdvanced".equals(preset)) {
+                if ("xwOBA".equals(key)) return 0.24d;
+                if ("barrelPct".equals(key)) return 0.16d;
+                if ("xSLG".equals(key)) return 0.14d;
+                if ("wOBA".equals(key)) return 0.12d;
+                if ("hardHitPct".equals(key)) return 0.12d;
+                if ("xBA".equals(key)) return 0.08d;
+                if ("whiffPct".equals(key)) return 0.08d;
+                if ("avgEV".equals(key)) return 0.06d;
+                return 0.08d;
+            } else if ("plateDiscipline".equals(preset)) {
+                // BB% and K% are inside BB-K%; the difference stat leads, the components season.
+                if ("bbMinusKPct".equals(key)) return 0.26d;
+                if ("whiffPct".equals(key)) return 0.18d;
+                if ("chasePct".equals(key)) return 0.16d;
+                if ("kPct".equals(key)) return 0.14d;
+                if ("zoneContactPct".equals(key)) return 0.14d;
+                if ("bbPct".equals(key)) return 0.12d;
+                return 0.08d;
+            } else if ("powerContact".equals(preset)) {
+                if ("barrelPct".equals(key)) return 0.20d;
+                if ("xSLG".equals(key)) return 0.16d;
+                if ("hardHitPct".equals(key)) return 0.14d;
+                if ("slg".equals(key)) return 0.12d;
+                if ("hr".equals(key)) return 0.12d;
+                if ("iso".equals(key)) return 0.10d;
+                if ("avgEV".equals(key)) return 0.08d;
+                if ("sweetSpotPct".equals(key)) return 0.08d;
+                return 0.08d;
+            } else if ("speedBaserunning".equals(preset)) {
+                if ("sb".equals(key)) return 0.50d;
+                if ("sprintSpeed".equals(key)) return 0.50d;
+                return 0.25d;
+            }
+            return 1d;
+        }
+
+        // v217: team lenses. The worst offender was here: Win%, Run Diff, RPG, and RAPG are
+        // four restatements of the same run-margin story (Run Diff IS RPG minus RAPG, and Win%
+        // follows it), and with equal weights they were 4 of 8 scored rows — the card was
+        // effectively "who has the better record." The record/margin family is now capped
+        // around one-fifth of the card and the underlying quality signals get real weight.
+        if (h.isTeam) {
+            String key = safe(m.key);
+            if ("recommended".equals(preset)) {
+                if ("teamXWOBA".equals(key)) return 0.17d;
+                if ("teamPXWOBA".equals(key)) return 0.17d;
+                if ("teamRPG".equals(key)) return 0.13d;
+                if ("teamRAPG".equals(key)) return 0.13d;
+                if ("teamWinPct".equals(key)) return 0.12d;
+                if ("teamOPS".equals(key)) return 0.10d;
+                if ("teamOppOps".equals(key)) return 0.10d;
+                if ("teamRunDiff".equals(key)) return 0.08d;
+                return 0.08d;
+            } else if ("teamOverall".equals(preset)) {
+                if ("teamERA".equals(key)) return 0.16d;
+                if ("teamWinPct".equals(key)) return 0.14d;
+                if ("teamWHIP".equals(key)) return 0.14d;
+                if ("teamRPG".equals(key)) return 0.13d;
+                if ("teamRAPG".equals(key)) return 0.13d;
+                if ("teamOPS".equals(key)) return 0.11d;
+                if ("teamOppOps".equals(key)) return 0.11d;
+                if ("teamRunDiff".equals(key)) return 0.08d;
+                return 0.08d;
+            } else if ("teamOffense".equals(preset)) {
+                if ("teamXWOBA".equals(key)) return 0.18d;
+                if ("teamRPG".equals(key)) return 0.16d;
+                if ("teamBBMinusKPct".equals(key)) return 0.14d;
+                if ("teamBarrelPct".equals(key)) return 0.14d;
+                if ("teamWOBA".equals(key)) return 0.12d;
+                if ("teamOPS".equals(key)) return 0.10d;
+                if ("teamHardHitPct".equals(key)) return 0.10d;
+                if ("teamSLG".equals(key)) return 0.06d;
+                return 0.08d;
+            } else if ("teamPitchingDefense".equals(preset) || "runPrevention".equals(preset)) {
+                if ("teamRAPG".equals(key)) return 0.16d;
+                if ("teamPXWOBA".equals(key)) return 0.16d;
+                if ("teamERA".equals(key)) return 0.14d;
+                if ("teamPitchKMinusBBPct".equals(key)) return 0.14d;
+                if ("teamPBarrelPct".equals(key)) return 0.12d;
+                if ("teamWHIP".equals(key)) return 0.10d;
+                if ("teamOppOps".equals(key)) return 0.10d;
+                if ("teamPHardHitPct".equals(key)) return 0.08d;
+                return 0.08d;
+            } else if ("statcastAdvanced".equals(preset)) {
+                if ("teamXWOBA".equals(key)) return 0.20d;
+                if ("teamPXWOBA".equals(key)) return 0.20d;
+                if ("teamBarrelPct".equals(key)) return 0.12d;
+                if ("teamPBarrelPct".equals(key)) return 0.12d;
+                if ("teamWhiffPct".equals(key)) return 0.10d;
+                if ("teamPWhiffPct".equals(key)) return 0.10d;
+                if ("teamHardHitPct".equals(key)) return 0.08d;
+                if ("teamPHardHitPct".equals(key)) return 0.08d;
+                return 0.08d;
+            } else if ("plateDiscipline".equals(preset)) {
+                if ("teamBBMinusKPct".equals(key)) return 0.22d;
+                if ("teamPitchKMinusBBPct".equals(key)) return 0.22d;
+                if ("teamPFirstStrikePct".equals(key)) return 0.12d;
+                if ("teamPChasePct".equals(key)) return 0.12d;
+                if ("teamBBPct".equals(key)) return 0.08d;
+                if ("teamKPct".equals(key)) return 0.08d;
+                if ("teamPitchKPct".equals(key)) return 0.08d;
+                if ("teamPitchBBPct".equals(key)) return 0.08d;
+                return 0.08d;
+            } else if ("powerContact".equals(preset)) {
+                if ("teamXSLG".equals(key)) return 0.18d;
+                if ("teamBarrelPct".equals(key)) return 0.18d;
+                if ("teamPBarrelPct".equals(key)) return 0.14d;
+                if ("teamHardHitPct".equals(key)) return 0.12d;
+                if ("teamSLG".equals(key)) return 0.10d;
+                if ("teamISO".equals(key)) return 0.10d;
+                if ("teamPHardHitPct".equals(key)) return 0.10d;
+                if ("teamAvgEV".equals(key)) return 0.08d;
+                return 0.08d;
+            } else if ("traditional".equals(preset)) {
+                if ("teamWinPct".equals(key)) return 0.16d;
+                if ("teamERA".equals(key)) return 0.16d;
+                if ("teamRunsScored".equals(key)) return 0.12d;
+                if ("teamRunsAllowed".equals(key)) return 0.12d;
+                if ("teamOPS".equals(key)) return 0.12d;
+                if ("teamWHIP".equals(key)) return 0.12d;
+                if ("teamRunDiff".equals(key)) return 0.10d;
+                if ("teamOppOps".equals(key)) return 0.10d;
+                return 0.08d;
+            }
+            return 1d;
         }
         return 1d;
     }
@@ -10375,6 +10567,10 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         if ("ip".equals(key) || "pitchK".equals(key) || "pitchBB".equals(key) || "saves".equals(key)
                 || "pHitsAllowed".equals(key) || "pHrAllowed".equals(key) || "pGbPct".equals(key)
                 || "pFbPct".equals(key) || "pLdPct".equals(key)) return true;
+        // v217: Zone% has no consistent good direction — elite chase-inducing pitchers live
+        // off the plate while command artists pound it — so it informs but never scores,
+        // matching how hitter Swing% is already treated.
+        if ("pZonePct".equals(key) || "teamPZonePct".equals(key)) return true;
         return "luck".equals(key) || "context".equals(m.type);
     }
 
@@ -20587,17 +20783,25 @@ private View liveGameCard(LiveGame game) {
                 scoreRange(offense.get("teamBarrelPct"), 3d, 12d, true),
                 scoreRange(starter.get("pxSLG"), 0.330d, 0.520d, true),
                 scoreRange(starter.get("pBarrelPct"), 3d, 12d, true));
+        // v217: the Discipline category previously averaged teamWOBA/teamXWOBA — overall
+        // production, not discipline — so this row mostly restated the other rows. It now
+        // measures actual strike-zone control: the lineup's K avoidance and walk-vs-K balance
+        // against the starter's strikeout and swing-and-miss ability.
         double discipline = mean(
-                scoreRange(offense.get("teamWOBA"), 0.280d, 0.360d, true),
-                scoreRange(offense.get("teamXWOBA"), 0.280d, 0.360d, true),
                 scoreRange(offense.get("teamKPct"), 16d, 28d, false),
-                scoreRange(starter.get("pitchKPct"), 17d, 33d, false));
+                scoreRange(offense.get("teamBBMinusKPct"), -19d, -8d, true),
+                scoreRange(starter.get("pitchKPct"), 17d, 33d, false),
+                scoreRange(starter.get("pWhiffPct"), 20d, 34d, false));
         double starterVuln = mean(
                 scoreRange(starter.get("era"), 2.50d, 5.80d, true),
                 scoreRange(starter.get("whip"), 1.00d, 1.55d, true),
                 scoreRange(starter.get("pxwOBA"), 0.270d, 0.380d, true),
                 scoreRange(starter.get("pHardHitPct"), 28d, 52d, true));
-        double overall = mean(onBase, power, discipline, starterVuln);
+        // v217: Overall was a flat mean of the four categories. In a lineup-vs-starter card the
+        // identity of the starter is the single biggest factor, and the lineup's overall quality
+        // (xwOBA) deserves a direct voice since the discipline rebuild removed it from the subs.
+        double offenseQuality = scoreRange(offense.get("teamXWOBA"), 0.280d, 0.360d, true);
+        double overall = 0.20d * onBase + 0.20d * power + 0.18d * discipline + 0.30d * starterVuln + 0.12d * offenseQuality;
 
         out.put("ovsOverall", overall);
         out.put("ovsOnBase", onBase);
