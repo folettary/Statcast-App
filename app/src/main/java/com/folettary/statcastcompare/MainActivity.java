@@ -686,7 +686,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v217", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v219", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -10424,8 +10424,11 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         double gap = aScore - bScore;
 
         // v199: bullpen edge share is a softened weighted-gap read, not winner-take-all.
-        // A 15 point category-score gap should feel like a clear edge, not 100-0 domination.
-        double pctA = 50.0d + clampDouble(gap * 0.92d, -38.0d, 38.0d);
+        // v218: multiplier retuned 0.92 → 0.55 because the realistic quality bands roughly
+        // tripled typical gap magnitudes. Calibration on the new scale: an elite-vs-bottom-third
+        // bullpen matchup (~34-pt quality gap) reads about 62-38; a moderate ~12-pt gap reads
+        // about 55-45; near-equal pens stay a toss-up.
+        double pctA = 50.0d + clampDouble(gap * 0.55d, -38.0d, 38.0d);
         if (Math.abs(gap) < 1.5d) {
             summary.tossUpRows = 1;
             pctA = 50.0d;
@@ -10668,6 +10671,10 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
     private double countStatVisualCap(Metric m, Double a, Double b, HeadToHeadComparison h) {
         if (m == null || a == null || b == null) return 0.55d;
+        // v219: this clamp exists so small-sample season counts (2 HR vs 1 HR) can't look
+        // decisive. Bullpen arm counts live on a 0-6 scale where a 3-arm gap IS decisive,
+        // so they use the normal easing instead of the season-count suppression.
+        if (safe(m.key).startsWith("bp")) return 0.82d;
         double maxValue = Math.max(Math.abs(a), Math.abs(b));
         double gap = Math.abs(a - b);
         double base;
@@ -10700,7 +10707,24 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
     private double meaningfulGapBenchmarkForEdge(Metric m) {
         if (m == null || m.key == null) return 0.10d;
+        // v219: bp* and ovs* rows previously fell through to the 0.10 default, so the
+        // raw-gap term saturated to 100 for ANY visible gap on those cards — every bullpen
+        // and offense-vs-starter row glowed with a hot floor regardless of how meaningful
+        // the gap was. These benchmarks define a realistic "full edge" gap per row.
+        if (m.key.startsWith("ovs")) return 22d;          // 0-100 model scores
         switch (m.key) {
+            case "bpQualityScore":
+            case "bpFreshnessScore": return 30d;          // post-v218 scale: elite-vs-bottom ≈ 34
+            case "bpERA": return 1.20d;                   // team bullpen ERA full-edge gap
+            case "bpWHIP": return 0.22d;
+            case "bpKMinusBB": return 6d;
+            case "bpHR9": return 0.45d;
+            case "bpStaffIP": return 6d;                  // IP last 2d
+            case "bpB2B":
+            case "bpWatchArms":
+            case "bpFreshArms":
+            case "bpReadyArms":
+            case "bpDownArms": return 3d;                 // a 3-arm swing is a full edge
             case "avg":
             case "teamAVG": return 0.045d;
             case "obp":
@@ -17764,14 +17788,19 @@ private View liveGameCard(LiveGame game) {
 
     private double bullpenHeroQualityScore(BullpenReport r) {
         if (r == null) return 50.0d;
-        double era = clampDouble(r.era(), 0.0d, 8.0d);
-        double whip = clampDouble(r.whip(), 0.70d, 2.20d);
-        double kbb = clampDouble(r.kMinusBbPct(), -5.0d, 32.0d);
-        double hr9 = clampDouble(r.hr9(), 0.0d, 2.4d);
-        double eraScore = 100.0d - (era / 8.0d) * 100.0d;
-        double whipScore = 100.0d - ((whip - 0.70d) / 1.50d) * 100.0d;
-        double kbbScore = ((kbb + 5.0d) / 37.0d) * 100.0d;
-        double hrScore = 100.0d - (hr9 / 2.4d) * 100.0d;
+        // v218: the bands were theoretical ranges (ERA 0-8, WHIP 0.70-2.20, K-BB -5..32), but
+        // real team bullpens live in a far narrower window, so genuinely huge gaps were being
+        // compressed into the middle of the scale — a 2.95 vs 4.48 ERA matchup (top-2 unit vs
+        // bottom third) scored only ~12 points apart. Bands now span the realistic best-to-worst
+        // team bullpen range, slightly padded, so the score reads like a percentile-style rating.
+        double era = clampDouble(r.era(), 2.60d, 5.40d);
+        double whip = clampDouble(r.whip(), 1.00d, 1.55d);
+        double kbb = clampDouble(r.kMinusBbPct(), 6.0d, 23.0d);
+        double hr9 = clampDouble(r.hr9(), 0.65d, 1.65d);
+        double eraScore = 100.0d - ((era - 2.60d) / 2.80d) * 100.0d;
+        double whipScore = 100.0d - ((whip - 1.00d) / 0.55d) * 100.0d;
+        double kbbScore = ((kbb - 6.0d) / 17.0d) * 100.0d;
+        double hrScore = 100.0d - ((hr9 - 0.65d) / 1.00d) * 100.0d;
         return clampDouble(eraScore * 0.42d + whipScore * 0.22d + kbbScore * 0.28d + hrScore * 0.08d, 0.0d, 100.0d);
     }
 
@@ -17788,25 +17817,29 @@ private View liveGameCard(LiveGame game) {
             if (m == null) continue;
             Double av = a.get(m.key);
             Double bv = b.get(m.key);
-            double[] pair = bullpenPairPercentiles(av, bv, m.higherGood);
+            double[] pair = bullpenPairPercentiles(m, av, bv);
             pctA.put(m.key, pair[0]);
             pctB.put(m.key, pair[1]);
         }
     }
 
-    private double[] bullpenPairPercentiles(Double a, Double b, Boolean higherGood) {
+    private double[] bullpenPairPercentiles(Metric m, Double a, Double b) {
         if (a == null || b == null || Double.isNaN(a) || Double.isNaN(b)) return new double[] { 50.0d, 50.0d };
+        // v219: the old fabricated split was 18 + 30 × (gap / larger value). Two problems:
+        // (1) an 18-point FLOOR meant even a 3.51-vs-3.53 ERA "gap" rendered as a 68-32 split,
+        // so glows could never be subtle; (2) dividing by the larger raw value made glow
+        // strength scale-dependent — a meaningful WHIP gap (1.18 vs 1.30) glowed faintly while
+        // a same-importance arm-count gap (4 vs 1 B2B) blazed. Strength now comes from the same
+        // per-stat meaningful-gap benchmarks the main cards use, eased identically, no floor.
         double gap = Math.abs(a - b);
-        double denom = Math.max(1.0d, Math.max(Math.abs(a), Math.abs(b)));
-        double strength = clampDouble(gap / denom, 0.0d, 1.0d);
-        double edge = 18.0d + 30.0d * strength;
-        int winner = 0;
-        if (Math.abs(a - b) > 0.0000001d) {
-            boolean aBetter = higherGood == null ? a > b : (higherGood ? a > b : a < b);
-            winner = aBetter ? -1 : 1;
-        }
-        if (winner == 0) return new double[] { 50.0d, 50.0d };
-        return winner < 0 ? new double[] { 50.0d + edge, 50.0d - edge } : new double[] { 50.0d - edge, 50.0d + edge };
+        if (gap < 0.0000001d) return new double[] { 50.0d, 50.0d };
+        double benchmark = meaningfulGapBenchmarkForEdge(m);
+        if (benchmark <= 0d) return new double[] { 50.0d, 50.0d };
+        double raw = Math.min(1.0d, gap / benchmark);
+        double eased = 1.0d - Math.pow(1.0d - raw, 1.20d);
+        double edge = 50.0d * eased;
+        boolean aBetter = m.higherGood == null ? a > b : (m.higherGood ? a > b : a < b);
+        return aBetter ? new double[] { 50.0d + edge, 50.0d - edge } : new double[] { 50.0d - edge, 50.0d + edge };
     }
 
     private boolean isBullpenHeroComparison(HeadToHeadComparison h) {
