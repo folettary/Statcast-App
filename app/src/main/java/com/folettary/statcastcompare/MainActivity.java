@@ -314,6 +314,9 @@ public class MainActivity extends Activity {
     // v132/v134: one sticky comparison preset is preserved across player/team changes until the
     // user explicitly changes presets or manually customizes the stat set.
     private String activeComparisonPreset = "recommended";
+    // v221: team cards now have a purpose: overall composite, offense-only, or pitching/defense.
+    // The lens picker and preset rows are constrained by this mode so we do not blend hitting and pitching accidentally.
+    private String activeTeamMatchupCardMode = "overall";
     private boolean metricsManuallyCustomized = false;
     // v134: stat picker browsing is separate from applying full-card comparison presets.
     private String activeStatCategory = "all";
@@ -686,7 +689,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v220", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v221", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -4124,9 +4127,101 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         return false;
     }
 
+    private String teamCardMode() {
+        String mode = safe(activeTeamMatchupCardMode).toLowerCase(Locale.US);
+        if ("offense".equals(mode) || "pitching".equals(mode) || "overall".equals(mode)) return mode;
+        return "overall";
+    }
+
+    private String[] teamOffensePresetKeys(String preset) {
+        preset = normalizePresetKey(preset);
+        if ("recommended".equals(preset) || "teamOffense".equals(preset)) {
+            return new String[] { "teamRPG", "teamOPS", "teamXWOBA", "teamBBMinusKPct", "teamBarrelPct", "teamHardHitPct", "teamSLG", "teamOBP" };
+        }
+        if ("traditional".equals(preset)) {
+            return new String[] { "teamRunsScored", "teamRPG", "teamAVG", "teamOBP", "teamSLG", "teamOPS", "teamHR", "teamWalks", "teamStrikeouts" };
+        }
+        if ("statcastAdvanced".equals(preset)) {
+            return new String[] { "teamXWOBA", "teamXBA", "teamXOBP", "teamXSLG", "teamXISO", "teamAvgEV", "teamBarrelPct", "teamHardHitPct", "teamSweetSpotPct" };
+        }
+        if ("plateDiscipline".equals(preset)) {
+            return new String[] { "teamBBPct", "teamKPct", "teamBBMinusKPct", "teamWhiffPct", "teamChasePct", "teamZoneContactPct" };
+        }
+        if ("powerContact".equals(preset)) {
+            return new String[] { "teamSLG", "teamISO", "teamHR", "teamXbh", "teamXSLG", "teamAvgEV", "teamBarrelPct", "teamHardHitPct", "teamSweetSpotPct" };
+        }
+        if ("all".equals(preset)) {
+            return new String[] { "teamAVG", "teamOBP", "teamSLG", "teamOPS", "teamISO", "teamBABIP", "teamHits", "teamDoubles", "teamTriples", "teamHR", "teamXbh", "teamRBI", "teamRunsScored", "teamRPG", "teamSB", "teamWalks", "teamStrikeouts", "teamTB", "teamKPct", "teamBBPct", "teamBBMinusKPct", "teamWhiffPct", "teamChasePct", "teamZoneContactPct", "teamWOBA", "teamXWOBA", "teamXBA", "teamXOBP", "teamXSLG", "teamXISO", "teamAvgEV", "teamHardHitPct", "teamBarrelPct", "teamSweetSpotPct", "teamGbPct", "teamFbPct", "teamLdPct", "teamPullPct", "teamOppoPct" };
+        }
+        return null;
+    }
+
+    private String[] teamPitchingPresetKeys(String preset) {
+        preset = normalizePresetKey(preset);
+        if ("recommended".equals(preset) || "teamPitchingDefense".equals(preset) || "runPrevention".equals(preset)) {
+            return new String[] { "teamRAPG", "teamERA", "teamWHIP", "teamOppOps", "teamPXWOBA", "teamPitchKMinusBBPct", "teamPBarrelPct", "teamPHardHitPct" };
+        }
+        if ("traditional".equals(preset)) {
+            return new String[] { "teamRunsAllowed", "teamRAPG", "teamERA", "teamWHIP", "teamK9", "teamBB9", "teamKBB", "teamHrAllowed", "teamPitchStrikeouts" };
+        }
+        if ("statcastAdvanced".equals(preset)) {
+            return new String[] { "teamPXWOBA", "teamPXBA", "teamPXSLG", "teamPAvgEV", "teamPBarrelPct", "teamPHardHitPct", "teamPWhiffPct", "teamPChasePct", "teamPFirstStrikePct" };
+        }
+        if ("plateDiscipline".equals(preset)) {
+            return new String[] { "teamPitchKPct", "teamPitchBBPct", "teamPitchKMinusBBPct", "teamPWhiffPct", "teamPChasePct", "teamPFirstStrikePct", "teamPZonePct" };
+        }
+        if ("powerContact".equals(preset)) {
+            return new String[] { "teamOppOps", "teamHrAllowed", "teamPXSLG", "teamPAvgEV", "teamPBarrelPct", "teamPHardHitPct", "teamPGbPct", "teamPFbPct" };
+        }
+        if ("all".equals(preset)) {
+            return new String[] { "teamRunsAllowed", "teamRAPG", "teamERA", "teamWHIP", "teamK9", "teamBB9", "teamKBB", "teamPitchKPct", "teamPitchBBPct", "teamPitchKMinusBBPct", "teamPitchStrikeouts", "teamHitsAllowed", "teamHrAllowed", "teamWalksAllowed", "teamOppAvg", "teamOppOps", "teamPXBA", "teamPXSLG", "teamPWOBA", "teamPXWOBA", "teamPAvgEV", "teamPHardHitPct", "teamPBarrelPct", "teamPWhiffPct", "teamPChasePct", "teamPFirstStrikePct", "teamPZonePct", "teamPGbPct", "teamPFbPct", "teamPLdPct" };
+        }
+        return null;
+    }
+
+    private String lensDescriptionForPreset(String preset, String role) {
+        preset = normalizePresetKey(preset);
+        if (isTeamMetricContext()) {
+            String mode = teamCardMode();
+            if ("overall".equals(mode)) {
+                if ("teamOverall".equals(preset)) return "Bucketed composite: record/margin, offense, and run prevention";
+                if ("teamOffense".equals(preset)) return "Switch this team card to a lineup-only view";
+                if ("teamPitchingDefense".equals(preset)) return "Switch this team card to a run-prevention view";
+            }
+            if ("offense".equals(mode)) {
+                if ("teamOffense".equals(preset) || "recommended".equals(preset)) return "Lineup production, discipline, and contact quality";
+                if ("traditional".equals(preset)) return "Classic offensive production";
+                if ("statcastAdvanced".equals(preset)) return "Expected offense and contact quality";
+                if ("plateDiscipline".equals(preset)) return "Walks, strikeouts, chase, and whiff";
+                if ("powerContact".equals(preset)) return "Slugging, barrels, hard contact, and power";
+            }
+            if ("pitching".equals(mode)) {
+                if ("teamPitchingDefense".equals(preset) || "runPrevention".equals(preset) || "recommended".equals(preset)) return "Run prevention and contact allowed";
+                if ("traditional".equals(preset)) return "Classic pitching and prevention rates";
+                if ("statcastAdvanced".equals(preset)) return "Expected allowed stats and contact quality";
+                if ("plateDiscipline".equals(preset)) return "Strikeouts, walks, chase, whiff, and first strike";
+                if ("powerContact".equals(preset)) return "Damage and contact allowed";
+            }
+        }
+        if ("recommended".equals(preset)) return "Balanced overall profile";
+        if ("traditional".equals(preset)) return "Classic rate results";
+        if ("statcastAdvanced".equals(preset)) return "Expected stats and contact quality";
+        if ("plateDiscipline".equals(preset)) return "Command, whiffs, and count control";
+        if ("powerContact".equals(preset)) return "Damage and contact quality";
+        if ("runPrevention".equals(preset)) return "Run prevention and allowed contact";
+        if ("speedBaserunning".equals(preset)) return "Speed and stolen-base value";
+        if ("all".equals(preset)) return "Show every available stat";
+        return "Focused stat group";
+    }
+
     private String[] recommendedKeysForRole(String role) {
         boolean team = isTeamMetricContext();
-        if (team) return new String[] { "teamWinPct", "teamRunDiff", "teamRPG", "teamRAPG", "teamOPS", "teamOppOps", "teamXWOBA", "teamPXWOBA", "teamBBMinusKPct", "teamPitchKMinusBBPct" };
+        if (team) {
+            String mode = teamCardMode();
+            if ("offense".equals(mode)) return teamOffensePresetKeys("recommended");
+            if ("pitching".equals(mode)) return teamPitchingPresetKeys("recommended");
+            return new String[] { "teamWinPct", "teamRunDiff", "teamRPG", "teamRAPG", "teamOPS", "teamOppOps", "teamERA", "teamWHIP", "teamXWOBA", "teamPXWOBA" };
+        }
         if ("pitch".equals(role)) return new String[] { "pxwOBA", "pitchKMinusBBPct", "pWhiffPct", "pBarrelPct", "pHardHitPct", "era", "whip" };
         // v217: reordered so the scored eight lead with one production story (OPS/wOBA/xwOBA)
         // plus contact quality and discipline. OBP and SLG stay as display rows but no longer
@@ -4138,6 +4233,13 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     private String[] presetKeysForRole(String preset, String role) {
         preset = normalizePresetKey(preset);
         boolean team = isTeamMetricContext();
+        if (team) {
+            String mode = teamCardMode();
+            String[] scoped = null;
+            if ("offense".equals(mode)) scoped = teamOffensePresetKeys(preset);
+            else if ("pitching".equals(mode)) scoped = teamPitchingPresetKeys(preset);
+            if (scoped != null) return scoped;
+        }
         if ("recommended".equals(preset)) return recommendedKeysForRole(role);
         if ("traditional".equals(preset)) {
             if (team) return new String[] { "teamWinPct", "teamRunsScored", "teamRunsAllowed", "teamRunDiff", "teamAVG", "teamOPS", "teamERA", "teamWHIP", "teamHR", "teamHrAllowed", "teamHits", "teamHitsAllowed", "teamWalks", "teamWalksAllowed", "teamStrikeouts", "teamPitchStrikeouts" };
@@ -4216,7 +4318,10 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
     private String[] presetOrderForRole(String role) {
         if (isTeamMetricContext()) {
-            return new String[] { "teamOverall", "teamOffense", "teamPitchingDefense", "recommended", "traditional", "statcastAdvanced", "plateDiscipline", "powerContact", "runPrevention", "all" };
+            String mode = teamCardMode();
+            if ("offense".equals(mode)) return new String[] { "teamOffense", "traditional", "statcastAdvanced", "plateDiscipline", "powerContact", "all" };
+            if ("pitching".equals(mode)) return new String[] { "teamPitchingDefense", "runPrevention", "traditional", "statcastAdvanced", "plateDiscipline", "powerContact", "all" };
+            return new String[] { "teamOverall", "teamOffense", "teamPitchingDefense" };
         }
         if ("pitch".equals(role)) {
             return new String[] { "recommended", "traditional", "statcastAdvanced", "plateDiscipline", "powerContact", "runPrevention", "all" };
@@ -4234,8 +4339,8 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         if ("powerContact".equals(preset)) return "pitch".equals(role) && !team ? "Power/Contact Allowed" : "Power/Contact";
         if ("runPrevention".equals(preset)) return "Run Prevention";
         if ("teamOverall".equals(preset)) return "Team Overall";
-        if ("teamOffense".equals(preset)) return "Offense";
-        if ("teamPitchingDefense".equals(preset)) return "Pitching/Defense";
+        if ("teamOffense".equals(preset)) return "Team Offense";
+        if ("teamPitchingDefense".equals(preset)) return "Team Pitching/Defense";
         if ("speedBaserunning".equals(preset)) return "Speed/Baserunning";
         if ("moreStats".equals(preset) || "all".equals(preset)) return "pitch".equals(role) ? "All Pitching" : ("hit".equals(role) ? "All Hitting" : "All Stats");
         if ("luck".equals(preset)) return "Luck";
@@ -4252,8 +4357,14 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         preset = normalizePresetKey(preset);
         boolean team = isTeamMetricContext();
         String[] order;
-        if ("traditional".equals(preset)) {
-            if (team) order = new String[] { "teamWinPct", "teamRunDiff", "teamRunsScored", "teamRunsAllowed", "teamOPS", "teamOppOps", "teamERA", "teamWHIP" };
+        if (team && "offense".equals(teamCardMode())) {
+            order = teamOffensePresetKeys(preset);
+            if (order == null) order = teamOffensePresetKeys("recommended");
+        } else if (team && "pitching".equals(teamCardMode())) {
+            order = teamPitchingPresetKeys(preset);
+            if (order == null) order = teamPitchingPresetKeys("recommended");
+        } else if ("traditional".equals(preset)) {
+            if (team) order = new String[] { "teamWinPct", "teamRunDiff", "teamRPG", "teamRAPG", "teamOPS", "teamOppOps", "teamERA", "teamWHIP" };
             else if ("pitch".equals(role)) order = new String[] { "era", "whip", "k9", "bb9", "pHr9", "ip" };
             else order = new String[] { "avg", "obp", "slg", "ops", "hr", "rbi", "r", "sb" };
         } else if ("teamOffense".equals(preset)) {
@@ -4290,9 +4401,9 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             if (out.size() >= 8) return out;
         }
 
-        // v215: pitcher lens presets are intentionally curated. Do not top them off with
-        // generic default metrics just because fewer than 8 rows scored. That was causing
-        // Traditional to quietly add xwOBA/K-BB and Run Prevention to add K-BB, muddying the story.
+        // v221: curated team/pitcher lenses are intentional. Do not top them off with generic
+        // mixed rows just because fewer than 8 rows scored.
+        if (team && ("offense".equals(teamCardMode()) || "pitching".equals(teamCardMode()) || "teamOverall".equals(preset))) return out;
         if (!team && "pitch".equals(role) && isCuratedPitcherLensPreset(preset)) return out;
 
         for (String key : defaultKeyEdgeOrder()) {
@@ -4394,6 +4505,16 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     }
 
     private void showMetricPicker() {
+        if (lastHeadToHead != null && resultsBox != null && resultsBox.getVisibility() == View.VISIBLE) {
+            if (isOffenseVsStarterComparison(lastHeadToHead)) {
+                showSpecialModelTip("Offense vs Starter", "This is a fixed matchup model, not a normal stat lens. It scores each lineup against the opposing probable starter using on-base pressure, power, discipline, and starter stress.");
+                return;
+            }
+            if (isHotBatsComparison(lastHeadToHead)) {
+                showSpecialModelTip("Hot Bats", "This card is locked to recent-form stats so the row set stays aligned with the hot-bat model. It uses recent OPS, wOBA, xwOBA, hard-hit, barrel, and exit velocity.");
+                return;
+            }
+        }
         final String role = allowedMetricRoleForCurrentContext();
 
         LinearLayout sheet = new LinearLayout(this);
@@ -4441,23 +4562,12 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         lensList.setPadding(0, 0, 0, dp(4));
         scroller.addView(lensList);
 
-        addLensChoiceCard(lensList, "recommended", "Recommended", "Balanced overall profile", role, dialog);
-        addLensChoiceCard(lensList, "traditional", "Traditional", "Classic rate results", role, dialog);
-        addLensChoiceCard(lensList, "statcastAdvanced", "Statcast", "Expected stats and contact quality", role, dialog);
-        addLensChoiceCard(lensList, "plateDiscipline", "Plate Discipline", "Command, whiffs, and count control", role, dialog);
-        addLensChoiceCard(lensList, "powerContact", "Power/Contact", "Damage and contact quality", role, dialog);
-        if (isTeamMetricContext() || "pitch".equals(role)) {
-            addLensChoiceCard(lensList, "runPrevention", "Run Prevention", "Run prevention and allowed contact", role, dialog);
-        } else {
-            addLensChoiceCard(lensList, "speedBaserunning", "Speed/Baserunning", "Speed and stolen-base value", role, dialog);
+        for (String preset : presetOrderForRole(role)) {
+            addLensChoiceCard(lensList, preset, presetDisplayName(preset, role), lensDescriptionForPreset(preset, role), role, dialog);
         }
-        if (isTeamMetricContext()) {
-            addLensChoiceCard(lensList, "teamOverall", "Team Overall", "Team-wide offense and run prevention", role, dialog);
-            addLensChoiceCard(lensList, "teamOffense", "Team Offense", "Lineup production and contact quality", role, dialog);
-            addLensChoiceCard(lensList, "teamPitchingDefense", "Pitching/Defense", "Pitching prevention and allowed contact", role, dialog);
+        if (!isTeamMetricContext() || !"overall".equals(teamCardMode())) {
+            addCustomLensChoiceCard(lensList, role, dialog);
         }
-        addLensChoiceCard(lensList, "all", "All Stats", "Show every available stat", role, dialog);
-        addCustomLensChoiceCard(lensList, role, dialog);
 
         LinearLayout.LayoutParams scrollerLp = new LinearLayout.LayoutParams(-1, dp(470));
         scrollerLp.setMargins(0, 0, 0, dp(10));
@@ -4476,6 +4586,14 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             }
         } catch (Exception ignored) {}
+    }
+
+    private void showSpecialModelTip(String title, String message) {
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setMessage(message)
+                .setPositiveButton("Got it", null)
+                .show();
     }
 
     private void addCustomLensChoiceCard(LinearLayout list, String role, AlertDialog dialog) {
@@ -9978,12 +10096,16 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         private String premiumCardScoreContextLine() {
             if (isBullpenHeroComparison(h)) return "70% QUALITY · 30% FRESHNESS";
             if (isOffenseVsStarterComparison(h)) return "OFFENSE VS STARTER MODEL";
+            if (isHotBatsComparison(h)) return "HOT BATS MODEL";
+            if (h != null && h.isTeam && "overall".equals(teamCardMode())) return "TEAM OVERALL COMPOSITE";
             return matchupLensNameForUi(h).toUpperCase(Locale.US) + " LENS";
         }
 
         private String premiumCardStatSectionTitle() {
             if (isBullpenHeroComparison(h)) return "BULLPEN SCORING FACTORS";
             if (isOffenseVsStarterComparison(h)) return "OFFENSE VS STARTER FACTORS";
+            if (isHotBatsComparison(h)) return "HOT BATS RECENT FORM";
+            if (h != null && h.isTeam && "overall".equals(teamCardMode())) return "OVERALL · OFFENSE · PITCHING STATS";
             return matchupLensNameForUi(h).toUpperCase(Locale.US) + " LENS STATS";
         }
 
@@ -10090,6 +10212,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     private boolean usesLockedHeadToHeadMetricSnapshot(HeadToHeadComparison h) {
         if (h == null || h.selectedMetricsSnapshot == null || h.selectedMetricsSnapshot.isEmpty()) return false;
         if (isBullpenHeroComparison(h)) return true;
+        if (isHotBatsComparison(h)) return true;
         for (Metric m : h.selectedMetricsSnapshot) {
             if (m == null) continue;
             // Synthetic live-game cards create metrics that are not in the global picker.
@@ -10500,7 +10623,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         Double b = h.statsB.get(m.key);
         if (a == null || b == null || Double.isNaN(a) || Double.isNaN(b)) return out;
         out.valid = true;
-        out.volumeSensitive = isVolumeSensitiveMetric(m);
+        out.volumeSensitive = !h.isTeam && isVolumeSensitiveMetric(m);
         out.contextOnly = isContextOnlyMetric(m);
         out.targetRange = isTargetRangeMetric(m);
         out.scoring = !out.contextOnly;
@@ -10532,8 +10655,9 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         // v130: sample adjustment can still soften the math, but the row-level "S"
         // badge is reserved for material caveats. Normal sample adjustment is shown once
         // in the hero instead of repeating on every rate row.
-        out.sampleFlag = out.reliability < 0.86d || opportunityBalance < 0.58d;
-        boolean showSampleBadge = out.reliability < 0.68d || opportunityBalance < 0.40d;
+        boolean bothLowSample = bothSidesLowSampleForEdge(h, m);
+        out.sampleFlag = !h.isTeam && bothLowSample && (out.reliability < 0.86d || opportunityBalance < 0.58d);
+        boolean showSampleBadge = !h.isTeam && bothLowSample && (out.reliability < 0.68d || opportunityBalance < 0.40d);
         out.adjustedEdge = out.rawEdge * out.reliability;
 
         double deadZone = m.isCount() ? 5.0d : (out.targetRange ? 4.0d : 3.0d);
@@ -10595,6 +10719,21 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 && h.statsB.get("ovsOverall") != null;
     }
 
+    private boolean isHotBatsComparison(HeadToHeadComparison h) {
+        if (h == null || h.isTeam || h.scope != StatScope.HIT_ONLY || h.selectedMetricsSnapshot == null) return false;
+        boolean hasOps = false, hasWoba = false, hasXwoba = false, hasHardHit = false, hasBarrel = false;
+        for (Metric m : h.selectedMetricsSnapshot) {
+            if (m == null) continue;
+            if ("ops".equals(m.key)) hasOps = true;
+            if ("wOBA".equals(m.key)) hasWoba = true;
+            if ("xwOBA".equals(m.key)) hasXwoba = true;
+            if ("hardHitPct".equals(m.key)) hasHardHit = true;
+            if ("barrelPct".equals(m.key)) hasBarrel = true;
+        }
+        return hasOps && hasWoba && hasXwoba && hasHardHit && hasBarrel
+                && (safe(h.metaA).contains("Last ") || safe(h.metaA).contains("Season"));
+    }
+
     private boolean isVolumeSensitiveMetric(Metric m) {
         if (m == null) return false;
         if (safe(m.key).startsWith("bp")) return false;
@@ -10624,6 +10763,15 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         if (value >= low && value <= high) return 100d;
         double distance = value < low ? low - value : value - high;
         return clampDouble(100d - distance * 5.0d, 0d, 100d);
+    }
+
+    private boolean bothSidesLowSampleForEdge(HeadToHeadComparison h, Metric m) {
+        if (h == null || m == null || h.isTeam || h.statsA == null || h.statsB == null) return false;
+        double target = targetSampleForMetric(m);
+        if (target <= 0d) return false;
+        double a = sampleSizeForMetric(h.statsA, m);
+        double b = sampleSizeForMetric(h.statsB, m);
+        return a < target * 0.70d && b < target * 0.70d;
     }
 
     private double sampleReliabilityForEdge(HeadToHeadComparison h, Metric m) {
@@ -17111,10 +17259,10 @@ private View liveGameCard(LiveGame game) {
         LinearLayout.LayoutParams row1Lp = new LinearLayout.LayoutParams(-1, dp(86));
         row1Lp.setMargins(dp(12), 0, dp(12), 0);
         panel.addView(row1, row1Lp);
-        row1.addView(gameMenuTile("Team Overall", displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr) + " vs " + displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr), "Compare both teams", accent, v -> openLiveTeamMatchup(game)), new LinearLayout.LayoutParams(0, -1, 1));
-        LinearLayout.LayoutParams spLp = new LinearLayout.LayoutParams(0, -1, 1);
-        spLp.setMargins(dp(7), 0, 0, 0);
-        row1.addView(gameMenuTile("Starting Pitchers", pitchers, "Probable starter duel", Color.rgb(247, 197, 77), v -> openLivePitcherMatchup(game)), spLp);
+        row1.addView(gameMenuTile("Team Overall", displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr) + " vs " + displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr), "Composite: overall/offense/pitching", accent, v -> openLiveTeamMatchup(game)), new LinearLayout.LayoutParams(0, -1, 1));
+        LinearLayout.LayoutParams offLp = new LinearLayout.LayoutParams(0, -1, 1);
+        offLp.setMargins(dp(7), 0, 0, 0);
+        row1.addView(gameMenuTile("Team Offense", "Lineup vs lineup", "Hitting-only lens set", Color.rgb(99, 166, 255), v -> openLiveTeamOffenseMatchup(game)), offLp);
 
         LinearLayout row2 = new LinearLayout(this);
         row2.setOrientation(LinearLayout.HORIZONTAL);
@@ -17122,10 +17270,10 @@ private View liveGameCard(LiveGame game) {
         LinearLayout.LayoutParams row2Lp = new LinearLayout.LayoutParams(-1, dp(86));
         row2Lp.setMargins(dp(12), dp(8), dp(12), 0);
         panel.addView(row2, row2Lp);
-        row2.addView(gameMenuTile("Offense vs SP", "Lineup vs opposing SP", "Each team bats vs starter", Color.rgb(255, 155, 92), v -> openLiveOffenseVsStarterMatchup(game)), new LinearLayout.LayoutParams(0, -1, 1));
-        LinearLayout.LayoutParams bpLp = new LinearLayout.LayoutParams(0, -1, 1);
-        bpLp.setMargins(dp(7), 0, 0, 0);
-        row2.addView(gameMenuTile("Bullpens", "Freshness + quality", "Reliever edge", Color.rgb(120, 220, 207), v -> openLiveBullpenMatchup(game)), bpLp);
+        row2.addView(gameMenuTile("Pitching/Defense", "Staff prevention", "Pitching-only lens set", Color.rgb(120, 220, 207), v -> openLiveTeamPitchingDefenseMatchup(game)), new LinearLayout.LayoutParams(0, -1, 1));
+        LinearLayout.LayoutParams spLp = new LinearLayout.LayoutParams(0, -1, 1);
+        spLp.setMargins(dp(7), 0, 0, 0);
+        row2.addView(gameMenuTile("Starting Pitchers", pitchers, "Probable starter duel", Color.rgb(247, 197, 77), v -> openLivePitcherMatchup(game)), spLp);
 
         LinearLayout row3 = new LinearLayout(this);
         row3.setOrientation(LinearLayout.HORIZONTAL);
@@ -17133,10 +17281,21 @@ private View liveGameCard(LiveGame game) {
         LinearLayout.LayoutParams row3Lp = new LinearLayout.LayoutParams(-1, dp(86));
         row3Lp.setMargins(dp(12), dp(8), dp(12), 0);
         panel.addView(row3, row3Lp);
-        row3.addView(gameMenuTile("Key Hitters", "Best season bats", "Auto-picks one hitter per team", Color.rgb(99, 166, 255), v -> openLiveTopHitterMatchup(game)), new LinearLayout.LayoutParams(0, -1, 1));
+        row3.addView(gameMenuTile("Offense vs SP", "Lineup vs opposing SP", "Fixed model + help tip", Color.rgb(255, 155, 92), v -> openLiveOffenseVsStarterMatchup(game)), new LinearLayout.LayoutParams(0, -1, 1));
+        LinearLayout.LayoutParams bpLp = new LinearLayout.LayoutParams(0, -1, 1);
+        bpLp.setMargins(dp(7), 0, 0, 0);
+        row3.addView(gameMenuTile("Bullpens", "Freshness + quality", "Reliever edge", Color.rgb(120, 220, 207), v -> openLiveBullpenMatchup(game)), bpLp);
+
+        LinearLayout row4 = new LinearLayout(this);
+        row4.setOrientation(LinearLayout.HORIZONTAL);
+        row4.setGravity(Gravity.TOP);
+        LinearLayout.LayoutParams row4Lp = new LinearLayout.LayoutParams(-1, dp(86));
+        row4Lp.setMargins(dp(12), dp(8), dp(12), 0);
+        panel.addView(row4, row4Lp);
+        row4.addView(gameMenuTile("Key Hitters", "Best active bats", "Filters IL + low sample", Color.rgb(99, 166, 255), v -> openLiveTopHitterMatchup(game)), new LinearLayout.LayoutParams(0, -1, 1));
         LinearLayout.LayoutParams hotLp = new LinearLayout.LayoutParams(0, -1, 1);
         hotLp.setMargins(dp(7), 0, 0, 0);
-        row3.addView(gameMenuTile("Hot Bats", "Recent hitter form", "Uses last-15d form", Color.rgb(255, 109, 131), v -> openLiveHotBatsMatchup(game)), hotLp);
+        row4.addView(gameMenuTile("Hot Bats", "Recent hitter form", "Locked recent-form model", Color.rgb(255, 109, 131), v -> openLiveHotBatsMatchup(game)), hotLp);
     }
 
     private View gameMatchupHeroCard(LiveGame game, Team away, Team home, TeamPalette awayPalette, TeamPalette homePalette, String pitchers) {
@@ -17270,6 +17429,7 @@ private View liveGameCard(LiveGame game) {
 
 
     private void openLiveBullpenMatchup(LiveGame game) {
+        activeTeamMatchupCardMode = "overall";
         if (game == null) return;
         final int requestToken = nextScreenRequestToken();
         activeLiveGameMenu = game;
@@ -20441,6 +20601,18 @@ private View liveGameCard(LiveGame game) {
 
 
     private void openLiveTeamMatchup(LiveGame game) {
+        openLiveTeamCardMatchup(game, "overall");
+    }
+
+    private void openLiveTeamOffenseMatchup(LiveGame game) {
+        openLiveTeamCardMatchup(game, "offense");
+    }
+
+    private void openLiveTeamPitchingDefenseMatchup(LiveGame game) {
+        openLiveTeamCardMatchup(game, "pitching");
+    }
+
+    private void openLiveTeamCardMatchup(LiveGame game, String mode) {
         Team away = teamForLiveGame(game.awayTeamId, game.awayName, game.awayAbbr);
         Team home = teamForLiveGame(game.homeTeamId, game.homeName, game.homeAbbr);
         if (away == null) away = findTeamByName(game.awayAbbr);
@@ -20455,6 +20627,12 @@ private View liveGameCard(LiveGame game) {
         expectedMode = false;
         selectedTeam = away;
         compareTeam = home;
+        activeTeamMatchupCardMode = ("offense".equals(mode) || "pitching".equals(mode)) ? mode : "overall";
+        String preset = "offense".equals(activeTeamMatchupCardMode) ? "teamOffense"
+                : ("pitching".equals(activeTeamMatchupCardMode) ? "teamPitchingDefense" : "teamOverall");
+        activeComparisonPreset = preset;
+        metricsManuallyCustomized = false;
+        applyMetricsForRoleAndPreset("both", preset, true);
         constrainSelectedMetricsToPlayerRole("both", true);
         applyHeadToHeadVisibility();
         updateAnalysisModeButtons();
@@ -20465,13 +20643,15 @@ private View liveGameCard(LiveGame game) {
         renderComparePreview();
         if (standingsBox != null) standingsBox.removeAllViews();
         if (resultsBox != null) resultsBox.setVisibility(View.VISIBLE);
-        statusView.setText("Live matchup · " + away.abbr + " @ " + home.abbr + ".");
+        String label = "offense".equals(activeTeamMatchupCardMode) ? "Team offense"
+                : ("pitching".equals(activeTeamMatchupCardMode) ? "Team pitching/defense" : "Team overall");
+        statusView.setText("Live " + label.toLowerCase(Locale.US) + " · " + away.abbr + " @ " + home.abbr + ".");
         compareTeamsSideBySide(away, home, currentSeason());
         if (mainScroll != null) mainScroll.post(() -> mainScroll.smoothScrollTo(0, 0));
     }
 
-
     private void openLivePitcherMatchup(LiveGame game) {
+        activeTeamMatchupCardMode = "overall";
         Player away = findPlayerByName(game.awayPitcher);
         Player home = findPlayerByName(game.homePitcher);
         if (away == null || home == null) {
@@ -20497,6 +20677,7 @@ private View liveGameCard(LiveGame game) {
     }
 
     private void openLiveTopHitterMatchup(LiveGame game) {
+        activeTeamMatchupCardMode = "overall";
         Team awayTeam = teamForLiveGame(game.awayTeamId, game.awayName, game.awayAbbr);
         Team homeTeam = teamForLiveGame(game.homeTeamId, game.homeName, game.homeAbbr);
         if (awayTeam == null || homeTeam == null) {
@@ -20541,6 +20722,7 @@ private View liveGameCard(LiveGame game) {
 
 
     private void openLiveHotBatsMatchup(LiveGame game) {
+        activeTeamMatchupCardMode = "overall";
         Team awayTeam = teamForLiveGame(game.awayTeamId, game.awayName, game.awayAbbr);
         Team homeTeam = teamForLiveGame(game.homeTeamId, game.homeName, game.homeAbbr);
         if (awayTeam == null || homeTeam == null) {
@@ -20597,6 +20779,7 @@ private View liveGameCard(LiveGame game) {
     }
 
     private void openLiveOffenseVsStarterMatchup(LiveGame game) {
+        activeTeamMatchupCardMode = "overall";
         Team awayTeam = teamForLiveGame(game.awayTeamId, game.awayName, game.awayAbbr);
         Team homeTeam = teamForLiveGame(game.homeTeamId, game.homeName, game.homeAbbr);
         Player awayStarter = findPlayerByName(game.awayPitcher);
@@ -20725,11 +20908,13 @@ private View liveGameCard(LiveGame game) {
     private HotHitterPick hottestHitterForTeam(ArrayList<LeaderboardEntry> entries, Team team, int season) {
         if (entries == null || team == null) return null;
         ArrayList<LeaderboardEntry> teamEntries = new ArrayList<>();
+        HashSet<Integer> activeIds = activeRosterPlayerIds(team);
+        int minPa = keyHitterMinimumPa(season);
         for (LeaderboardEntry e : entries) {
             if (e == null || e.stats == null) continue;
             if (!team.key().equals(teamKeyFromEntry(e))) continue;
             Player p = playerFromEntry(e);
-            if (p == null || isPitcher(p)) continue;
+            if (!isLiveHitterEligible(e, p, activeIds, minPa)) continue;
             teamEntries.add(e);
         }
         teamEntries.sort((a, b) -> {
@@ -20741,7 +20926,7 @@ private View liveGameCard(LiveGame game) {
             return Double.compare(opsB == null ? -999d : opsB, opsA == null ? -999d : opsA);
         });
         HotHitterPick best = null;
-        int limit = Math.min(10, teamEntries.size());
+        int limit = Math.min(18, teamEntries.size());
         for (int i = 0; i < limit; i++) {
             LeaderboardEntry e = teamEntries.get(i);
             Player p = playerFromEntry(e);
@@ -20898,15 +21083,68 @@ private View liveGameCard(LiveGame game) {
     private LeaderboardEntry topHitterForTeam(ArrayList<LeaderboardEntry> entries, Team team) {
         if (entries == null || team == null) return null;
         Metric ops = metricByKey("ops");
+        HashSet<Integer> activeIds = activeRosterPlayerIds(team);
+        int minPa = keyHitterMinimumPa(currentSeason());
         LeaderboardEntry best = null;
+        LeaderboardEntry fallback = null;
         for (LeaderboardEntry e : entries) {
             if (e == null || e.stats == null) continue;
             if (!team.key().equals(teamKeyFromEntry(e))) continue;
+            Player p = playerFromEntry(e);
+            if (p == null || isPitcher(p)) continue;
             Double value = e.stats.get("ops");
             if (value == null || Double.isNaN(value)) continue;
+            if (fallback == null || compareMetricValues(value, fallback.stats.get("ops"), ops) < 0) fallback = e;
+            if (!isLiveHitterEligible(e, p, activeIds, minPa)) continue;
             if (best == null || compareMetricValues(value, best.stats.get("ops"), ops) < 0) best = e;
         }
-        return best;
+        return best != null ? best : fallback;
+    }
+
+    private final Map<Integer, HashSet<Integer>> activeRosterIdCache = new HashMap<>();
+
+    private HashSet<Integer> activeRosterPlayerIds(Team team) {
+        HashSet<Integer> empty = new HashSet<>();
+        if (team == null || team.id <= 0) return empty;
+        HashSet<Integer> cached = activeRosterIdCache.get(team.id);
+        if (cached != null) return cached;
+        HashSet<Integer> ids = new HashSet<>();
+        try {
+            String url = "https://statsapi.mlb.com/api/v1/teams/" + team.id + "/roster?rosterType=active";
+            JSONObject root = new JSONObject(httpGet(url));
+            JSONArray roster = root.optJSONArray("roster");
+            if (roster != null) {
+                for (int i = 0; i < roster.length(); i++) {
+                    JSONObject row = roster.optJSONObject(i);
+                    JSONObject person = row == null ? null : row.optJSONObject("person");
+                    int id = person == null ? 0 : person.optInt("id", 0);
+                    if (id > 0) ids.add(id);
+                }
+            }
+        } catch (Exception ignored) {}
+        activeRosterIdCache.put(team.id, ids);
+        return ids;
+    }
+
+    private int keyHitterMinimumPa(int season) {
+        Calendar now = Calendar.getInstance();
+        int current = now.get(Calendar.YEAR);
+        if (season < current) return 100;
+        Calendar opening = Calendar.getInstance();
+        opening.set(Calendar.YEAR, season);
+        opening.set(Calendar.MONTH, Calendar.MARCH);
+        opening.set(Calendar.DAY_OF_MONTH, 20);
+        zeroTime(opening);
+        long days = Math.max(0L, Math.round((now.getTimeInMillis() - opening.getTimeInMillis()) / (24d * 60d * 60d * 1000d)));
+        if (days < 21) return 20;
+        if (days < 45) return 45;
+        return 75;
+    }
+
+    private boolean isLiveHitterEligible(LeaderboardEntry e, Player p, HashSet<Integer> activeIds, int minPa) {
+        if (e == null || e.stats == null || p == null || isPitcher(p)) return false;
+        if (activeIds != null && !activeIds.isEmpty() && !activeIds.contains(e.playerId)) return false;
+        return e.stats.pa >= Math.max(12, minPa);
     }
 
     private Player findPlayerByName(String name) {
