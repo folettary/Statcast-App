@@ -689,7 +689,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v223", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v224", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -4231,6 +4231,18 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         return new String[] { "ops", "xwOBA", "barrelPct", "hardHitPct", "era", "whip", "pitchKMinusBBPct", "pxwOBA" };
     }
 
+    private String[] combinedPlayerPresetKeys(String preset) {
+        preset = normalizePresetKey(preset);
+        if ("recommended".equals(preset)) return new String[] { "ops", "xwOBA", "barrelPct", "hardHitPct", "era", "whip", "pitchKMinusBBPct", "pxwOBA" };
+        if ("traditional".equals(preset)) return new String[] { "avg", "obp", "slg", "ops", "era", "whip", "k9", "bb9" };
+        if ("statcastAdvanced".equals(preset)) return new String[] { "xwOBA", "xBA", "xSLG", "avgEV", "barrelPct", "hardHitPct", "pxwOBA", "pxSLG" };
+        if ("plateDiscipline".equals(preset)) return new String[] { "bbPct", "kPct", "bbMinusKPct", "chasePct", "whiffPct", "pitchKMinusBBPct", "pWhiffPct", "pChasePct" };
+        if ("powerContact".equals(preset)) return new String[] { "slg", "iso", "barrelPct", "hardHitPct", "avgEV", "pxSLG", "pBarrelPct", "pHardHitPct" };
+        if ("runPrevention".equals(preset)) return new String[] { "era", "whip", "pxwOBA", "pOppOps", "pBarrelPct", "pHardHitPct", "bb9" };
+        if ("speedBaserunning".equals(preset)) return new String[] { "sprintSpeed", "sb" };
+        return null;
+    }
+
     private String[] presetKeysForRole(String preset, String role) {
         preset = normalizePresetKey(preset);
         boolean team = isTeamMetricContext();
@@ -4240,6 +4252,9 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             if ("offense".equals(mode)) scoped = teamOffensePresetKeys(preset);
             else if ("pitching".equals(mode)) scoped = teamPitchingPresetKeys(preset);
             if (scoped != null) return scoped;
+        } else if ("both".equals(role) || "two".equals(role)) {
+            String[] combined = combinedPlayerPresetKeys(preset);
+            if (combined != null) return combined;
         }
         if ("recommended".equals(preset)) return recommendedKeysForRole(role);
         if ("traditional".equals(preset)) {
@@ -4387,6 +4402,8 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         } else if (team && "pitching".equals(teamCardMode())) {
             order = teamPitchingPresetKeys(preset);
             if (order == null) order = teamPitchingPresetKeys("recommended");
+        } else if (!team && ("both".equals(role) || "two".equals(role)) && combinedPlayerPresetKeys(preset) != null) {
+            order = combinedPlayerPresetKeys(preset);
         } else if ("traditional".equals(preset)) {
             if (team) order = new String[] { "teamWinPct", "teamRunDiff", "teamRPG", "teamRAPG", "teamOPS", "teamOppOps", "teamERA", "teamWHIP" };
             else if ("pitch".equals(role)) order = new String[] { "era", "whip", "k9", "bb9", "pHr9", "ip" };
@@ -10237,6 +10254,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     private ArrayList<Metric> collectHeadToHeadMetrics(HeadToHeadComparison h, int max, boolean keyEdgeOnly) {
         ArrayList<Metric> ordered = new ArrayList<>();
         boolean lockedSnapshot = usesLockedHeadToHeadMetricSnapshot(h);
+        boolean strictPresetRows = !lockedSnapshot && usesStrictPresetRowsForHeadToHead(h);
 
         // v211: normal player/team matchup cards should follow the CURRENT lens/key-edge
         // selections every time the card re-renders. Earlier versions prioritized the
@@ -10260,6 +10278,11 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                     if (ordered.size() >= max) return ordered;
                 }
             }
+
+            // v224: Strict preset/category cards stop here. Do NOT top off a category lens
+            // with stale snapshot rows from the previous card/lens. If a lens only has 1-3
+            // valid stats, show 1-3 honest rows instead of silently becoming a different lens.
+            if (strictPresetRows) return ordered;
 
             if (keyEdgeOnly && ordered.isEmpty()) {
                 LinkedHashSet<String> fallback = defaultKeyEdgeForRole(role, selectedMetricKeys);
@@ -10305,6 +10328,22 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         LinkedHashSet<String> presetKeys = metricKeysForPresetAndRole(preset, role);
         if (presetKeys == null || presetKeys.isEmpty()) return null;
         return keyEdgeOnly ? defaultKeyEdgeForPresetAndRole(preset, role, presetKeys) : presetKeys;
+    }
+
+    private boolean usesStrictPresetRowsForHeadToHead(HeadToHeadComparison h) {
+        if (metricsManuallyCustomized) return false;
+        String preset = normalizePresetKey(activeComparisonPreset);
+        if ("custom".equals(preset) || "all".equals(preset) || "moreStats".equals(preset)) return false;
+        if (h == null) return false;
+        if (isBullpenHeroComparison(h) || isOffenseVsStarterComparison(h) || isHotBatsComparison(h)) return false;
+        String role = h.isTeam ? "both" : roleForScope(h.scope);
+        if (h.isTeam) return isCuratedTeamLensPreset(preset);
+        if ("pitch".equals(role)) return isCuratedPitcherLensPreset(preset);
+        if ("hit".equals(role)) return isCuratedHitterLensPreset(preset);
+        return "recommended".equals(preset) || "traditional".equals(preset)
+                || "statcastAdvanced".equals(preset) || "plateDiscipline".equals(preset)
+                || "powerContact".equals(preset) || "speedBaserunning".equals(preset)
+                || "runPrevention".equals(preset);
     }
 
     private boolean usesLockedHeadToHeadMetricSnapshot(HeadToHeadComparison h) {
