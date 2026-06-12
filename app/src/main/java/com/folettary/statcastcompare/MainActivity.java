@@ -685,7 +685,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v212", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v213", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -8162,11 +8162,13 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             float titleY = card.top + dp(28);
             drawText(canvas, h.season + " STATCAST MATCHUP", card.centerX(), titleY, dp(10), Color.rgb(204, 215, 230), true, Paint.Align.CENTER, 0.13f);
             boolean bullpenCard = isBullpenHeroComparison(h);
+            boolean offenseStarterCard = isOffenseVsStarterComparison(h);
             String statPill = bullpenCard ? "QUALITY + FRESHNESS"
+                    : (offenseStarterCard ? "OFFENSE VS STARTER"
                     : (keyScore.scoredRows == allMetrics.size()
                         ? keyScore.scoredRows + " SCORING STATS"
-                        : allMetrics.size() + " SELECTED · " + keyScore.scoredRows + " SCORED");
-            drawPill(canvas, statPill, card.centerX(), titleY + dp(24), dp(bullpenCard ? 148 : (keyScore.scoredRows == allMetrics.size() ? 104 : 138)), dp(24), Color.argb(36, 255, 255, 255), Color.argb(72, 255, 255, 255), Color.rgb(218, 228, 241), dp(8));
+                        : allMetrics.size() + " SELECTED · " + keyScore.scoredRows + " SCORED"));
+            drawPill(canvas, statPill, card.centerX(), titleY + dp(24), dp(bullpenCard ? 148 : (offenseStarterCard ? 154 : (keyScore.scoredRows == allMetrics.size() ? 104 : 138))), dp(24), Color.argb(36, 255, 255, 255), Color.argb(72, 255, 255, 255), Color.rgb(218, 228, 241), dp(8));
             String lensLabel = premiumCardLensEyebrow();
             drawText(canvas, lensLabel, card.centerX(), titleY + dp(49), dp(7), Color.rgb(206, 218, 235), true, Paint.Align.CENTER, 0.08f);
             if (keyScore.sampleAdjustedRows > 0) {
@@ -9919,16 +9921,19 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
         private String premiumCardLensEyebrow() {
             if (isBullpenHeroComparison(h)) return "MATCHUP TYPE · BULLPEN";
+            if (isOffenseVsStarterComparison(h)) return "MATCHUP TYPE · OFFENSE VS STARTER";
             return "LENS · " + matchupLensNameForUi(h).toUpperCase(Locale.US);
         }
 
         private String premiumCardScoreContextLine() {
             if (isBullpenHeroComparison(h)) return "70% QUALITY · 30% FRESHNESS";
+            if (isOffenseVsStarterComparison(h)) return "OFFENSE VS STARTER MODEL";
             return matchupLensNameForUi(h).toUpperCase(Locale.US) + " LENS";
         }
 
         private String premiumCardStatSectionTitle() {
             if (isBullpenHeroComparison(h)) return "BULLPEN SCORING FACTORS";
+            if (isOffenseVsStarterComparison(h)) return "OFFENSE VS STARTER FACTORS";
             return matchupLensNameForUi(h).toUpperCase(Locale.US) + " LENS STATS";
         }
 
@@ -10228,6 +10233,20 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         return m != null && ("avgLA".equals(m.key) || "target".equals(m.type));
     }
 
+    private boolean isNormalizedMatchupScoreMetric(Metric m) {
+        if (m == null) return false;
+        String key = safe(m.key);
+        return key.startsWith("ovs") || "matchup".equalsIgnoreCase(safe(m.group));
+    }
+
+    private boolean isOffenseVsStarterComparison(HeadToHeadComparison h) {
+        return h != null
+                && h.statsA != null
+                && h.statsB != null
+                && h.statsA.get("ovsOverall") != null
+                && h.statsB.get("ovsOverall") != null;
+    }
+
     private boolean isVolumeSensitiveMetric(Metric m) {
         if (m == null) return false;
         if (safe(m.key).startsWith("bp")) return false;
@@ -10237,6 +10256,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
     private double statQualityScore(HeadToHeadComparison h, Metric m, Double value, boolean sideA) {
         if (value == null || Double.isNaN(value)) return 50d;
+        if (isNormalizedMatchupScoreMetric(m)) return clampDouble(value, 0d, 100d); // v213: custom game-card model scores are already 0-100
         if (isTargetRangeMetric(m)) return launchAngleQuality(value);
         Map<String, Double> map = sideA ? h.percentileA : h.percentileB;
         Double pct = map == null ? null : map.get(m.key);
@@ -20288,6 +20308,16 @@ private View liveGameCard(LiveGame game) {
         ArrayList<Metric> key = new ArrayList<>();
         for (int i = 0; i < Math.min(4, metrics.size()); i++) key.add(metrics.get(i));
 
+        HashMap<String, Double> pctA = new HashMap<>();
+        HashMap<String, Double> pctB = new HashMap<>();
+        for (Metric m : metrics) {
+            if (m == null) continue;
+            Double av = sideA.get(m.key);
+            Double bv = sideB.get(m.key);
+            if (av != null && !Double.isNaN(av)) pctA.put(m.key, clampDouble(av, 0d, 100d));
+            if (bv != null && !Double.isNaN(bv)) pctB.put(m.key, clampDouble(bv, 0d, 100d));
+        }
+
         return new HeadToHeadComparison(true,
                 awayTeam.name,
                 homeTeam.name,
@@ -20296,7 +20326,7 @@ private View liveGameCard(LiveGame game) {
                 0, 0, season,
                 sideA, sideB, league,
                 null, null, awayTeam, homeTeam,
-                new HashMap<>(), new HashMap<>(), new HashMap<>(), new HashMap<>(), new HashMap<>(), new HashMap<>(),
+                new HashMap<>(), new HashMap<>(), new HashMap<>(), new HashMap<>(), pctA, pctB,
                 StatScope.BOTH, metrics, key);
     }
 
@@ -20440,7 +20470,7 @@ private View liveGameCard(LiveGame game) {
         out.add(new Metric("ovsOnBase", "On-Base Edge", "", 0, true, "rate", "matchup", "both"));
         out.add(new Metric("ovsPower", "Power Edge", "", 0, true, "rate", "matchup", "both"));
         out.add(new Metric("ovsDiscipline", "Discipline Edge", "", 0, true, "rate", "matchup", "both"));
-        out.add(new Metric("ovsStarterVuln", "Starter Vulnerability", "", 0, true, "rate", "matchup", "both"));
+        out.add(new Metric("ovsStarterVuln", "Starter Stress", "", 0, true, "rate", "matchup", "both"));
         return out;
     }
 
