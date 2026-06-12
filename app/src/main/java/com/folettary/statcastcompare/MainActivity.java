@@ -686,7 +686,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v215", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v216", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -8178,29 +8178,14 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             drawAtmosphere(canvas, card, false, paletteB, sideAbbr(false));
             drawVignette(canvas, card);
 
-            float titleY = card.top + dp(28);
-            drawText(canvas, h.season + " STATCAST MATCHUP", card.centerX(), titleY, dp(10), Color.rgb(204, 215, 230), true, Paint.Align.CENTER, 0.13f);
-            boolean bullpenCard = isBullpenHeroComparison(h);
-            boolean offenseStarterCard = isOffenseVsStarterComparison(h);
-            String statPill = bullpenCard ? "QUALITY + FRESHNESS"
-                    : (offenseStarterCard ? "OFFENSE VS STARTER"
-                    : (keyScore.scoredRows == allMetrics.size()
-                        ? keyScore.scoredRows + " SCORING STATS"
-                        : allMetrics.size() + " SELECTED · " + keyScore.scoredRows + " SCORED"));
-            drawPill(canvas, statPill, card.centerX(), titleY + dp(24), dp(bullpenCard ? 148 : (offenseStarterCard ? 154 : (keyScore.scoredRows == allMetrics.size() ? 104 : 138))), dp(24), Color.argb(36, 255, 255, 255), Color.argb(72, 255, 255, 255), Color.rgb(218, 228, 241), dp(8));
-            String lensLabel = premiumCardLensEyebrow();
-            drawText(canvas, lensLabel, card.centerX(), titleY + dp(49), dp(7), Color.rgb(206, 218, 235), true, Paint.Align.CENTER, 0.08f);
-            if (keyScore.sampleAdjustedRows > 0) {
-                drawPill(canvas, "SAMPLE WEIGHTED", card.centerX(), titleY + dp(68), dp(110), dp(17), Color.argb(24, 255, 255, 255), Color.argb(52, 255, 255, 255), Color.rgb(174, 190, 212), dp(6));
-            }
-
-            drawCornerTeamLogo(canvas, logoA, sideAbbr(true), card.left + dp(34), card.top + dp(52), dp(70), accentA, true);
-            drawCornerTeamLogo(canvas, logoB, sideAbbr(false), card.right - dp(34), card.top + dp(52), dp(70), Color.WHITE, false);
+            // v216: keep the hero clean and poster-like. Lens/scoring details live in the score panel.
+            drawCornerTeamLogo(canvas, logoA, sideAbbr(true), card.left + dp(34), card.top + dp(38), dp(70), accentA, true);
+            drawCornerTeamLogo(canvas, logoB, sideAbbr(false), card.right - dp(34), card.top + dp(38), dp(70), Color.WHITE, false);
 
             float portraitR = Math.min(dp(72), w * 0.19f);
             float leftCx = card.left + w * 0.25f;
             float rightCx = card.right - w * 0.25f;
-            float portraitCy = card.top + dp(134);
+            float portraitCy = card.top + dp(116);
             float vsCx = card.centerX();
             float vsCy = portraitCy + dp(2);
 
@@ -8213,11 +8198,11 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             drawPlayerNameBlock(canvas, h.nameA, h.metaA, leftCx, portraitCy + portraitR + dp(31), paletteA, true);
             drawPlayerNameBlock(canvas, h.nameB, h.metaB, rightCx, portraitCy + portraitR + dp(31), paletteB, false);
 
-            float scoreTop = card.top + dp(324);
+            float scoreTop = card.top + dp(302);
             RectF score = new RectF(card.left + dp(30), scoreTop, card.right - dp(30), scoreTop + dp(106));
             drawScoreBlock(canvas, score);
 
-            float keyY = score.bottom + dp(27);
+            float keyY = score.bottom + dp(24);
             drawKeyStatBody(canvas, card, keyY);
             canvas.restoreToCount(save);
 
@@ -9070,7 +9055,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             float titleSize = fitTextSize(paint, title, dp(9), dp(7), score.width() - dp(30), 0.10f, true);
             drawText(canvas, title, score.centerX(), score.top + dp(20), titleSize, Color.rgb(232, 240, 249), true, Paint.Align.CENTER, 0.10f);
             drawText(canvas, premiumCardScoreContextLine(), score.centerX(), score.top + dp(37), dp(7), isBullpenHeroComparison(h) ? Color.rgb(247, 197, 77) : Color.rgb(194, 210, 232), true, Paint.Align.CENTER, 0.10f);
-            drawText(canvas, isBullpenHeroComparison(h) ? "WEIGHTED BULLPEN EDGE" : "SCORED EDGE SHARE", score.centerX(), score.top + dp(51), dp(7), Color.rgb(166, 181, 202), true, Paint.Align.CENTER, 0.11f);
+            drawText(canvas, premiumCardScoreMetaLine(), score.centerX(), score.top + dp(51), dp(7), Color.rgb(166, 181, 202), true, Paint.Align.CENTER, 0.11f);
 
             float midY = score.top + dp(78);
             float scoreSize = dp(35);
@@ -9241,6 +9226,10 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         private void drawBullpenGroupedShareMetric(Canvas canvas, Metric m, RectF panel, float top, float bottom) {
             Double a = h.statsA.get(m.key), b = h.statsB.get(m.key);
             StatEdgeResult edge = statEdgeForMetric(h, m);
+            if (edge != null && edge.contextOnly) {
+                drawContextShareMetric(canvas, m, panel, top, bottom, a, b);
+                return;
+            }
             int winner = edge == null ? 0 : edge.winner;
             int aBase = battleTeamColor(paletteA, paletteB, true);
             int bBase = battleTeamColor(paletteB, paletteA, false);
@@ -9342,6 +9331,43 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                     fmtStat(st.get("bpStaffIP"), 1) + " IP last 2d · " + fmtCount(st.get("bpB2B")) + " B2B",
                     fmtCount(st.get("bpFreshArms")) + " fresh · " + fmtCount(st.get("bpReadyArms")) + " ready · " + fmtCount(st.get("bpWatchArms")) + " watch"
             };
+        }
+
+        private void drawContextShareMetric(Canvas canvas, Metric m, RectF panel, float top, float bottom, Double a, Double b) {
+            float rowH = bottom - top;
+            float valueSize = dp(17);
+            float labelSize = dp(10);
+            float valueBaseline = centeredTextBaseline(top + rowH * 0.46f, valueSize, true);
+            float labelBaseline = centeredTextBaseline(top + rowH * 0.40f, labelSize, true);
+            float railY = top + rowH * 0.75f;
+            float innerPad = dp(22);
+            float leftValueX = panel.left + innerPad;
+            float rightValueX = panel.right - innerPad;
+            float railLeft = panel.left + dp(92);
+            float railRight = panel.right - dp(92);
+            float cX = (railLeft + railRight) / 2f;
+
+            int valueColor = Color.rgb(190, 203, 222);
+            int labelColor = Color.rgb(166, 181, 202);
+            drawText(canvas, shareFormat(a, m), leftValueX, valueBaseline, valueSize, valueColor, true, Paint.Align.LEFT, 0.00f);
+            drawText(canvas, shareFormat(b, m), rightValueX, valueBaseline, valueSize, valueColor, true, Paint.Align.RIGHT, 0.00f);
+            drawText(canvas, m.label, cX, labelBaseline, labelSize, labelColor, true, Paint.Align.CENTER, 0.09f);
+            drawShareMiniBadge(canvas, "CTX", Math.min(railRight - dp(21), cX + dp(74)), top + rowH * 0.40f, Color.rgb(150, 166, 190));
+
+            strokePaint.setStyle(Paint.Style.STROKE);
+            strokePaint.setStrokeCap(Paint.Cap.ROUND);
+            strokePaint.setStrokeWidth(dp(2.4f));
+            strokePaint.setShader(new LinearGradient(railLeft, railY, railRight, railY,
+                    new int[] {
+                            Color.argb(0, 180, 196, 218),
+                            Color.argb(56, 180, 196, 218),
+                            Color.argb(84, 236, 242, 250),
+                            Color.argb(56, 180, 196, 218),
+                            Color.argb(0, 180, 196, 218)
+                    }, new float[] {0f, .22f, .50f, .78f, 1f}, Shader.TileMode.CLAMP));
+            canvas.drawLine(railLeft, railY, railRight, railY, strokePaint);
+            strokePaint.setShader(null);
+            strokePaint.setStrokeCap(Paint.Cap.BUTT);
         }
 
         private String fmtStat(Double v, int decimals) {
@@ -9956,6 +9982,15 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             return matchupLensNameForUi(h).toUpperCase(Locale.US) + " LENS STATS";
         }
 
+        private String premiumCardScoreMetaLine() {
+            if (isBullpenHeroComparison(h)) return "WEIGHTED BULLPEN EDGE";
+            if (isOffenseVsStarterComparison(h)) return keyScore.scoredRows + " MODEL FACTORS";
+            int scored = Math.max(0, keyScore.scoredRows);
+            int ctx = Math.max(0, keyScore.contextRows);
+            if (ctx > 0) return scored + " SCORING STATS · " + ctx + " CONTEXT";
+            return scored + " SCORING STATS";
+        }
+
         private void drawPill(Canvas canvas, String label, float cx, float cy, float w, float h, int fill, int stroke, int textColor, float sp) {
             RectF r = new RectF(cx - w / 2f, cy - h / 2f, cx + w / 2f, cy + h / 2f);
             paint.setStyle(Paint.Style.FILL);
@@ -9986,6 +10021,8 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         if (!lockedSnapshot) {
             String role = h == null ? allowedMetricRoleForCurrentContext() : roleForScope(h.scope);
             LinkedHashSet<String> sourceKeys = keyEdgeOnly ? keyEdgeMetricKeys : selectedMetricKeys;
+            LinkedHashSet<String> presetOverride = activePresetMetricKeysForHeadToHead(h, keyEdgeOnly);
+            if (presetOverride != null && !presetOverride.isEmpty()) sourceKeys = presetOverride;
             if (sourceKeys == null || sourceKeys.isEmpty()) sourceKeys = selectedMetricKeys;
 
             if (sourceKeys != null) {
@@ -10033,6 +10070,16 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             }
         }
         return ordered;
+    }
+
+    private LinkedHashSet<String> activePresetMetricKeysForHeadToHead(HeadToHeadComparison h, boolean keyEdgeOnly) {
+        if (metricsManuallyCustomized) return null;
+        String preset = normalizePresetKey(activeComparisonPreset);
+        if ("custom".equals(preset)) return null;
+        String role = h == null ? allowedMetricRoleForCurrentContext() : (h.isTeam ? "both" : roleForScope(h.scope));
+        LinkedHashSet<String> presetKeys = metricKeysForPresetAndRole(preset, role);
+        if (presetKeys == null || presetKeys.isEmpty()) return null;
+        return keyEdgeOnly ? defaultKeyEdgeForPresetAndRole(preset, role, presetKeys) : presetKeys;
     }
 
     private boolean usesLockedHeadToHeadMetricSnapshot(HeadToHeadComparison h) {
@@ -10093,13 +10140,13 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 if ("bb9".equals(key)) return 0.05d;
                 if ("pxwOBA".equals(key)) return 0.02d;
             } else if ("powerContact".equals(preset)) {
-                if ("pxSLG".equals(key)) return 0.24d;
-                if ("pOppOps".equals(key)) return 0.18d;
-                if ("pBarrelPct".equals(key)) return 0.18d;
-                if ("pHardHitPct".equals(key)) return 0.16d;
+                if ("pxSLG".equals(key)) return 0.20d;
+                if ("pOppOps".equals(key)) return 0.16d;
+                if ("pBarrelPct".equals(key)) return 0.16d;
+                if ("pHardHitPct".equals(key)) return 0.18d;
                 if ("pAvgEV".equals(key)) return 0.12d;
-                if ("pHr9".equals(key)) return 0.08d;
-                if ("pGbPct".equals(key)) return 0.04d;
+                if ("pHr9".equals(key)) return 0.14d;
+                if ("pGbPct".equals(key)) return 0.00d;
             } else if ("plateDiscipline".equals(preset)) {
                 if ("pitchKMinusBBPct".equals(key)) return 0.25d;
                 if ("pWhiffPct".equals(key)) return 0.20d;
@@ -10326,8 +10373,8 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         // v214: raw pitcher volume and batted-ball shape rows can help interpret the card,
         // but they should not move the matchup score. Use rate/quality versions for scoring.
         if ("ip".equals(key) || "pitchK".equals(key) || "pitchBB".equals(key) || "saves".equals(key)
-                || "pHitsAllowed".equals(key) || "pHrAllowed".equals(key) || "pFbPct".equals(key)
-                || "pLdPct".equals(key)) return true;
+                || "pHitsAllowed".equals(key) || "pHrAllowed".equals(key) || "pGbPct".equals(key)
+                || "pFbPct".equals(key) || "pLdPct".equals(key)) return true;
         return "luck".equals(key) || "context".equals(m.type);
     }
 
