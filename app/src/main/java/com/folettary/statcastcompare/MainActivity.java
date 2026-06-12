@@ -685,7 +685,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v203", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v204", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -5703,13 +5703,82 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         });
     }
 
+
+    private void renderPremiumPlayerMatchupLoading(Player a, Player b, int season, StatScope scope) {
+        hideProfileSkeleton();
+        if (resultsBox == null || headerBox == null || metricBox == null) return;
+        resultsBox.setVisibility(View.VISIBLE);
+        if (standingsBox != null) standingsBox.setVisibility(View.GONE);
+        headerBox.removeAllViews();
+        metricBox.removeAllViews();
+
+        Team teamA = findTeamByName(a == null ? "" : a.teamAbbr);
+        Team teamB = findTeamByName(b == null ? "" : b.teamAbbr);
+        TeamPalette paletteA = teamA == null ? paletteForAbbr(a == null ? "" : a.teamAbbr) : paletteForTeam(teamA);
+        TeamPalette paletteB = teamB == null ? paletteForAbbr(b == null ? "" : b.teamAbbr) : paletteForTeam(teamB);
+        int colorA = readableTeamColor(paletteA.primary, paletteA.secondary, true);
+        int colorB = readableTeamColor(paletteB.primary, paletteB.secondary, true);
+
+        PremiumMatchupLoadingView loadingView = new PremiumMatchupLoadingView(this, a, b, teamA, teamB, season, scope, colorA, colorB);
+        LinearLayout.LayoutParams heroLp = matchWrap();
+        heroLp.setMargins(0, dp(6), 0, dp(8));
+        headerBox.addView(loadingView, heroLp);
+        metricBox.addView(premiumMatchupLoadingStatusCard("Building player matchup card", "Loading player profiles, selected lens, percentile edge, and spark rails."), matchWrap());
+        focusResultsPanel(false, 0);
+    }
+
+    private void renderPremiumTeamMatchupLoading(Team a, Team b, int season, StatScope scope) {
+        hideProfileSkeleton();
+        if (resultsBox == null || headerBox == null || metricBox == null) return;
+        resultsBox.setVisibility(View.VISIBLE);
+        if (standingsBox != null) standingsBox.setVisibility(View.GONE);
+        headerBox.removeAllViews();
+        metricBox.removeAllViews();
+
+        TeamPalette paletteA = paletteForTeam(a);
+        TeamPalette paletteB = paletteForTeam(b);
+        int colorA = readableTeamColor(paletteA.primary, paletteA.secondary, true);
+        int colorB = readableTeamColor(paletteB.primary, paletteB.secondary, true);
+
+        PremiumMatchupLoadingView loadingView = new PremiumMatchupLoadingView(this, a, b, season, scope, colorA, colorB);
+        LinearLayout.LayoutParams heroLp = matchWrap();
+        heroLp.setMargins(0, dp(6), 0, dp(8));
+        headerBox.addView(loadingView, heroLp);
+        metricBox.addView(premiumMatchupLoadingStatusCard("Building team matchup card", "Loading team offense, pitching, league ranks, and weighted edge."), matchWrap());
+        focusResultsPanel(false, 0);
+    }
+
+    private TextView premiumMatchupLoadingStatusCard(String title, String subtitle) {
+        TextView tv = text(title + "\n" + subtitle, 11, Color.rgb(210, 226, 244), true);
+        tv.setGravity(Gravity.CENTER);
+        tv.setSingleLine(false);
+        tv.setMaxLines(3);
+        tv.setLineSpacing(dp(2), 1.0f);
+        tv.setPadding(dp(12), dp(9), dp(12), dp(9));
+        tv.setBackground(roundedGradientStroke(new int[] {
+                Color.argb(210, 5, 10, 18),
+                Color.argb(190, 9, 22, 38),
+                Color.argb(210, 5, 10, 18)
+        }, 18, Color.argb(66, 126, 235, 226), 1));
+        return tv;
+    }
+
+    private void focusResultsPanel(boolean immediate, int offsetDp) {
+        if (mainScroll == null || resultsBox == null) return;
+        mainScroll.post(() -> {
+            int targetY = Math.max(0, resultsBox.getTop() + dp(offsetDp));
+            if (immediate) mainScroll.scrollTo(0, targetY);
+            else mainScroll.smoothScrollTo(0, targetY);
+        });
+    }
+
     private void comparePlayersSideBySide(Player a, Player b, int season) {
         lastComparison = null;
         lastHeadToHead = null;
         resetTrendDefaults();
         StatScope scope = scopeForPlayers(a, b);
         constrainSelectedMetricsToPlayerRole(roleForScope(scope), true);
-        showProfileSkeleton();  // v29: skeleton while H2H loads
+        renderPremiumPlayerMatchupLoading(a, b, season, scope);
         setBusy(true, scope == StatScope.BOTH ? "Loading player side-by-side · hitting + pitching…" : "Loading player side-by-side…");
         final int requestToken = nextScreenRequestToken();
         io.execute(() -> {
@@ -5754,7 +5823,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         resetTrendDefaults();
         StatScope scope = StatScope.BOTH;
         constrainSelectedMetricsToPlayerRole("both", true);
-        showProfileSkeleton();  // v29: skeleton while H2H loads
+        renderPremiumTeamMatchupLoading(a, b, season, scope);
         setBusy(true, "Loading team side-by-side · hitting + pitching…");
         final int requestToken = nextScreenRequestToken();
         io.execute(() -> {
@@ -16711,7 +16780,7 @@ private View liveGameCard(LiveGame game) {
         int homeColor = readableTeamColor(homePalette.primary, homePalette.secondary, true);
 
         LinearLayout panel = bullpenPanelShell(game);
-        BullpenLoadingHeroView loadingView = new BullpenLoadingHeroView(this, game, awayColor, homeColor);
+        PremiumMatchupLoadingView loadingView = new PremiumMatchupLoadingView(this, game, currentSeason(), awayColor, homeColor);
         LinearLayout.LayoutParams heroLp = matchWrap();
         heroLp.setMargins(0, dp(6), 0, dp(2));
         panel.addView(loadingView, heroLp);
@@ -18339,6 +18408,586 @@ private View liveGameCard(LiveGame game) {
             }
             canvas.drawText(txt, x, y, p);
             p.setLetterSpacing(0f);
+        }
+    }
+
+
+
+    class PremiumMatchupLoadingView extends View {
+        final int season;
+        final String title;
+        final String typeLine;
+        final String leftTop;
+        final String leftMain;
+        final String leftBottom;
+        final String rightTop;
+        final String rightMain;
+        final String rightBottom;
+        final String[] rowLabels;
+        final String[] loadingSteps;
+        final int leftColor;
+        final int rightColor;
+        final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG);
+        final Paint stroke = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG);
+        Bitmap leftIcon;
+        Bitmap rightIcon;
+        Bitmap leftWatermark;
+        Bitmap rightWatermark;
+        ValueAnimator shimmerAnim;
+        float shimmerPhase = 0f;
+
+        PremiumMatchupLoadingView(Context context, Player left, Player right, Team leftTeam, Team rightTeam, int season, StatScope scope, int leftColor, int rightColor) {
+            this(context,
+                    season,
+                    "MATCHUP CARD",
+                    scope == StatScope.BOTH ? "Player lens · hitting + pitching" : "Player lens · " + roleLabelForLoading(scope),
+                    shortNameForLoading(left == null ? "" : left.fullName, true),
+                    shortNameForLoading(left == null ? "Player" : left.fullName, false),
+                    safe(left == null ? "" : left.teamAbbr) + (left == null || safe(left.position).isEmpty() ? "" : " · " + left.position),
+                    shortNameForLoading(right == null ? "" : right.fullName, true),
+                    shortNameForLoading(right == null ? "Player" : right.fullName, false),
+                    safe(right == null ? "" : right.teamAbbr) + (right == null || safe(right.position).isEmpty() ? "" : " · " + right.position),
+                    new String[] { "Selected Lens", "Percentile Edge", "League Context", "Recent Form", "Key Stat Rail", "Final Card" },
+                    new String[] { "Loading player profiles...", "Scoring selected lens...", "Reviewing league context...", "Finalizing matchup edge..." },
+                    leftColor,
+                    rightColor);
+            if (left != null && left.id > 0) loadPlayerImageBitmap(left.id, b -> { leftIcon = b; invalidate(); });
+            if (right != null && right.id > 0) loadPlayerImageBitmap(right.id, b -> { rightIcon = b; invalidate(); });
+            if (leftTeam != null) loadTeamLogoBitmap(leftTeam, b -> { leftWatermark = b; invalidate(); });
+            if (rightTeam != null) loadTeamLogoBitmap(rightTeam, b -> { rightWatermark = b; invalidate(); });
+        }
+
+        PremiumMatchupLoadingView(Context context, Team left, Team right, int season, StatScope scope, int leftColor, int rightColor) {
+            this(context,
+                    season,
+                    "MATCHUP CARD",
+                    "Team lens · offense + pitching",
+                    cityPartForLoading(left == null ? "" : left.name),
+                    mascotPartForLoading(left == null ? safe(left == null ? "" : left.abbr) : left.name, left == null ? "" : left.abbr),
+                    "TEAM",
+                    cityPartForLoading(right == null ? "" : right.name),
+                    mascotPartForLoading(right == null ? safe(right == null ? "" : right.abbr) : right.name, right == null ? "" : right.abbr),
+                    "TEAM",
+                    new String[] { "Offense Lens", "Pitching Lens", "League Ranks", "Weighted Edge", "Spark Rails", "Final Card" },
+                    new String[] { "Loading team context...", "Building offense + pitching lens...", "Scoring weighted edge...", "Finalizing matchup card..." },
+                    leftColor,
+                    rightColor);
+            if (left != null) {
+                loadTeamLogoBitmap(left, b -> { leftIcon = b; leftWatermark = b; invalidate(); });
+            }
+            if (right != null) {
+                loadTeamLogoBitmap(right, b -> { rightIcon = b; rightWatermark = b; invalidate(); });
+            }
+        }
+
+        PremiumMatchupLoadingView(Context context, LiveGame game, int season, int leftColor, int rightColor) {
+            this(context,
+                    season,
+                    "BULLPEN INTELLIGENCE",
+                    "Matchup type · bullpen",
+                    cityPartForLoading(game == null ? "" : safe(game.awayName)),
+                    mascotPartForLoading(game == null ? "" : safe(game.awayName), game == null ? "" : game.awayAbbr),
+                    "BULLPEN",
+                    cityPartForLoading(game == null ? "" : safe(game.homeName)),
+                    mascotPartForLoading(game == null ? "" : safe(game.homeName), game == null ? "" : game.homeAbbr),
+                    "BULLPEN",
+                    new String[] { "Quality Score", "ERA", "WHIP", "Freshness Score", "IP Last 2d", "Watch Arms" },
+                    new String[] { "Checking recent relief usage...", "Scoring bullpen quality...", "Measuring freshness and strain...", "Finalizing bullpen edge..." },
+                    leftColor,
+                    rightColor);
+            Team away = game == null ? null : teamForLiveGame(game.awayTeamId, game.awayName, game.awayAbbr);
+            Team home = game == null ? null : teamForLiveGame(game.homeTeamId, game.homeName, game.homeAbbr);
+            if (away != null) loadTeamLogoBitmap(away, b -> { leftIcon = b; leftWatermark = b; invalidate(); });
+            if (home != null) loadTeamLogoBitmap(home, b -> { rightIcon = b; rightWatermark = b; invalidate(); });
+        }
+
+        private PremiumMatchupLoadingView(Context context, int season, String title, String typeLine,
+                                          String leftTop, String leftMain, String leftBottom,
+                                          String rightTop, String rightMain, String rightBottom,
+                                          String[] rowLabels, String[] loadingSteps,
+                                          int leftColor, int rightColor) {
+            super(context);
+            this.season = season;
+            this.title = safe(title).isEmpty() ? "MATCHUP CARD" : title;
+            this.typeLine = safe(typeLine).isEmpty() ? "Premium loading" : typeLine;
+            this.leftTop = safe(leftTop).isEmpty() ? "LEFT" : safe(leftTop).toUpperCase(Locale.US);
+            this.leftMain = safe(leftMain).isEmpty() ? "SIDE A" : safe(leftMain).toUpperCase(Locale.US);
+            this.leftBottom = safe(leftBottom).isEmpty() ? "MATCHUP" : safe(leftBottom).toUpperCase(Locale.US);
+            this.rightTop = safe(rightTop).isEmpty() ? "RIGHT" : safe(rightTop).toUpperCase(Locale.US);
+            this.rightMain = safe(rightMain).isEmpty() ? "SIDE B" : safe(rightMain).toUpperCase(Locale.US);
+            this.rightBottom = safe(rightBottom).isEmpty() ? "MATCHUP" : safe(rightBottom).toUpperCase(Locale.US);
+            this.rowLabels = rowLabels == null || rowLabels.length == 0 ? new String[] { "Selected Lens", "Weighted Edge", "Spark Rails" } : rowLabels;
+            this.loadingSteps = loadingSteps == null || loadingSteps.length == 0 ? new String[] { "Building matchup card..." } : loadingSteps;
+            this.leftColor = boostNeonColor(leftColor, 1.10f, 1.06f);
+            this.rightColor = boostNeonColor(rightColor, 1.10f, 1.06f);
+            setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+        }
+
+        @Override protected void onAttachedToWindow() {
+            super.onAttachedToWindow();
+            if (shimmerAnim == null) {
+                shimmerAnim = ValueAnimator.ofFloat(0f, 1f);
+                shimmerAnim.setDuration(1900);
+                shimmerAnim.setRepeatCount(ValueAnimator.INFINITE);
+                shimmerAnim.setInterpolator(new LinearInterpolator());
+                shimmerAnim.addUpdateListener(a -> {
+                    shimmerPhase = (float) a.getAnimatedValue();
+                    invalidate();
+                });
+                shimmerAnim.start();
+            }
+        }
+
+        @Override protected void onDetachedFromWindow() {
+            super.onDetachedFromWindow();
+            if (shimmerAnim != null) {
+                shimmerAnim.cancel();
+                shimmerAnim = null;
+            }
+        }
+
+        @Override protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+            int w = MeasureSpec.getSize(widthMeasureSpec);
+            if (w <= 0) w = dp(360);
+            int h = Math.max(dp(690), Math.round(w * 1.70f));
+            setMeasuredDimension(w, h);
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            float w = getWidth();
+            float h = getHeight();
+            if (w <= dp(120) || h <= dp(240)) return;
+
+            float pad = dp(4);
+            RectF card = new RectF(pad, pad, w - pad, h - pad);
+            float radius = dp(30);
+            int blend = mixColor(leftColor, rightColor, 0.50f);
+
+            p.setStyle(Paint.Style.FILL);
+            p.setShader(new LinearGradient(card.left, card.top, card.right, card.bottom,
+                    new int[] {
+                            mixColor(leftColor, Color.rgb(2, 4, 9), 0.42f),
+                            mixColor(leftColor, Color.rgb(4, 7, 13), 0.78f),
+                            Color.rgb(5, 8, 15),
+                            mixColor(rightColor, Color.rgb(4, 7, 13), 0.78f),
+                            mixColor(rightColor, Color.rgb(2, 4, 9), 0.42f)
+                    },
+                    new float[] {0f, .23f, .50f, .77f, 1f}, Shader.TileMode.CLAMP));
+            p.setShadowLayer(dp(10), 0, dp(5), Color.argb(46, 0, 0, 0));
+            canvas.drawRoundRect(card, radius, radius, p);
+            p.clearShadowLayer();
+            p.setShader(null);
+
+            int save = canvas.save();
+            Path clip = new Path();
+            clip.addRoundRect(card, radius, radius, Path.Direction.CW);
+            canvas.clipPath(clip);
+
+            drawPremiumLoadingAtmosphere(canvas, card, blend);
+            drawPremiumLoadingHeader(canvas, card);
+
+            float orbR = Math.min(dp(68), w * 0.18f);
+            float orbY = card.top + dp(142);
+            float leftCx = card.left + w * 0.25f;
+            float rightCx = card.right - w * 0.25f;
+            float vsCx = card.centerX();
+
+            drawPremiumLoadingBeam(canvas, leftCx + orbR - dp(2), orbY, vsCx - dp(24), orbY, leftColor, true);
+            drawPremiumLoadingBeam(canvas, rightCx - orbR + dp(2), orbY, vsCx + dp(24), orbY, rightColor, false);
+            drawPremiumLoadingOrb(canvas, leftIcon, leftMain, leftCx, orbY, orbR, leftColor);
+            drawPremiumLoadingOrb(canvas, rightIcon, rightMain, rightCx, orbY, orbR, rightColor);
+            drawPremiumLoadingVs(canvas, vsCx, orbY, dp(28), leftColor, rightColor, blend);
+
+            drawPremiumLoadingNameBlock(canvas, leftTop, leftMain, leftBottom, leftCx, orbY + orbR + dp(33), leftColor);
+            drawPremiumLoadingNameBlock(canvas, rightTop, rightMain, rightBottom, rightCx, orbY + orbR + dp(33), rightColor);
+
+            RectF score = new RectF(card.left + dp(22), card.top + dp(314), card.right - dp(22), card.top + dp(432));
+            drawPremiumLoadingScoreBlock(canvas, score);
+
+            float keyY = score.bottom + dp(34);
+            drawPremiumLoadingFactorTitle(canvas, card.left + dp(24), keyY);
+            RectF panel = new RectF(card.left + dp(16), keyY + dp(20), card.right - dp(16), card.bottom - dp(18));
+            drawPremiumLoadingFactorsPanel(canvas, panel);
+
+            canvas.restoreToCount(save);
+
+            stroke.setShader(null);
+            stroke.setStyle(Paint.Style.STROKE);
+            stroke.setStrokeWidth(dp(1));
+            stroke.setColor(Color.argb(82, 255, 255, 255));
+            canvas.drawRoundRect(card, radius, radius, stroke);
+        }
+
+        private void drawPremiumLoadingAtmosphere(Canvas canvas, RectF card, int blend) {
+            p.setStyle(Paint.Style.FILL);
+            p.setShader(new RadialGradient(card.left + card.width() * .25f, card.top + dp(144), card.width() * .36f,
+                    new int[] { Color.argb(138, Color.red(leftColor), Color.green(leftColor), Color.blue(leftColor)), Color.argb(30, Color.red(leftColor), Color.green(leftColor), Color.blue(leftColor)), Color.TRANSPARENT },
+                    new float[] {0f, .42f, 1f}, Shader.TileMode.CLAMP));
+            canvas.drawCircle(card.left + card.width() * .25f, card.top + dp(144), card.width() * .36f, p);
+            p.setShader(new RadialGradient(card.right - card.width() * .25f, card.top + dp(144), card.width() * .36f,
+                    new int[] { Color.argb(138, Color.red(rightColor), Color.green(rightColor), Color.blue(rightColor)), Color.argb(30, Color.red(rightColor), Color.green(rightColor), Color.blue(rightColor)), Color.TRANSPARENT },
+                    new float[] {0f, .42f, 1f}, Shader.TileMode.CLAMP));
+            canvas.drawCircle(card.right - card.width() * .25f, card.top + dp(144), card.width() * .36f, p);
+            p.setShader(null);
+
+            if (leftWatermark != null) {
+                p.setAlpha(22);
+                drawBitmapFitCenter(canvas, leftWatermark, new RectF(card.left + dp(18), card.top + dp(20), card.left + dp(160), card.top + dp(162)), false, 0);
+                p.setAlpha(255);
+            } else {
+                drawPremiumLoadingWatermark(canvas, leftMain, card.left + dp(28), card.top + dp(76), leftColor, Paint.Align.LEFT);
+            }
+            if (rightWatermark != null) {
+                p.setAlpha(22);
+                drawBitmapFitCenter(canvas, rightWatermark, new RectF(card.right - dp(160), card.top + dp(20), card.right - dp(18), card.top + dp(162)), false, 0);
+                p.setAlpha(255);
+            } else {
+                drawPremiumLoadingWatermark(canvas, rightMain, card.right - dp(28), card.top + dp(76), rightColor, Paint.Align.RIGHT);
+            }
+
+            p.setShader(new LinearGradient(card.centerX() - dp(24), card.top, card.centerX() + dp(24), card.bottom,
+                    new int[] { Color.TRANSPARENT, Color.argb(34, 255, 255, 255), Color.TRANSPARENT },
+                    new float[] {0f, .50f, 1f}, Shader.TileMode.CLAMP));
+            canvas.drawRect(card.centerX() - dp(1.2f), card.top + dp(50), card.centerX() + dp(1.2f), card.bottom - dp(26), p);
+            p.setShader(null);
+
+            p.setShader(new RadialGradient(card.centerX(), card.centerY(), card.width() * .74f,
+                    new int[] { Color.TRANSPARENT, Color.argb(14, 0, 0, 0), Color.argb(102, 0, 0, 0) },
+                    new float[] {0f, .56f, 1f}, Shader.TileMode.CLAMP));
+            canvas.drawRect(card, p);
+            p.setShader(null);
+        }
+
+        private void drawPremiumLoadingHeader(Canvas canvas, RectF card) {
+            drawPremiumLoadingText(canvas, season + " STATCAST MATCHUP", card.centerX(), card.top + dp(29), card.width() - dp(72), dp(10), Color.rgb(204, 215, 230), true, Paint.Align.CENTER, 0.12f);
+            drawPremiumLoadingPill(canvas, title, card.centerX(), card.top + dp(54), Math.min(card.width() - dp(70), dp(220)), dp(25),
+                    Color.argb(38, 255, 255, 255), Color.argb(78, 255, 255, 255), Color.rgb(220, 230, 244), dp(9));
+            drawPremiumLoadingText(canvas, currentPremiumLoadingStep(), card.centerX(), card.top + dp(83), card.width() - dp(52), dp(9), Color.rgb(186, 204, 228), true, Paint.Align.CENTER, 0.10f);
+            drawPremiumLoadingText(canvas, typeLine, card.centerX(), card.top + dp(101), card.width() - dp(52), dp(8), Color.rgb(143, 162, 190), true, Paint.Align.CENTER, 0.12f);
+        }
+
+        private void drawPremiumLoadingScoreBlock(Canvas canvas, RectF score) {
+            p.setStyle(Paint.Style.FILL);
+            p.setShader(new LinearGradient(score.left, score.top, score.right, score.bottom,
+                    new int[] { Color.argb(226, 6, 10, 18), Color.argb(238, 12, 18, 30), Color.argb(218, 6, 10, 18) },
+                    null, Shader.TileMode.CLAMP));
+            canvas.drawRoundRect(score, dp(24), dp(24), p);
+            p.setShader(null);
+            stroke.setStyle(Paint.Style.STROKE);
+            stroke.setStrokeWidth(dp(1));
+            stroke.setColor(Color.argb(82, 255, 255, 255));
+            canvas.drawRoundRect(score, dp(24), dp(24), stroke);
+
+            drawPremiumLoadingText(canvas, "BUILDING MATCHUP EDGE", score.centerX(), score.top + dp(23), score.width() - dp(40), dp(10), Color.rgb(214, 223, 236), true, Paint.Align.CENTER, 0.12f);
+            drawPremiumLoadingText(canvas, "Scoring the selected card lens", score.centerX(), score.top + dp(41), score.width() - dp(44), dp(9), Color.rgb(173, 188, 209), false, Paint.Align.CENTER, 0.02f);
+
+            drawPremiumShimmerRect(canvas, new RectF(score.centerX() - dp(124), score.top + dp(60), score.centerX() - dp(38), score.top + dp(88)), dp(12));
+            drawPremiumShimmerRect(canvas, new RectF(score.centerX() + dp(38), score.top + dp(60), score.centerX() + dp(124), score.top + dp(88)), dp(12));
+            drawPremiumLoadingText(canvas, "-", score.centerX(), score.top + dp(83), dp(28), dp(24), Color.rgb(226, 234, 244), true, Paint.Align.CENTER, 0f);
+            drawPremiumLoadingSparkRail(canvas, score.left + dp(28), score.right - dp(28), score.bottom - dp(23), mixColor(leftColor, rightColor, 0.50f));
+        }
+
+        private void drawPremiumLoadingFactorTitle(Canvas canvas, float x, float y) {
+            p.setStyle(Paint.Style.FILL);
+            p.setColor(Color.argb(58, 255, 255, 255));
+            canvas.drawCircle(x + dp(14), y - dp(6), dp(14), p);
+            stroke.setStyle(Paint.Style.STROKE);
+            stroke.setStrokeWidth(dp(3));
+            stroke.setStrokeCap(Paint.Cap.ROUND);
+            stroke.setColor(Color.WHITE);
+            float bx = x + dp(8), by = y - dp(11);
+            canvas.drawLine(bx, by + dp(9), bx, by + dp(15), stroke);
+            canvas.drawLine(bx + dp(6), by + dp(5), bx + dp(6), by + dp(15), stroke);
+            canvas.drawLine(bx + dp(12), by + dp(1), bx + dp(12), by + dp(15), stroke);
+            stroke.setStrokeCap(Paint.Cap.BUTT);
+            drawPremiumLoadingText(canvas, "MATCHUP SCORING FACTORS", x + dp(36), y, dp(260), dp(11), Color.rgb(228, 235, 245), true, Paint.Align.LEFT, 0.10f);
+        }
+
+        private void drawPremiumLoadingFactorsPanel(Canvas canvas, RectF panel) {
+            p.setStyle(Paint.Style.FILL);
+            p.setShader(new LinearGradient(panel.left, panel.top, panel.right, panel.bottom,
+                    new int[] { Color.argb(178, 6, 12, 22), Color.argb(164, 8, 18, 34), Color.argb(184, 5, 14, 28) },
+                    null, Shader.TileMode.CLAMP));
+            p.setShadowLayer(dp(8), 0, dp(4), Color.argb(55, 0, 0, 0));
+            canvas.drawRoundRect(panel, dp(16), dp(16), p);
+            p.clearShadowLayer();
+            p.setShader(null);
+            stroke.setStyle(Paint.Style.STROKE);
+            stroke.setStrokeWidth(dp(1));
+            stroke.setColor(Color.argb(58, 255, 255, 255));
+            canvas.drawRoundRect(panel, dp(16), dp(16), stroke);
+
+            float top = panel.top + dp(22);
+            drawPremiumSectionHeader(canvas, panel, top, "SELECTED LENS");
+            top += dp(18);
+            for (int i = 0; i < Math.min(3, rowLabels.length); i++) {
+                drawPremiumLoadingMetricRow(canvas, panel, top, rowLabels[i]);
+                top += dp(42);
+            }
+            top += dp(2);
+            drawPremiumSectionHeader(canvas, panel, top, "WEIGHTED EDGE");
+            top += dp(18);
+            for (int i = 3; i < Math.min(6, rowLabels.length); i++) {
+                drawPremiumLoadingMetricRow(canvas, panel, top, rowLabels[i]);
+                top += dp(42);
+            }
+        }
+
+        private void drawPremiumSectionHeader(Canvas canvas, RectF panel, float y, String label) {
+            float textW = dp(122);
+            stroke.setStyle(Paint.Style.STROKE);
+            stroke.setStrokeWidth(dp(1));
+            stroke.setColor(Color.argb(46, 255, 255, 255));
+            canvas.drawLine(panel.left + dp(16), y, panel.centerX() - textW / 2f - dp(8), y, stroke);
+            canvas.drawLine(panel.centerX() + textW / 2f + dp(8), y, panel.right - dp(16), y, stroke);
+            drawPremiumLoadingText(canvas, label, panel.centerX(), y + dp(4), textW, dp(9), Color.rgb(212, 221, 234), true, Paint.Align.CENTER, 0.11f);
+        }
+
+        private void drawPremiumLoadingMetricRow(Canvas canvas, RectF panel, float y, String label) {
+            float rowTop = y - dp(18);
+            if (rowTop > panel.top + dp(24)) {
+                stroke.setStyle(Paint.Style.STROKE);
+                stroke.setStrokeWidth(dp(1));
+                stroke.setColor(Color.argb(26, 255, 255, 255));
+                canvas.drawLine(panel.left + dp(4), rowTop, panel.right - dp(4), rowTop, stroke);
+            }
+            drawPremiumShimmerRect(canvas, new RectF(panel.left + dp(14), y - dp(11), panel.left + dp(76), y + dp(7)), dp(9));
+            drawPremiumShimmerRect(canvas, new RectF(panel.right - dp(76), y - dp(11), panel.right - dp(14), y + dp(7)), dp(9));
+            drawPremiumLoadingText(canvas, label, panel.centerX(), y - dp(1), dp(128), dp(11), Color.rgb(224, 232, 242), true, Paint.Align.CENTER, 0.04f);
+            drawPremiumLoadingSparkRail(canvas, panel.left + dp(102), panel.right - dp(102), y + dp(10), mixColor(leftColor, rightColor, 0.50f));
+        }
+
+        private void drawPremiumLoadingSparkRail(Canvas canvas, float left, float right, float y, int glowColor) {
+            float cx = (left + right) / 2f;
+            float ping = 0.5f + 0.34f * (float) Math.sin(shimmerPhase * Math.PI * 2f);
+            float sparkX = left + (right - left) * ping;
+            stroke.setStyle(Paint.Style.STROKE);
+            stroke.setStrokeCap(Paint.Cap.ROUND);
+            stroke.setStrokeWidth(dp(4.8f));
+            stroke.setShader(new LinearGradient(left, y, right, y,
+                    new int[] {
+                            Color.argb(0, Color.red(leftColor), Color.green(leftColor), Color.blue(leftColor)),
+                            Color.argb(70, Color.red(leftColor), Color.green(leftColor), Color.blue(leftColor)),
+                            Color.argb(138, 244, 249, 255),
+                            Color.argb(70, Color.red(rightColor), Color.green(rightColor), Color.blue(rightColor)),
+                            Color.argb(0, Color.red(rightColor), Color.green(rightColor), Color.blue(rightColor))
+                    },
+                    new float[] {0f, .20f, .50f, .80f, 1f}, Shader.TileMode.CLAMP));
+            canvas.drawLine(left, y, right, y, stroke);
+            stroke.setShader(null);
+
+            stroke.setStrokeWidth(dp(1.1f));
+            stroke.setColor(Color.argb(166, 235, 242, 250));
+            canvas.drawLine(cx, y - dp(11), cx, y + dp(11), stroke);
+
+            stroke.setStrokeWidth(dp(5.1f));
+            stroke.setShader(new LinearGradient(cx, y, sparkX, y,
+                    new int[] {
+                            Color.argb(92, Color.red(glowColor), Color.green(glowColor), Color.blue(glowColor)),
+                            Color.argb(162, Color.red(glowColor), Color.green(glowColor), Color.blue(glowColor)),
+                            Color.argb(226, Color.red(glowColor), Color.green(glowColor), Color.blue(glowColor))
+                    },
+                    new float[] {0f, .58f, 1f}, Shader.TileMode.CLAMP));
+            stroke.setShadowLayer(dp(4.2f), 0, 0, Color.argb(88, Color.red(glowColor), Color.green(glowColor), Color.blue(glowColor)));
+            canvas.drawLine(cx, y, sparkX, y, stroke);
+            stroke.clearShadowLayer();
+            stroke.setShader(null);
+            drawPremiumLoadingSparkDot(canvas, sparkX, y, glowColor, 0.42f);
+            stroke.setStrokeCap(Paint.Cap.BUTT);
+        }
+
+        private void drawPremiumShimmerRect(Canvas canvas, RectF box, float radius) {
+            p.setStyle(Paint.Style.FILL);
+            p.setColor(Color.argb(46, 255, 255, 255));
+            canvas.drawRoundRect(box, radius, radius, p);
+            float band = Math.max(dp(24), box.width() * 0.34f);
+            float center = box.left - band + (box.width() + band * 2f) * shimmerPhase;
+            p.setShader(new LinearGradient(center - band, box.top, center + band, box.bottom,
+                    new int[] { Color.argb(0, 255, 255, 255), Color.argb(88, 255, 255, 255), Color.argb(0, 255, 255, 255) },
+                    new float[] {0f, .50f, 1f}, Shader.TileMode.CLAMP));
+            canvas.drawRoundRect(box, radius, radius, p);
+            p.setShader(null);
+        }
+
+        private void drawPremiumLoadingPill(Canvas canvas, String label, float cx, float cy, float width, float height,
+                                            int fillColor, int strokeColor, int textColor, float textSize) {
+            RectF pill = new RectF(cx - width / 2f, cy - height / 2f, cx + width / 2f, cy + height / 2f);
+            p.setStyle(Paint.Style.FILL);
+            p.setShader(new LinearGradient(pill.left, pill.top, pill.right, pill.bottom,
+                    new int[] { fillColor, Color.argb(Math.min(255, Color.alpha(fillColor) + 20), 255, 255, 255), fillColor },
+                    new float[] { 0f, 0.50f, 1f }, Shader.TileMode.CLAMP));
+            canvas.drawRoundRect(pill, height / 2f, height / 2f, p);
+            p.setShader(null);
+            stroke.setStyle(Paint.Style.STROKE);
+            stroke.setStrokeWidth(dp(1f));
+            stroke.setColor(strokeColor);
+            canvas.drawRoundRect(pill, height / 2f, height / 2f, stroke);
+            drawPremiumLoadingText(canvas, label, cx, cy + textSize * 0.36f, width - dp(18), textSize, textColor, true, Paint.Align.CENTER, 0.10f);
+        }
+
+        private void drawPremiumLoadingOrb(Canvas canvas, Bitmap logo, String fallback, float cx, float cy, float rr, int color) {
+            int hot = mixColor(Color.WHITE, color, 0.25f);
+            p.setStyle(Paint.Style.FILL);
+            p.setShader(new RadialGradient(cx, cy, rr + dp(22),
+                    new int[] { Color.argb(170, Color.red(color), Color.green(color), Color.blue(color)), Color.argb(54, Color.red(color), Color.green(color), Color.blue(color)), Color.TRANSPARENT },
+                    new float[] {0f, .62f, 1f}, Shader.TileMode.CLAMP));
+            canvas.drawCircle(cx, cy, rr + dp(22), p);
+            p.setShader(null);
+
+            p.setColor(Color.rgb(4, 8, 16));
+            canvas.drawCircle(cx, cy, rr + dp(5), p);
+            stroke.setStyle(Paint.Style.STROKE);
+            stroke.setStrokeCap(Paint.Cap.ROUND);
+            stroke.setStrokeWidth(dp(7.4f));
+            stroke.setShader(new LinearGradient(cx - rr, cy - rr, cx + rr, cy + rr,
+                    new int[] { hot, color, mixColor(color, Color.WHITE, 0.08f) },
+                    null, Shader.TileMode.CLAMP));
+            stroke.setShadowLayer(dp(15), 0, 0, Color.argb(218, Color.red(color), Color.green(color), Color.blue(color)));
+            canvas.drawCircle(cx, cy, rr + dp(2), stroke);
+            stroke.clearShadowLayer();
+            stroke.setShader(null);
+
+            p.setStyle(Paint.Style.FILL);
+            p.setShader(new RadialGradient(cx, cy, rr,
+                    new int[] { Color.argb(116, Color.red(color), Color.green(color), Color.blue(color)), Color.argb(38, Color.red(color), Color.green(color), Color.blue(color)), Color.rgb(5, 8, 15) },
+                    new float[] {0f, .58f, 1f}, Shader.TileMode.CLAMP));
+            canvas.drawCircle(cx, cy, rr - dp(3), p);
+            p.setShader(null);
+
+            if (logo != null) {
+                p.setAlpha(242);
+                drawBitmapFitCenter(canvas, logo, new RectF(cx - rr * .58f, cy - rr * .58f, cx + rr * .58f, cy + rr * .58f), false, 0);
+                p.setAlpha(255);
+            } else {
+                drawPremiumLoadingText(canvas, fallback, cx, cy + dp(11), rr * 1.45f, dp(30), Color.WHITE, true, Paint.Align.CENTER, 0.04f);
+            }
+        }
+
+        private void drawPremiumLoadingBeam(Canvas canvas, float x1, float y1, float x2, float y2, int color, boolean left) {
+            int hot = mixColor(Color.WHITE, color, 0.10f);
+            stroke.setStyle(Paint.Style.STROKE);
+            stroke.setStrokeCap(Paint.Cap.ROUND);
+            stroke.setStrokeWidth(dp(18));
+            stroke.setShader(new LinearGradient(x1, y1, x2, y2,
+                    left ? new int[] { Color.TRANSPARENT, Color.argb(186, Color.red(color), Color.green(color), Color.blue(color)), Color.argb(70, Color.red(hot), Color.green(hot), Color.blue(hot)) }
+                            : new int[] { Color.argb(70, Color.red(hot), Color.green(hot), Color.blue(hot)), Color.argb(186, Color.red(color), Color.green(color), Color.blue(color)), Color.TRANSPARENT },
+                    null, Shader.TileMode.CLAMP));
+            stroke.setShadowLayer(dp(18), 0, 0, Color.argb(190, Color.red(color), Color.green(color), Color.blue(color)));
+            canvas.drawLine(x1, y1, x2, y2, stroke);
+            stroke.clearShadowLayer();
+            stroke.setShader(null);
+        }
+
+        private void drawPremiumLoadingVs(Canvas canvas, float cx, float cy, float rr, int leftColor, int rightColor, int blend) {
+            p.setStyle(Paint.Style.FILL);
+            p.setShader(new RadialGradient(cx, cy, rr * 1.95f,
+                    new int[] { Color.argb(120, Color.red(blend), Color.green(blend), Color.blue(blend)), Color.argb(36, 255, 255, 255), Color.TRANSPARENT },
+                    new float[] {0f, .45f, 1f}, Shader.TileMode.CLAMP));
+            canvas.drawCircle(cx, cy, rr * 1.65f, p);
+            p.setShader(new LinearGradient(cx - rr, cy, cx + rr, cy,
+                    new int[] { mixColor(leftColor, Color.rgb(4, 8, 16), 0.42f), mixColor(blend, Color.rgb(6, 10, 18), 0.34f), mixColor(rightColor, Color.rgb(4, 8, 16), 0.42f) },
+                    null, Shader.TileMode.CLAMP));
+            canvas.drawCircle(cx, cy, rr, p);
+            p.setShader(null);
+            stroke.setStyle(Paint.Style.STROKE);
+            stroke.setStrokeWidth(dp(3.0f));
+            stroke.setShader(new LinearGradient(cx - rr, cy, cx + rr, cy, new int[] { leftColor, Color.WHITE, rightColor }, null, Shader.TileMode.CLAMP));
+            stroke.setShadowLayer(dp(12), 0, 0, Color.argb(180, Color.red(blend), Color.green(blend), Color.blue(blend)));
+            canvas.drawCircle(cx, cy, rr + dp(4), stroke);
+            stroke.clearShadowLayer();
+            stroke.setShader(null);
+            drawPremiumLoadingText(canvas, "VS", cx, cy + dp(5), rr * 1.4f, dp(13), Color.WHITE, true, Paint.Align.CENTER, 0.10f);
+        }
+
+        private void drawPremiumLoadingNameBlock(Canvas canvas, String top, String main, String bottom, float cx, float y, int color) {
+            drawPremiumLoadingText(canvas, top, cx, y, dp(150), dp(12), Color.rgb(214, 224, 240), true, Paint.Align.CENTER, 0.18f);
+            drawPremiumLoadingText(canvas, main, cx, y + dp(26), dp(174), dp(24), Color.WHITE, true, Paint.Align.CENTER, 0.05f);
+            drawPremiumLoadingText(canvas, bottom, cx, y + dp(49), dp(130), dp(10), softColor(color, 0.08f), true, Paint.Align.CENTER, 0.18f);
+        }
+
+        private void drawPremiumLoadingSparkDot(Canvas canvas, float x, float y, int color, float strength) {
+            int hot = mixColor(Color.WHITE, color, 0.14f);
+            p.setStyle(Paint.Style.FILL);
+            p.setShader(new RadialGradient(x, y, dp(15 + 8 * strength),
+                    new int[] {
+                            Color.argb((int)(168 + 52 * strength), Color.red(color), Color.green(color), Color.blue(color)),
+                            Color.argb((int)(58 + 40 * strength), Color.red(color), Color.green(color), Color.blue(color)),
+                            Color.TRANSPARENT
+                    },
+                    new float[] {0f, .42f, 1f}, Shader.TileMode.CLAMP));
+            canvas.drawCircle(x, y, dp(15 + 8 * strength), p);
+            p.setShader(null);
+            p.setColor(Color.rgb(6, 10, 18));
+            canvas.drawCircle(x, y, dp(5.7f), p);
+            p.setColor(hot);
+            canvas.drawCircle(x, y, dp(3.9f), p);
+            p.setColor(Color.WHITE);
+            canvas.drawCircle(x - dp(1.0f), y - dp(1.0f), dp(1.05f), p);
+        }
+
+        private void drawPremiumLoadingWatermark(Canvas canvas, String txt, float x, float y, int color, Paint.Align align) {
+            String t = safe(txt);
+            if (t.length() > 4) t = t.substring(0, Math.min(4, t.length()));
+            if (t.isEmpty()) return;
+            p.setShader(null);
+            p.setStyle(Paint.Style.FILL);
+            p.setColor(Color.argb(18, Color.red(color), Color.green(color), Color.blue(color)));
+            p.setTypeface(Typeface.DEFAULT_BOLD);
+            p.setTextSize(dp(62));
+            p.setTextAlign(align);
+            canvas.drawText(t, x, y, p);
+        }
+
+        private void drawPremiumLoadingText(Canvas canvas, String txt, float x, float y, float maxW, float size, int color, boolean bold, Paint.Align align, float letterSpacing) {
+            if (txt == null) txt = "";
+            p.setShader(null);
+            p.setStyle(Paint.Style.FILL);
+            p.setColor(color);
+            p.setTypeface(bold ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+            p.setTextAlign(align);
+            p.setLetterSpacing(letterSpacing);
+            float textSize = size;
+            p.setTextSize(textSize);
+            while (p.measureText(txt) > maxW && textSize > dp(6.5f)) {
+                textSize -= dp(0.65f);
+                p.setTextSize(textSize);
+            }
+            canvas.drawText(txt, x, y, p);
+            p.setLetterSpacing(0f);
+        }
+
+        private String currentPremiumLoadingStep() {
+            int idx = Math.min(loadingSteps.length - 1, (int) ((shimmerPhase * loadingSteps.length)) % loadingSteps.length);
+            return loadingSteps[idx];
+        }
+
+        private String roleLabelForLoading(StatScope scope) {
+            if (scope == StatScope.HIT_ONLY) return "hitting";
+            if (scope == StatScope.PITCH_ONLY) return "pitching";
+            return "hitting + pitching";
+        }
+
+        private String shortNameForLoading(String full, boolean firstPart) {
+            String s = safe(full).trim();
+            if (s.isEmpty()) return firstPart ? "" : "PLAYER";
+            int sp = s.lastIndexOf(' ');
+            if (sp <= 0) return firstPart ? "" : s;
+            return firstPart ? s.substring(0, sp) : s.substring(sp + 1);
+        }
+
+        private String cityPartForLoading(String full) {
+            String s = safe(full).trim();
+            int sp = s.lastIndexOf(' ');
+            return (sp > 0 ? s.substring(0, sp) : s).toUpperCase(Locale.US);
+        }
+
+        private String mascotPartForLoading(String full, String fallback) {
+            String s = safe(full).trim();
+            int sp = s.lastIndexOf(' ');
+            String out = sp > 0 ? s.substring(sp + 1) : safe(fallback);
+            if (out.isEmpty()) out = "TEAM";
+            return out.toUpperCase(Locale.US);
         }
     }
 
