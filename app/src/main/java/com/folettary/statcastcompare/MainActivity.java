@@ -685,7 +685,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v201", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v203", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -16703,16 +16703,26 @@ private View liveGameCard(LiveGame game) {
     private void renderBullpenLoading(LiveGame game) {
         if (standingsBox == null) return;
         standingsBox.removeAllViews();
+        Team away = game == null ? null : teamForLiveGame(game.awayTeamId, game.awayName, game.awayAbbr);
+        Team home = game == null ? null : teamForLiveGame(game.homeTeamId, game.homeName, game.homeAbbr);
+        TeamPalette awayPalette = away == null ? paletteForAbbr(game == null ? "" : game.awayAbbr) : paletteForTeam(away);
+        TeamPalette homePalette = home == null ? paletteForAbbr(game == null ? "" : game.homeAbbr) : paletteForTeam(home);
+        int awayColor = readableTeamColor(awayPalette.primary, awayPalette.secondary, true);
+        int homeColor = readableTeamColor(homePalette.primary, homePalette.secondary, true);
+
         LinearLayout panel = bullpenPanelShell(game);
-        TextView title = text("BULLPEN INTELLIGENCE", 18, Color.WHITE, true);
-        title.setGravity(Gravity.CENTER);
-        title.setPadding(0, dp(6), 0, 0);
-        panel.addView(title, matchWrap());
-        TextView sub = text("Building appearance-level bullpen quality and recent availability…", 12, Color.rgb(190, 207, 229), false);
+        BullpenLoadingHeroView loadingView = new BullpenLoadingHeroView(this, game, awayColor, homeColor);
+        LinearLayout.LayoutParams heroLp = matchWrap();
+        heroLp.setMargins(0, dp(6), 0, dp(2));
+        panel.addView(loadingView, heroLp);
+
+        TextView sub = text("Reviewing recent relief usage, bullpen quality, and tonight's freshness…", 11, Color.rgb(190, 207, 229), false);
         sub.setGravity(Gravity.CENTER);
-        sub.setPadding(0, dp(8), 0, dp(10));
+        sub.setPadding(dp(12), dp(4), dp(12), dp(6));
         panel.addView(sub, matchWrap());
+
         standingsBox.addView(panel, matchWrap());
+        focusBullpenPanel(true, 52);
     }
 
     private void renderBullpenError(LiveGame game, String message) {
@@ -16794,12 +16804,7 @@ private View liveGameCard(LiveGame game) {
 
 
         standingsBox.addView(panel, matchWrap());
-        if (mainScroll != null) {
-            mainScroll.post(() -> {
-                int targetY = Math.max(0, standingsBox.getTop() - dp(8));
-                mainScroll.smoothScrollTo(0, targetY);
-            });
-        }
+        focusBullpenPanel(false, 34);
     }
 
 
@@ -16808,6 +16813,15 @@ private View liveGameCard(LiveGame game) {
 
 
 
+
+    private void focusBullpenPanel(boolean immediate, int offsetDp) {
+        if (mainScroll == null || standingsBox == null) return;
+        mainScroll.post(() -> {
+            int targetY = Math.max(0, standingsBox.getTop() + dp(offsetDp));
+            if (immediate) mainScroll.scrollTo(0, targetY);
+            else mainScroll.smoothScrollTo(0, targetY);
+        });
+    }
 
     private LinearLayout bullpenEdgeHeroCards(BullpenReport away, BullpenReport home, int awayColor, int homeColor) {
         LinearLayout wrap = new LinearLayout(this);
@@ -17803,6 +17817,528 @@ private View liveGameCard(LiveGame game) {
 
         private String freshnessSecondary(BullpenReport r) {
             return r == null ? "" : "staff · " + r.b2bArms + " B2B";
+        }
+    }
+
+
+
+    class BullpenLoadingHeroView extends View {
+        final LiveGame game;
+        final int awayColor;
+        final int homeColor;
+        final String awayAbbr;
+        final String homeAbbr;
+        final String awayName;
+        final String homeName;
+        final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG);
+        final Paint stroke = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG);
+        Bitmap awayLogo;
+        Bitmap homeLogo;
+        ValueAnimator shimmerAnim;
+        float shimmerPhase = 0f;
+
+        BullpenLoadingHeroView(Context context, LiveGame game, int awayColor, int homeColor) {
+            super(context);
+            this.game = game;
+            this.awayColor = boostNeonColor(awayColor, 1.10f, 1.06f);
+            this.homeColor = boostNeonColor(homeColor, 1.10f, 1.06f);
+            this.awayAbbr = game == null ? "AWAY" : displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr);
+            this.homeAbbr = game == null ? "HOME" : displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr);
+            this.awayName = game == null ? "Away Team" : safe(game.awayName);
+            this.homeName = game == null ? "Home Team" : safe(game.homeName);
+            setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+            Team awayTeam = game == null ? null : teamForLiveGame(game.awayTeamId, game.awayName, game.awayAbbr);
+            Team homeTeam = game == null ? null : teamForLiveGame(game.homeTeamId, game.homeName, game.homeAbbr);
+            if (awayTeam != null) loadTeamLogoBitmap(awayTeam, b -> { awayLogo = b; invalidate(); });
+            if (homeTeam != null) loadTeamLogoBitmap(homeTeam, b -> { homeLogo = b; invalidate(); });
+        }
+
+        @Override protected void onAttachedToWindow() {
+            super.onAttachedToWindow();
+            if (shimmerAnim == null) {
+                shimmerAnim = ValueAnimator.ofFloat(0f, 1f);
+                shimmerAnim.setDuration(1900);
+                shimmerAnim.setRepeatCount(ValueAnimator.INFINITE);
+                shimmerAnim.setInterpolator(new LinearInterpolator());
+                shimmerAnim.addUpdateListener(a -> {
+                    shimmerPhase = (float) a.getAnimatedValue();
+                    invalidate();
+                });
+                shimmerAnim.start();
+            }
+        }
+
+        @Override protected void onDetachedFromWindow() {
+            super.onDetachedFromWindow();
+            if (shimmerAnim != null) {
+                shimmerAnim.cancel();
+                shimmerAnim = null;
+            }
+        }
+
+        @Override protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+            int w = MeasureSpec.getSize(widthMeasureSpec);
+            if (w <= 0) w = dp(360);
+            int h = Math.max(dp(720), Math.round(w * 1.76f));
+            setMeasuredDimension(w, h);
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            float w = getWidth();
+            float h = getHeight();
+            if (w <= dp(120) || h <= dp(240)) return;
+
+            float pad = dp(4);
+            RectF card = new RectF(pad, pad, w - pad, h - pad);
+            float radius = dp(30);
+            int blend = mixColor(awayColor, homeColor, 0.50f);
+
+            p.setStyle(Paint.Style.FILL);
+            p.setShader(new LinearGradient(card.left, card.top, card.right, card.bottom,
+                    new int[] {
+                            mixColor(awayColor, Color.rgb(2, 4, 9), 0.42f),
+                            mixColor(awayColor, Color.rgb(4, 7, 13), 0.78f),
+                            Color.rgb(5, 8, 15),
+                            mixColor(homeColor, Color.rgb(4, 7, 13), 0.78f),
+                            mixColor(homeColor, Color.rgb(2, 4, 9), 0.42f)
+                    },
+                    new float[] {0f, .23f, .50f, .77f, 1f},
+                    Shader.TileMode.CLAMP));
+            p.setShadowLayer(dp(10), 0, dp(5), Color.argb(46, 0, 0, 0));
+            canvas.drawRoundRect(card, radius, radius, p);
+            p.clearShadowLayer();
+            p.setShader(null);
+
+            int save = canvas.save();
+            Path clip = new Path();
+            clip.addRoundRect(card, radius, radius, Path.Direction.CW);
+            canvas.clipPath(clip);
+
+            drawAtmosphere(canvas, card, blend);
+            drawHeader(canvas, card);
+
+            float orbR = Math.min(dp(68), w * 0.18f);
+            float orbY = card.top + dp(142);
+            float leftCx = card.left + w * 0.25f;
+            float rightCx = card.right - w * 0.25f;
+            float vsCx = card.centerX();
+            float vsCy = orbY;
+
+            drawBattleBeam(canvas, leftCx + orbR - dp(2), orbY, vsCx - dp(24), vsCy, awayColor, true);
+            drawBattleBeam(canvas, rightCx - orbR + dp(2), orbY, vsCx + dp(24), vsCy, homeColor, false);
+            drawLogoOrb(canvas, awayLogo, awayAbbr, leftCx, orbY, orbR, awayColor);
+            drawLogoOrb(canvas, homeLogo, homeAbbr, rightCx, orbY, orbR, homeColor);
+            drawVsBadge(canvas, vsCx, vsCy, dp(28), awayColor, homeColor, blend);
+
+            drawTeamIdentity(canvas, cityPart(awayName), mascotPart(awayName, awayAbbr), leftCx, orbY + orbR + dp(33), awayColor);
+            drawTeamIdentity(canvas, cityPart(homeName), mascotPart(homeName, homeAbbr), rightCx, orbY + orbR + dp(33), homeColor);
+
+            RectF score = new RectF(card.left + dp(22), card.top + dp(314), card.right - dp(22), card.top + dp(432));
+            drawLoadingScoreBlock(canvas, score);
+
+            float keyY = score.bottom + dp(34);
+            drawFactorTitle(canvas, card.left + dp(24), keyY);
+            RectF panel = new RectF(card.left + dp(16), keyY + dp(20), card.right - dp(16), card.bottom - dp(18));
+            drawLoadingFactorsPanel(canvas, panel);
+
+            canvas.restoreToCount(save);
+
+            stroke.setShader(null);
+            stroke.setStyle(Paint.Style.STROKE);
+            stroke.setStrokeWidth(dp(1));
+            stroke.setColor(Color.argb(82, 255, 255, 255));
+            canvas.drawRoundRect(card, radius, radius, stroke);
+        }
+
+        private void drawAtmosphere(Canvas canvas, RectF card, int blend) {
+            RectF left = new RectF(card.left, card.top, card.centerX(), card.bottom);
+            RectF right = new RectF(card.centerX(), card.top, card.right, card.bottom);
+
+            p.setStyle(Paint.Style.FILL);
+            p.setShader(new RadialGradient(left.centerX(), card.top + dp(144), left.width() * 0.72f,
+                    new int[] { Color.argb(138, Color.red(awayColor), Color.green(awayColor), Color.blue(awayColor)), Color.argb(30, Color.red(awayColor), Color.green(awayColor), Color.blue(awayColor)), Color.TRANSPARENT },
+                    new float[] {0f, .42f, 1f}, Shader.TileMode.CLAMP));
+            canvas.drawCircle(left.centerX(), card.top + dp(144), left.width() * 0.72f, p);
+            p.setShader(new RadialGradient(right.centerX(), card.top + dp(144), right.width() * 0.72f,
+                    new int[] { Color.argb(138, Color.red(homeColor), Color.green(homeColor), Color.blue(homeColor)), Color.argb(30, Color.red(homeColor), Color.green(homeColor), Color.blue(homeColor)), Color.TRANSPARENT },
+                    new float[] {0f, .42f, 1f}, Shader.TileMode.CLAMP));
+            canvas.drawCircle(right.centerX(), card.top + dp(144), right.width() * 0.72f, p);
+            p.setShader(null);
+
+            if (awayLogo != null) {
+                p.setAlpha(24);
+                drawBitmapFitCenter(canvas, awayLogo, new RectF(card.left + dp(18), card.top + dp(20), card.left + dp(160), card.top + dp(162)), false, 0);
+                p.setAlpha(255);
+            } else {
+                drawWatermark(canvas, awayAbbr, card.left + dp(28), card.top + dp(76), awayColor, Paint.Align.LEFT);
+            }
+            if (homeLogo != null) {
+                p.setAlpha(24);
+                drawBitmapFitCenter(canvas, homeLogo, new RectF(card.right - dp(160), card.top + dp(20), card.right - dp(18), card.top + dp(162)), false, 0);
+                p.setAlpha(255);
+            } else {
+                drawWatermark(canvas, homeAbbr, card.right - dp(28), card.top + dp(76), homeColor, Paint.Align.RIGHT);
+            }
+
+            p.setShader(new LinearGradient(card.centerX() - dp(24), card.top, card.centerX() + dp(24), card.bottom,
+                    new int[] { Color.TRANSPARENT, Color.argb(34, 255, 255, 255), Color.TRANSPARENT },
+                    new float[] {0f, .50f, 1f}, Shader.TileMode.CLAMP));
+            canvas.drawRect(card.centerX() - dp(1.2f), card.top + dp(50), card.centerX() + dp(1.2f), card.bottom - dp(26), p);
+            p.setShader(null);
+
+            p.setShader(new RadialGradient(card.centerX(), card.centerY(), card.width() * .74f,
+                    new int[] { Color.TRANSPARENT, Color.argb(14, 0, 0, 0), Color.argb(102, 0, 0, 0) },
+                    new float[] {0f, .56f, 1f}, Shader.TileMode.CLAMP));
+            canvas.drawRect(card, p);
+            p.setShader(null);
+        }
+
+        private void drawHeader(Canvas canvas, RectF card) {
+            drawTextFit(canvas, "2026 STATCAST MATCHUP", card.centerX(), card.top + dp(29), card.width() - dp(72), dp(10), Color.rgb(204, 215, 230), true, Paint.Align.CENTER, 0.12f);
+            drawHeroPill(canvas, "BULLPEN INTELLIGENCE", card.centerX(), card.top + dp(54), Math.min(card.width() - dp(70), dp(214)), dp(25),
+                    Color.argb(38, 255, 255, 255), Color.argb(78, 255, 255, 255), Color.rgb(220, 230, 244), dp(9));
+            drawTextFit(canvas, currentLoadingStep(), card.centerX(), card.top + dp(83), card.width() - dp(52), dp(9), Color.rgb(186, 204, 228), true, Paint.Align.CENTER, 0.10f);
+            drawTextFit(canvas, "Matchup type · bullpen", card.centerX(), card.top + dp(101), card.width() - dp(52), dp(8), Color.rgb(143, 162, 190), true, Paint.Align.CENTER, 0.12f);
+        }
+
+        private void drawTeamIdentity(Canvas canvas, String city, String mascot, float cx, float y, int color) {
+            drawTextFit(canvas, city, cx, y, dp(150), dp(12), Color.rgb(214, 224, 240), true, Paint.Align.CENTER, 0.18f);
+            drawTextFit(canvas, mascot, cx, y + dp(26), dp(174), dp(24), Color.WHITE, true, Paint.Align.CENTER, 0.05f);
+            drawTextFit(canvas, "BULLPEN", cx, y + dp(49), dp(120), dp(10), softColor(color, 0.08f), true, Paint.Align.CENTER, 0.18f);
+        }
+
+        private void drawLoadingScoreBlock(Canvas canvas, RectF score) {
+            p.setStyle(Paint.Style.FILL);
+            p.setShader(new LinearGradient(score.left, score.top, score.right, score.bottom,
+                    new int[] { Color.argb(226, 6, 10, 18), Color.argb(238, 12, 18, 30), Color.argb(218, 6, 10, 18) },
+                    null, Shader.TileMode.CLAMP));
+            canvas.drawRoundRect(score, dp(24), dp(24), p);
+            p.setShader(null);
+            stroke.setStyle(Paint.Style.STROKE);
+            stroke.setStrokeWidth(dp(1));
+            stroke.setColor(Color.argb(82, 255, 255, 255));
+            canvas.drawRoundRect(score, dp(24), dp(24), stroke);
+
+            drawTextFit(canvas, "BUILDING BULLPEN EDGE", score.centerX(), score.top + dp(23), score.width() - dp(40), dp(10), Color.rgb(214, 223, 236), true, Paint.Align.CENTER, 0.12f);
+            drawTextFit(canvas, "Quality and freshness are being scored live", score.centerX(), score.top + dp(41), score.width() - dp(44), dp(9), Color.rgb(173, 188, 209), false, Paint.Align.CENTER, 0.02f);
+
+            RectF leftPct = new RectF(score.centerX() - dp(124), score.top + dp(60), score.centerX() - dp(38), score.top + dp(88));
+            RectF rightPct = new RectF(score.centerX() + dp(38), score.top + dp(60), score.centerX() + dp(124), score.top + dp(88));
+            drawShimmerRect(canvas, leftPct, dp(12));
+            drawShimmerRect(canvas, rightPct, dp(12));
+            drawTextFit(canvas, "–", score.centerX(), score.top + dp(83), dp(28), dp(24), Color.rgb(226, 234, 244), true, Paint.Align.CENTER, 0f);
+
+            float railY = score.bottom - dp(23);
+            drawLoadingSparkRail(canvas, score.left + dp(28), score.right - dp(28), railY, mixColor(awayColor, homeColor, 0.50f));
+        }
+
+        private void drawFactorTitle(Canvas canvas, float x, float y) {
+            p.setStyle(Paint.Style.FILL);
+            p.setColor(Color.argb(58, 255, 255, 255));
+            canvas.drawCircle(x + dp(14), y - dp(6), dp(14), p);
+            stroke.setStyle(Paint.Style.STROKE);
+            stroke.setStrokeWidth(dp(3));
+            stroke.setStrokeCap(Paint.Cap.ROUND);
+            stroke.setColor(Color.WHITE);
+            float bx = x + dp(8), by = y - dp(11);
+            canvas.drawLine(bx, by + dp(9), bx, by + dp(15), stroke);
+            canvas.drawLine(bx + dp(6), by + dp(5), bx + dp(6), by + dp(15), stroke);
+            canvas.drawLine(bx + dp(12), by + dp(1), bx + dp(12), by + dp(15), stroke);
+            stroke.setStrokeCap(Paint.Cap.BUTT);
+            drawTextFit(canvas, "BULLPEN SCORING FACTORS", x + dp(36), y, dp(250), dp(11), Color.rgb(228, 235, 245), true, Paint.Align.LEFT, 0.10f);
+        }
+
+        private void drawLoadingFactorsPanel(Canvas canvas, RectF panel) {
+            p.setStyle(Paint.Style.FILL);
+            p.setShader(new LinearGradient(panel.left, panel.top, panel.right, panel.bottom,
+                    new int[] { Color.argb(178, 6, 12, 22), Color.argb(164, 8, 18, 34), Color.argb(184, 5, 14, 28) },
+                    null, Shader.TileMode.CLAMP));
+            p.setShadowLayer(dp(8), 0, dp(4), Color.argb(55, 0, 0, 0));
+            canvas.drawRoundRect(panel, dp(16), dp(16), p);
+            p.clearShadowLayer();
+            p.setShader(null);
+            stroke.setStyle(Paint.Style.STROKE);
+            stroke.setStrokeWidth(dp(1));
+            stroke.setColor(Color.argb(58, 255, 255, 255));
+            canvas.drawRoundRect(panel, dp(16), dp(16), stroke);
+
+            float top = panel.top + dp(22);
+            drawSectionHeader(canvas, panel, top, "QUALITY · LOADING");
+            top += dp(18);
+            drawLoadingMetricRow(canvas, panel, top, "Quality Score", awayColor, homeColor);
+            top += dp(42);
+            drawLoadingMetricRow(canvas, panel, top, "ERA", awayColor, homeColor);
+            top += dp(42);
+            drawLoadingMetricRow(canvas, panel, top, "WHIP", awayColor, homeColor);
+            top += dp(44);
+            drawSectionHeader(canvas, panel, top, "FRESHNESS · LOADING");
+            top += dp(18);
+            drawLoadingMetricRow(canvas, panel, top, "Freshness Score", awayColor, homeColor);
+            top += dp(42);
+            drawLoadingMetricRow(canvas, panel, top, "IP Last 2d", awayColor, homeColor);
+            top += dp(42);
+            drawLoadingMetricRow(canvas, panel, top, "Watch Arms", awayColor, homeColor);
+        }
+
+        private void drawSectionHeader(Canvas canvas, RectF panel, float y, String label) {
+            float textW = dp(132);
+            stroke.setStyle(Paint.Style.STROKE);
+            stroke.setStrokeWidth(dp(1));
+            stroke.setColor(Color.argb(46, 255, 255, 255));
+            canvas.drawLine(panel.left + dp(16), y, panel.centerX() - textW / 2f - dp(8), y, stroke);
+            canvas.drawLine(panel.centerX() + textW / 2f + dp(8), y, panel.right - dp(16), y, stroke);
+            drawTextFit(canvas, label, panel.centerX(), y + dp(4), textW, dp(9), Color.rgb(212, 221, 234), true, Paint.Align.CENTER, 0.11f);
+        }
+
+        private void drawLoadingMetricRow(Canvas canvas, RectF panel, float y, String label, int leftColor, int rightColor) {
+            float rowTop = y - dp(18);
+            if (rowTop > panel.top + dp(24)) {
+                stroke.setStyle(Paint.Style.STROKE);
+                stroke.setStrokeWidth(dp(1));
+                stroke.setColor(Color.argb(26, 255, 255, 255));
+                canvas.drawLine(panel.left + dp(4), rowTop, panel.right - dp(4), rowTop, stroke);
+            }
+
+            RectF leftBox = new RectF(panel.left + dp(14), y - dp(11), panel.left + dp(76), y + dp(7));
+            RectF rightBox = new RectF(panel.right - dp(76), y - dp(11), panel.right - dp(14), y + dp(7));
+            drawShimmerRect(canvas, leftBox, dp(9));
+            drawShimmerRect(canvas, rightBox, dp(9));
+
+            drawTextFit(canvas, label, panel.centerX(), y - dp(1), dp(118), dp(11), Color.rgb(224, 232, 242), true, Paint.Align.CENTER, 0.04f);
+            drawLoadingSparkRail(canvas, panel.left + dp(102), panel.right - dp(102), y + dp(10), mixColor(leftColor, rightColor, 0.50f));
+        }
+
+        private void drawLoadingSparkRail(Canvas canvas, float left, float right, float y, int glowColor) {
+            float cx = (left + right) / 2f;
+            float ping = 0.5f + 0.34f * (float) Math.sin(shimmerPhase * Math.PI * 2f);
+            float sparkX = left + (right - left) * ping;
+            int leftBase = Color.argb(0, Color.red(awayColor), Color.green(awayColor), Color.blue(awayColor));
+            int leftWarm = Color.argb(70, Color.red(awayColor), Color.green(awayColor), Color.blue(awayColor));
+            int rightWarm = Color.argb(70, Color.red(homeColor), Color.green(homeColor), Color.blue(homeColor));
+            int rightBase = Color.argb(0, Color.red(homeColor), Color.green(homeColor), Color.blue(homeColor));
+
+            stroke.setStyle(Paint.Style.STROKE);
+            stroke.setStrokeCap(Paint.Cap.ROUND);
+            stroke.setStrokeWidth(dp(4.8f));
+            stroke.setShader(new LinearGradient(left, y, right, y,
+                    new int[] { leftBase, leftWarm, Color.argb(138, 244, 249, 255), rightWarm, rightBase },
+                    new float[] {0f, .20f, .50f, .80f, 1f}, Shader.TileMode.CLAMP));
+            canvas.drawLine(left, y, right, y, stroke);
+            stroke.setShader(null);
+
+            stroke.setStrokeWidth(dp(1.1f));
+            stroke.setColor(Color.argb(166, 235, 242, 250));
+            canvas.drawLine(cx, y - dp(11), cx, y + dp(11), stroke);
+
+            stroke.setStrokeWidth(dp(5.1f));
+            stroke.setShader(new LinearGradient(cx, y, sparkX, y,
+                    new int[] {
+                            Color.argb(92, Color.red(glowColor), Color.green(glowColor), Color.blue(glowColor)),
+                            Color.argb(162, Color.red(glowColor), Color.green(glowColor), Color.blue(glowColor)),
+                            Color.argb(226, Color.red(glowColor), Color.green(glowColor), Color.blue(glowColor))
+                    },
+                    new float[] {0f, .58f, 1f}, Shader.TileMode.CLAMP));
+            stroke.setShadowLayer(dp(4.2f), 0, 0, Color.argb(88, Color.red(glowColor), Color.green(glowColor), Color.blue(glowColor)));
+            canvas.drawLine(cx, y, sparkX, y, stroke);
+            stroke.clearShadowLayer();
+            stroke.setShader(null);
+
+            drawSparkDot(canvas, sparkX, y, glowColor, 0.42f);
+            stroke.setStrokeCap(Paint.Cap.BUTT);
+        }
+
+        private void drawShimmerRect(Canvas canvas, RectF box, float radius) {
+            p.setStyle(Paint.Style.FILL);
+            p.setColor(Color.argb(46, 255, 255, 255));
+            canvas.drawRoundRect(box, radius, radius, p);
+            float band = Math.max(dp(24), box.width() * 0.34f);
+            float center = box.left - band + (box.width() + band * 2f) * shimmerPhase;
+            p.setShader(new LinearGradient(center - band, box.top, center + band, box.bottom,
+                    new int[] { Color.argb(0, 255, 255, 255), Color.argb(88, 255, 255, 255), Color.argb(0, 255, 255, 255) },
+                    new float[] {0f, .50f, 1f}, Shader.TileMode.CLAMP));
+            canvas.drawRoundRect(box, radius, radius, p);
+            p.setShader(null);
+        }
+
+        private String currentLoadingStep() {
+            String[] steps = new String[] {
+                    "Checking recent relief usage...",
+                    "Scoring bullpen quality...",
+                    "Measuring freshness and strain...",
+                    "Finalizing bullpen edge..."
+            };
+            int idx = Math.min(steps.length - 1, (int) ((shimmerPhase * steps.length)) % steps.length);
+            return steps[idx];
+        }
+
+        private String cityPart(String full) {
+            String s = safe(full).trim();
+            int sp = s.lastIndexOf(' ');
+            return (sp > 0 ? s.substring(0, sp) : s).toUpperCase(Locale.US);
+        }
+
+        private String mascotPart(String full, String fallback) {
+            String s = safe(full).trim();
+            int sp = s.lastIndexOf(' ');
+            return (sp > 0 ? s.substring(sp + 1) : safe(fallback)).toUpperCase(Locale.US);
+        }
+
+        private void drawHeroPill(Canvas canvas, String label, float cx, float cy, float width, float height,
+                                  int fillColor, int strokeColor, int textColor, float textSize) {
+            RectF pill = new RectF(cx - width / 2f, cy - height / 2f, cx + width / 2f, cy + height / 2f);
+            p.setStyle(Paint.Style.FILL);
+            p.setShader(new LinearGradient(pill.left, pill.top, pill.right, pill.bottom,
+                    new int[] { fillColor, Color.argb(Math.min(255, Color.alpha(fillColor) + 20), 255, 255, 255), fillColor },
+                    new float[] { 0f, 0.50f, 1f },
+                    Shader.TileMode.CLAMP));
+            canvas.drawRoundRect(pill, height / 2f, height / 2f, p);
+            p.setShader(null);
+
+            stroke.setStyle(Paint.Style.STROKE);
+            stroke.setStrokeWidth(dp(1f));
+            stroke.setColor(strokeColor);
+            canvas.drawRoundRect(pill, height / 2f, height / 2f, stroke);
+
+            drawTextFit(canvas, label, cx, cy + textSize * 0.36f, width - dp(18), textSize, textColor, true, Paint.Align.CENTER, 0.10f);
+        }
+
+        private void drawLogoOrb(Canvas canvas, Bitmap logo, String fallback, float cx, float cy, float rr, int color) {
+            int hot = mixColor(Color.WHITE, color, 0.25f);
+            p.setStyle(Paint.Style.FILL);
+            p.setShader(new RadialGradient(cx, cy, rr + dp(22),
+                    new int[] { Color.argb(170, Color.red(color), Color.green(color), Color.blue(color)), Color.argb(54, Color.red(color), Color.green(color), Color.blue(color)), Color.TRANSPARENT },
+                    new float[] {0f, .62f, 1f}, Shader.TileMode.CLAMP));
+            canvas.drawCircle(cx, cy, rr + dp(22), p);
+            p.setShader(null);
+
+            p.setColor(Color.rgb(4, 8, 16));
+            canvas.drawCircle(cx, cy, rr + dp(5), p);
+            stroke.setStyle(Paint.Style.STROKE);
+            stroke.setStrokeCap(Paint.Cap.ROUND);
+            stroke.setStrokeWidth(dp(7.4f));
+            stroke.setShader(new LinearGradient(cx - rr, cy - rr, cx + rr, cy + rr,
+                    new int[] { hot, color, mixColor(color, Color.WHITE, 0.08f) },
+                    null, Shader.TileMode.CLAMP));
+            stroke.setShadowLayer(dp(15), 0, 0, Color.argb(218, Color.red(color), Color.green(color), Color.blue(color)));
+            canvas.drawCircle(cx, cy, rr + dp(2), stroke);
+            stroke.clearShadowLayer();
+            stroke.setShader(null);
+
+            p.setStyle(Paint.Style.FILL);
+            p.setShader(new RadialGradient(cx, cy, rr,
+                    new int[] { Color.argb(116, Color.red(color), Color.green(color), Color.blue(color)), Color.argb(38, Color.red(color), Color.green(color), Color.blue(color)), Color.rgb(5, 8, 15) },
+                    new float[] {0f, .58f, 1f}, Shader.TileMode.CLAMP));
+            canvas.drawCircle(cx, cy, rr - dp(3), p);
+            p.setShader(null);
+
+            if (logo != null) {
+                p.setAlpha(242);
+                drawBitmapFitCenter(canvas, logo, new RectF(cx - rr * .58f, cy - rr * .58f, cx + rr * .58f, cy + rr * .58f), false, 0);
+                p.setAlpha(255);
+            } else {
+                drawTextFit(canvas, fallback, cx, cy + dp(11), rr * 1.45f, dp(30), Color.WHITE, true, Paint.Align.CENTER, 0.04f);
+            }
+        }
+
+        private void drawBattleBeam(Canvas canvas, float x1, float y1, float x2, float y2, int color, boolean left) {
+            int hot = mixColor(Color.WHITE, color, 0.10f);
+            stroke.setStyle(Paint.Style.STROKE);
+            stroke.setStrokeCap(Paint.Cap.ROUND);
+            stroke.setStrokeWidth(dp(18));
+            stroke.setShader(new LinearGradient(x1, y1, x2, y2,
+                    left ? new int[] { Color.TRANSPARENT, Color.argb(186, Color.red(color), Color.green(color), Color.blue(color)), Color.argb(70, Color.red(hot), Color.green(hot), Color.blue(hot)) }
+                            : new int[] { Color.argb(70, Color.red(hot), Color.green(hot), Color.blue(hot)), Color.argb(186, Color.red(color), Color.green(color), Color.blue(color)), Color.TRANSPARENT },
+                    null, Shader.TileMode.CLAMP));
+            stroke.setShadowLayer(dp(18), 0, 0, Color.argb(190, Color.red(color), Color.green(color), Color.blue(color)));
+            canvas.drawLine(x1, y1, x2, y2, stroke);
+            stroke.clearShadowLayer();
+
+            stroke.setStrokeWidth(dp(3.0f));
+            stroke.setShader(null);
+            stroke.setColor(hot);
+            stroke.setShadowLayer(dp(8), 0, 0, Color.argb(180, Color.red(color), Color.green(color), Color.blue(color)));
+            Path bolt = new Path();
+            bolt.moveTo(x1, y1);
+            float dx = (x2 - x1) / 5f;
+            bolt.lineTo(x1 + dx, y1 - dp(4));
+            bolt.lineTo(x1 + dx * 2f, y1 + dp(3));
+            bolt.lineTo(x1 + dx * 3f, y1 - dp(3));
+            bolt.lineTo(x1 + dx * 4f, y1 + dp(4));
+            bolt.lineTo(x2, y2);
+            canvas.drawPath(bolt, stroke);
+            stroke.clearShadowLayer();
+            stroke.setShader(null);
+        }
+
+        private void drawVsBadge(Canvas canvas, float cx, float cy, float rr, int leftColor, int rightColor, int blend) {
+            p.setStyle(Paint.Style.FILL);
+            p.setShader(new RadialGradient(cx, cy, rr * 1.95f,
+                    new int[] { Color.argb(120, Color.red(blend), Color.green(blend), Color.blue(blend)), Color.argb(36, 255, 255, 255), Color.TRANSPARENT },
+                    new float[] {0f, .45f, 1f}, Shader.TileMode.CLAMP));
+            canvas.drawCircle(cx, cy, rr * 1.65f, p);
+            p.setShader(new LinearGradient(cx - rr, cy, cx + rr, cy,
+                    new int[] { mixColor(leftColor, Color.rgb(4, 8, 16), 0.42f), mixColor(blend, Color.rgb(6, 10, 18), 0.34f), mixColor(rightColor, Color.rgb(4, 8, 16), 0.42f) },
+                    null, Shader.TileMode.CLAMP));
+            canvas.drawCircle(cx, cy, rr, p);
+            p.setShader(null);
+            stroke.setStyle(Paint.Style.STROKE);
+            stroke.setStrokeWidth(dp(3.0f));
+            stroke.setShader(new LinearGradient(cx - rr, cy, cx + rr, cy, new int[] { leftColor, Color.WHITE, rightColor }, null, Shader.TileMode.CLAMP));
+            stroke.setShadowLayer(dp(12), 0, 0, Color.argb(180, Color.red(blend), Color.green(blend), Color.blue(blend)));
+            canvas.drawCircle(cx, cy, rr + dp(4), stroke);
+            stroke.clearShadowLayer();
+            stroke.setShader(null);
+            drawTextFit(canvas, "VS", cx, cy + dp(5), rr * 1.4f, dp(13), Color.WHITE, true, Paint.Align.CENTER, 0.10f);
+        }
+
+        private void drawSparkDot(Canvas canvas, float x, float y, int color, float strength) {
+            int hot = mixColor(Color.WHITE, color, 0.14f);
+            p.setStyle(Paint.Style.FILL);
+            p.setShader(new RadialGradient(x, y, dp(15 + 8 * strength),
+                    new int[] {
+                            Color.argb((int)(168 + 52 * strength), Color.red(color), Color.green(color), Color.blue(color)),
+                            Color.argb((int)(58 + 40 * strength), Color.red(color), Color.green(color), Color.blue(color)),
+                            Color.TRANSPARENT
+                    },
+                    new float[] {0f, .42f, 1f}, Shader.TileMode.CLAMP));
+            canvas.drawCircle(x, y, dp(15 + 8 * strength), p);
+            p.setShader(null);
+            p.setColor(Color.rgb(6, 10, 18));
+            canvas.drawCircle(x, y, dp(5.7f), p);
+            p.setColor(hot);
+            canvas.drawCircle(x, y, dp(3.9f), p);
+            p.setColor(Color.WHITE);
+            canvas.drawCircle(x - dp(1.0f), y - dp(1.0f), dp(1.05f), p);
+        }
+
+        private void drawWatermark(Canvas canvas, String txt, float x, float y, int color, Paint.Align align) {
+            if (txt == null || txt.isEmpty()) return;
+            p.setShader(null);
+            p.setStyle(Paint.Style.FILL);
+            p.setColor(Color.argb(18, Color.red(color), Color.green(color), Color.blue(color)));
+            p.setTypeface(Typeface.DEFAULT_BOLD);
+            p.setTextSize(dp(62));
+            p.setTextAlign(align);
+            canvas.drawText(txt, x, y, p);
+        }
+
+        private void drawTextFit(Canvas canvas, String txt, float x, float y, float maxW, float size, int color, boolean bold, Paint.Align align, float letterSpacing) {
+            if (txt == null) txt = "";
+            p.setShader(null);
+            p.setStyle(Paint.Style.FILL);
+            p.setColor(color);
+            p.setTypeface(bold ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+            p.setTextAlign(align);
+            p.setLetterSpacing(letterSpacing);
+            float textSize = size;
+            p.setTextSize(textSize);
+            while (p.measureText(txt) > maxW && textSize > dp(6.5f)) {
+                textSize -= dp(0.65f);
+                p.setTextSize(textSize);
+            }
+            canvas.drawText(txt, x, y, p);
+            p.setLetterSpacing(0f);
         }
     }
 
