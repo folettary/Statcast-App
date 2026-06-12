@@ -686,7 +686,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v219", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v220", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -9333,7 +9333,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 };
             }
             return new String[] {
-                    fmtStat(st.get("bpStaffIP"), 1) + " IP last 2d · " + fmtCount(st.get("bpB2B")) + " B2B",
+                    fmtStat(st.get("bpStaffIP"), 1) + " IP last 2 cal d · " + fmtCount(st.get("bpB2B")) + " true B2B",
                     fmtCount(st.get("bpFreshArms")) + " fresh · " + fmtCount(st.get("bpReadyArms")) + " ready · " + fmtCount(st.get("bpWatchArms")) + " watch"
             };
         }
@@ -17510,7 +17510,7 @@ private View liveGameCard(LiveGame game) {
         bullpenSectionTitle(panel, "FRESHNESS DETAILS", "");
         panel.addView(bullpenTeamSummaryRow(away, home, awayColor, homeColor), matchWrap());
 
-        bullpenSectionTitle(panel, "RELIEVER AVAILABILITY", "Last 5 days by arm");
+        bullpenSectionTitle(panel, "RELIEVER AVAILABILITY", "Calendar-day usage by arm");
         panel.addView(bullpenUsageMatrixCard(away, awayColor), matchWrap());
         LinearLayout.LayoutParams homeMatrixLp = matchWrap();
         homeMatrixLp.setMargins(0, dp(8), 0, 0);
@@ -17522,12 +17522,12 @@ private View liveGameCard(LiveGame game) {
         bullpenCompareRow(panel, "Follower", bullpenIpPitches(away.yesterdayBulkIp, away.yesterdayBulkPitches), bullpenIpPitches(home.yesterdayBulkIp, home.yesterdayBulkPitches), compareLower(away.yesterdayBulkIp, home.yesterdayBulkIp), awayColor, homeColor);
         bullpenCompareRow(panel, "Long relief", bullpenIpPitches(away.yesterdayLongIp, away.yesterdayLongPitches), bullpenIpPitches(home.yesterdayLongIp, home.yesterdayLongPitches), compareLower(away.yesterdayLongIp, home.yesterdayLongIp), awayColor, homeColor);
         bullpenCompareRow(panel, "Non-starter IP", bullpenIpPitches(away.yesterdayNonStarterIp(), away.yesterdayNonStarterPitches()), bullpenIpPitches(home.yesterdayNonStarterIp(), home.yesterdayNonStarterPitches()), compareLower(away.yesterdayNonStarterIp(), home.yesterdayNonStarterIp()), awayColor, homeColor);
-        bullpenSubsectionLabel(panel, "Prior 2 Days");
+        bullpenSubsectionLabel(panel, "Last 2 Calendar Days");
         bullpenCompareRow(panel, "Relievers", bullpenIpFmt(away.last2Ip), bullpenIpFmt(home.last2Ip), compareLower(away.last2Ip, home.last2Ip), awayColor, homeColor);
         bullpenCompareRow(panel, "Follower", bullpenIpFmt(away.last2BulkIp), bullpenIpFmt(home.last2BulkIp), compareLower(away.last2BulkIp, home.last2BulkIp), awayColor, homeColor);
         bullpenCompareRow(panel, "Long relief", bullpenIpFmt(away.last2LongIp), bullpenIpFmt(home.last2LongIp), compareLower(away.last2LongIp, home.last2LongIp), awayColor, homeColor);
         bullpenCompareRow(panel, "Non-starter IP", bullpenIpPitches(away.last2NonStarterIp(), away.last2NonStarterPitches()), bullpenIpPitches(home.last2NonStarterIp(), home.last2NonStarterPitches()), compareLower(away.last2NonStarterIp(), home.last2NonStarterIp()), awayColor, homeColor);
-        bullpenCompareRow(panel, "B2B relievers", String.valueOf(away.b2bArms), String.valueOf(home.b2bArms), compareLower(away.b2bArms, home.b2bArms), awayColor, homeColor);
+        bullpenCompareRow(panel, "True B2B relievers", String.valueOf(away.b2bArms), String.valueOf(home.b2bArms), compareLower(away.b2bArms, home.b2bArms), awayColor, homeColor);
         bullpenCompareRow(panel, "Freshness read", away.fatigueLabel(), home.fatigueLabel(), compareLower(away.fatiguePenalty(), home.fatiguePenalty()), awayColor, homeColor);
     }
 
@@ -17761,7 +17761,7 @@ private View liveGameCard(LiveGame game) {
         out.add(new Metric("bpKMinusBB", "K-BB %", "%", 1, true, "rate", "Bullpen", "pitch"));
         out.add(new Metric("bpSectionFreshness", "FRESHNESS · 30% OF EDGE", "", 0, null, "section", "Bullpen", "pitch"));
         out.add(new Metric("bpFreshnessScore", "Freshness Score", "", 0, true, "rate", "Bullpen", "pitch"));
-        out.add(new Metric("bpStaffIP", "IP Last 2d", "", 1, false, "rate", "Bullpen", "pitch"));
+        out.add(new Metric("bpStaffIP", "IP Last 2 Cal Days", "", 1, false, "rate", "Bullpen", "pitch"));
         out.add(new Metric("bpB2B", "B2B Arms", "", 0, false, "count", "Bullpen", "pitch"));
         out.add(new Metric("bpWatchArms", "Watch Arms", "", 0, false, "count", "Bullpen", "pitch"));
         return out;
@@ -18433,7 +18433,7 @@ private View liveGameCard(LiveGame game) {
         }
 
         private String freshnessSecondary(BullpenReport r) {
-            return r == null ? "" : "staff · " + r.b2bArms + " B2B";
+            return r == null ? "" : "staff · " + r.b2bArms + " true B2B";
         }
     }
 
@@ -20034,7 +20034,8 @@ private View liveGameCard(LiveGame game) {
             // now cached permanently (repeat opens read tiny local JSONs and only fetch games
             // completed since the last view), and first-time fetches run 8 wide. daysAgo is
             // recomputed from the game date at merge time so freshness stays correct no matter
-            // when the cache entry was written.
+            // when the cache entry was written. v220 keeps fatigue calendar-day based, so off days
+            // correctly reset B2B and pitch-count stress decays by actual days since usage.
             ExecutorService pool = Executors.newFixedThreadPool(8);
             ArrayList<Future<ArrayList<BullpenAppearanceRecord>>> futures = new ArrayList<>();
             for (int i = startIndex; i < games.size(); i++) {
@@ -22061,10 +22062,12 @@ private View liveGameCard(LiveGame game) {
             int three = 0;
             for (Set<Integer> days : pitcherDayOffsets.values()) {
                 if (days == null || days.isEmpty()) continue;
-                if ((days.contains(1) && days.contains(2)) || (days.contains(2) && days.contains(3)) || (days.contains(3) && days.contains(4))) b2b++;
+                // v220: true B2B is calendar fatigue: pitched yesterday AND the day before.
+                // Do not count "last two team games/appearances" if an off day sits between them.
+                if (days.contains(1) && days.contains(2)) b2b++;
                 int last4 = 0;
                 for (int d = 1; d <= 4; d++) if (days.contains(d)) last4++;
-                if (last4 >= 3) three++;
+                if (last4 >= 3 && (days.contains(1) || days.contains(2))) three++;
             }
             b2bArms = b2b;
             threeInFourArms = three;
@@ -22087,15 +22090,23 @@ private View liveGameCard(LiveGame game) {
         int last2NonStarterPitches() { return last2Pitches + last2BulkPitches + last2LongPitches; }
 
         double fatiguePenalty() {
-            return (yesterdayIp * 0.95d) + (twoDaysAgoIp * 0.62d) + (last2Ip * 0.45d)
-                    + (last2BulkIp * 0.25d) + (last2LongIp * 0.18d) + (b2bArms * 1.85d) + (threeInFourArms * 1.85d)
-                    + (usedYesterday * 0.42d) + (usedTwoDaysAgo * 0.28d) + (last2Pitches / 70.0d) + (last2BulkPitches / 125.0d) + (last2LongPitches / 160.0d);
+            // v220: calendar-day freshness model. Yesterday matters most; two days ago decays sharply;
+            // off days naturally lower the score because no day-1 usage is present.
+            return (yesterdayIp * 1.10d) + (twoDaysAgoIp * 0.35d)
+                    + (yesterdayBulkIp * 0.18d) + (twoDaysAgoBulkIp * 0.08d)
+                    + (yesterdayLongIp * 0.14d) + (twoDaysAgoLongIp * 0.06d)
+                    + (b2bArms * 2.25d) + (threeInFourArms * 1.35d)
+                    + (usedYesterday * 0.48d) + (usedTwoDaysAgo * 0.14d)
+                    + (yesterdayPitches / 55.0d) + (twoDaysAgoPitches / 155.0d)
+                    + (yesterdayBulkPitches / 150.0d) + (twoDaysAgoBulkPitches / 260.0d)
+                    + (yesterdayLongPitches / 180.0d) + (twoDaysAgoLongPitches / 300.0d);
         }
 
         String fatigueLabel() {
             double p = fatiguePenalty();
-            if (p >= 12.0d || b2bArms >= 4 || last2Ip >= 9.0d || last2Pitches >= 150) return "Heavy";
-            if (p >= 6.5d || b2bArms >= 2 || last2Ip >= 5.0d || usedYesterday >= 4 || usedTwoDaysAgo >= 4 || last2BulkIp >= 4.0d || last2LongIp >= 5.0d) return "Moderate";
+            if (p >= 10.5d || b2bArms >= 4 || yesterdayPitches >= 135 || yesterdayIp >= 7.5d) return "Heavy";
+            if (p >= 5.8d || b2bArms >= 2 || usedYesterday >= 4 || yesterdayIp >= 4.5d
+                    || (last2Pitches >= 125 && yesterdayPitches > 0)) return "Moderate";
             return "Rested";
         }
 
@@ -22125,16 +22136,31 @@ private View liveGameCard(LiveGame game) {
         int totalPitches(int first, int last) { int t = 0; for (int d = first; d <= last && d < pitchesByAgo.length; d++) t += pitchesByAgo[d]; return t; }
         int usedDays(int first, int last) { int n = 0; for (int d = first; d <= last && d < pitchesByAgo.length; d++) if (pitchesByAgo[d] > 0) n++; return n; }
         double totalIp(int first, int last) { double t = 0.0d; for (int d = first; d <= last && d < ipByAgo.length; d++) t += ipByAgo[d]; return t; }
-        boolean b2b() { return (pitchesByAgo[1] > 0 && pitchesByAgo[2] > 0) || (pitchesByAgo[2] > 0 && pitchesByAgo[3] > 0) || (pitchesByAgo[3] > 0 && pitchesByAgo[4] > 0); }
+        boolean b2b() { return pitchesByAgo[1] > 0 && pitchesByAgo[2] > 0; }
+        int lastPitchedDaysAgo() {
+            for (int d = 1; d < pitchesByAgo.length; d++) if (pitchesByAgo[d] > 0) return d;
+            return 99;
+        }
+        double calendarPitchLoad() {
+            return pitchesByAgo[1]
+                    + pitchesByAgo[2] * 0.45d
+                    + pitchesByAgo[3] * 0.20d
+                    + pitchesByAgo[4] * 0.10d
+                    + pitchesByAgo[5] * 0.05d;
+        }
         String status() {
             if ("Bulk".equals(role)) return "Follower";
             if ("Long".equals(role)) return "Long";
             int y = pitchesByAgo[1];
+            int d2 = pitchesByAgo[2];
             int total2 = totalPitches(1, 2);
             int days4 = usedDays(1, 4);
-            if (y >= 30 || total2 >= 45 || (b2b() && total2 >= 30) || days4 >= 3) return "Likely down";
-            if (y >= 20 || total2 >= 30 || b2b()) return "Watch";
-            if (total2 > 0) return "Ready";
+            int lastAgo = lastPitchedDaysAgo();
+            double load = calendarPitchLoad();
+
+            if (y >= 35 || (b2b() && total2 >= 35) || (days4 >= 3 && lastAgo <= 2)) return "Likely down";
+            if (y >= 24 || b2b() || load >= 32.0d || d2 >= 42) return "Watch";
+            if (lastAgo <= 2 || load >= 12.0d) return "Ready";
             return "Fresh";
         }
         String displayName() {
