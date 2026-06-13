@@ -709,7 +709,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v232", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v233", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -1666,9 +1666,29 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     rightWash.setBackground(rightG);
     shell.addView(rightWash, new FrameLayout.LayoutParams(-1, -1));
 
+    // v233: text overlaid on this shell (SEA @ WSH title, pitcher subtitle, game tile labels)
+    // was washing out against the bright team-color washes. The old centerGuard was a narrow
+    // vertical band that only backed the very middle, so wide titles spilled onto the bright
+    // wash. This is now a broad horizontal scrim spanning the tile so the entire text column
+    // has a dark backing, while the washes/logos to the sides keep their vibrancy.
+    View textScrim = new View(this);
+    GradientDrawable textScrimBg = new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
+            new int[] {
+                    Color.TRANSPARENT,
+                    Color.argb(featured ? 150 : 130, 4, 8, 15),
+                    Color.argb(featured ? 168 : 148, 4, 8, 15),
+                    Color.argb(featured ? 150 : 130, 4, 8, 15),
+                    Color.TRANSPARENT
+            });
+    textScrimBg.setCornerRadius(dp(28));
+    textScrim.setBackground(textScrimBg);
+    FrameLayout.LayoutParams scrimLp = new FrameLayout.LayoutParams(-1, dp(featured ? 90 : 56));
+    scrimLp.gravity = Gravity.CENTER;
+    shell.addView(textScrim, scrimLp);
+
     View centerGuard = new View(this);
     GradientDrawable centerGuardBg = new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-            new int[] { Color.TRANSPARENT, Color.argb(featured ? 186 : 168, 4, 8, 15), Color.TRANSPARENT });
+            new int[] { Color.TRANSPARENT, Color.argb(featured ? 150 : 134, 4, 8, 15), Color.TRANSPARENT });
     centerGuardBg.setCornerRadius(dp(28));
     centerGuard.setBackground(centerGuardBg);
     FrameLayout.LayoutParams guardLp = new FrameLayout.LayoutParams(dp(featured ? 134 : 96), -1);
@@ -8762,9 +8782,23 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
         private void drawVignette(Canvas canvas, RectF card) {
             paint.setStyle(Paint.Style.FILL);
+            // v233: THE fix for the washed-out text. The card's team-color atmosphere wash is
+            // brightest exactly where the city/name, the "WEIGHTED EDGE" eyebrow, and the stat
+            // labels sit — and the old vignette left that whole middle band TRANSPARENT, so
+            // bright text fought a bright tinted background and lost. Previous attempts to
+            // brighten the text or add per-glyph shadows couldn't win that bright-on-bright
+            // battle. This lays a gentle dark scrim across the text-bearing regions (it reads as
+            // depth, not a flat panel) so every text layer above it has real contrast, while the
+            // logos/orbs above and the score panel keep their vibrancy.
             paint.setShader(new LinearGradient(card.left, card.top, card.left, card.bottom,
-                    new int[] { Color.argb(18, 255, 255, 255), Color.TRANSPARENT, Color.argb(118, 0, 0, 0) },
-                    new float[] {0f, 0.42f, 1f}, Shader.TileMode.CLAMP));
+                    new int[] {
+                            Color.argb(18, 255, 255, 255),  // top sheen (over logos)
+                            Color.argb(120, 4, 8, 16),       // city/name band
+                            Color.argb(140, 4, 8, 16),       // eyebrow + score header band
+                            Color.argb(146, 4, 8, 16),       // stat-label body
+                            Color.argb(160, 0, 0, 0)         // bottom
+                    },
+                    new float[] {0f, 0.30f, 0.52f, 0.80f, 1f}, Shader.TileMode.CLAMP));
             canvas.drawRect(card, paint);
             paint.setShader(null);
         }
