@@ -717,7 +717,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v244", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v245", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -8415,7 +8415,9 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         header.addView(chevron);
         card.addView(header, matchWrap());
 
-        // Body — leader-centric: what's driving the leader's edge vs working against them.
+        // Body — lens-weighting view: what share of the decision each stat owns, which the glow
+        // bars on the card cannot show (the card glows by raw gap; the score is gap × lens
+        // weight). This is the part of the model the bars hide.
         final LinearLayout body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
         body.setVisibility(View.GONE);
@@ -8425,31 +8427,38 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         if (winner == 0) {
             body.addView(text("The stats balance out — no side has a meaningful edge in this lens.", 12, INK_DIM, false));
         } else {
-            // Split contributions by whether each stat helps or hurts the leader.
-            ArrayList<EdgeContribution> driving = new ArrayList<>();
-            ArrayList<EdgeContribution> against = new ArrayList<>();
-            for (EdgeContribution c : ranked) {
-                if (c.winner == 0 || c.share <= 0d) continue; // toss-ups don't drive either way
-                if (c.winner == winner) driving.add(c); else against.add(c);
-            }
             int leaderColor = winner < 0 ? (paletteA == null ? INK : paletteA.primary)
                     : (paletteB == null ? INK : paletteB.primary);
 
-            // Driving group
+            // Share of decision: each driver's weighted points toward the leader as a % of all
+            // weighted points that pushed the leader ahead.
+            double totalToward = 0d;
+            for (EdgeContribution c : ranked) if (c.winner == winner && c.share > 0d) totalToward += c.share;
+
+            ArrayList<EdgeContribution> driving = new ArrayList<>();
+            ArrayList<EdgeContribution> against = new ArrayList<>();
+            for (EdgeContribution c : ranked) {
+                if (c.winner == 0 || c.share <= 0d) continue;
+                if (c.winner == winner) driving.add(c); else against.add(c);
+            }
+
             TextView drivingHead = text("DRIVING THE " + winnerName.toUpperCase(Locale.US) + " EDGE", 10, INK_SOFT, true);
             drivingHead.setLetterSpacing(0.12f);
             body.addView(drivingHead);
+
+            HashSet<String> notedFamilies = new HashSet<>();
             int shown = 0;
             for (EdgeContribution c : driving) {
                 if (shown >= 4) break;
-                body.addView(whyEdgeRow(c, nameA, nameB, paletteA, paletteB, true, leaderColor));
+                int sharePct = totalToward > 0d ? (int) Math.round(100d * c.share / totalToward) : 0;
+                String note = whyEdgeNote(c, driving, notedFamilies);
+                body.addView(whyEdgeRow(c, nameA, nameB, sharePct, true, leaderColor, note));
                 shown++;
             }
             if (shown == 0) {
                 body.addView(text("No single stat stands out — the edge comes from small advantages across the board.", 12, INK_DIM, false));
             }
 
-            // Against group (only if there's something meaningful working against the leader)
             if (!against.isEmpty()) {
                 TextView againstHead = text("WORKING AGAINST " + winnerName.toUpperCase(Locale.US), 10, EYEBROW, true);
                 againstHead.setLetterSpacing(0.12f);
@@ -8459,13 +8468,13 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 int shownAgainst = 0;
                 for (EdgeContribution c : against) {
                     if (shownAgainst >= 3) break;
-                    body.addView(whyEdgeRow(c, nameA, nameB, paletteA, paletteB, false, leaderColor));
+                    body.addView(whyEdgeRow(c, nameA, nameB, -1, false, leaderColor, whyEdgeNote(c, against, notedFamilies)));
                     shownAgainst++;
                 }
             }
         }
         // Footnote: make the lens dependency explicit, since the answer changes per lens.
-        TextView foot = text("Ranked by impact on the score under the " + presetDisplayName(activeComparisonPreset, roleForScope(h.scope)) + " lens.", 11, EYEBROW, false);
+        TextView foot = text("Shares reflect each stat's weight in the " + presetDisplayName(activeComparisonPreset, roleForScope(h.scope)) + " lens — not just the size of the gap.", 11, EYEBROW, false);
         foot.setPadding(0, dp(10), 0, 0);
         body.addView(foot);
 
@@ -8484,24 +8493,43 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         headerBox.addView(card, cardLp);
     }
 
-    private LinearLayout whyEdgeRow(EdgeContribution c, String nameA, String nameB, TeamPalette paletteA, TeamPalette paletteB, boolean towardLeader, int leaderColor) {
+    // v245: a driver row in the lens-weighting view. sharePct >= 0 shows that stat's % of the
+    // decision (leading, since it's the number that exists nowhere else); sharePct < 0 hides it
+    // (used for the "working against" group, where a leader-share % would be meaningless).
+    private LinearLayout whyEdgeRow(EdgeContribution c, String nameA, String nameB, int sharePct,
+                                    boolean towardLeader, int leaderColor, String note) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(0, dp(5), 0, dp(5));
+        row.setPadding(0, dp(6), 0, dp(6));
 
-        // Left: stat label + the two values (winner of the stat shown first contextually).
+        // Leading share-of-decision chip (the headline number the glow bars can't convey).
+        if (sharePct >= 0) {
+            TextView pct = text(sharePct + "%", 15, towardLeader ? leaderColor : INK_DIM, true);
+            pct.setGravity(Gravity.CENTER);
+            pct.setMinWidth(dp(46));
+            row.addView(pct);
+        } else {
+            View spacer = new View(this);
+            row.addView(spacer, new LinearLayout.LayoutParams(dp(46), dp(1)));
+        }
+
+        // Middle: stat label, the two values, and (optionally) the insight note.
         LinearLayout labelCol = new LinearLayout(this);
         labelCol.setOrientation(LinearLayout.VERTICAL);
+        labelCol.setPadding(dp(4), 0, dp(8), 0);
         labelCol.addView(text(c.label, 13, INK, true));
-        // Values are always A vs B for consistency with the card above.
         TextView detail = text(nameA + " " + c.valueA + "  ·  " + nameB + " " + c.valueB, 11, INK_DIM, false);
         detail.setPadding(0, dp(1), 0, 0);
         labelCol.addView(detail);
+        if (note != null && !note.isEmpty()) {
+            TextView noteTv = text(note, 11, Color.rgb(244, 192, 54), false);
+            noteTv.setPadding(0, dp(2), 0, 0);
+            labelCol.addView(noteTv);
+        }
         row.addView(labelCol, new LinearLayout.LayoutParams(0, -2, 1));
 
-        // Right: a directional impact meter. Toward-leader stats use the leader's color and a
-        // solid bar; against-leader stats use a muted gray bar — so direction reads at a glance.
+        // Right: a small impact meter — leader-colored when helping, muted when pulling against.
         View meter = new View(this);
         double mag = Math.max(0.06d, Math.min(1d, c.share * 2.2d));
         GradientDrawable mb = new GradientDrawable();
@@ -8509,13 +8537,35 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         if (towardLeader) {
             mb.setColor(Color.argb(230, Color.red(leaderColor), Color.green(leaderColor), Color.blue(leaderColor)));
         } else {
-            mb.setColor(Color.argb(120, 150, 164, 188)); // muted: this one pulls against the leader
+            mb.setColor(Color.argb(120, 150, 164, 188));
         }
         meter.setBackground(mb);
-        LinearLayout.LayoutParams meterLp = new LinearLayout.LayoutParams(dp((int)(16 + 58 * mag)), dp(6));
-        meterLp.setMargins(dp(10), 0, 0, 0);
+        LinearLayout.LayoutParams meterLp = new LinearLayout.LayoutParams(dp((int)(16 + 48 * mag)), dp(6));
         row.addView(meter, meterLp);
         return row;
+    }
+
+    // v245: the insight line beneath a driver — the thing the glow bars actively hide. Two cases:
+    //  • glow/score disagreement: a big visible gap that the lens discounts (or vice-versa), and
+    //  • correlated families: several stats telling one story, weighted as one (emitted once).
+    private String whyEdgeNote(EdgeContribution c, ArrayList<EdgeContribution> group, HashSet<String> notedFamilies) {
+        // Correlated-family note takes priority and is emitted once per family.
+        if (c.family != null && !c.family.isEmpty() && !notedFamilies.contains(c.family)) {
+            int famCount = 0;
+            for (EdgeContribution g : group) if (c.family.equals(g.family)) famCount++;
+            if (famCount >= 2) {
+                notedFamilies.add(c.family);
+                return "part of the " + c.family + " story — weighted as one, not " + famCount;
+            }
+        }
+        // Glow/score disagreement: visualStrength is how big the gap looked; share is how much it
+        // actually moved the score. When a big gap barely counts (or a modest gap counts a lot),
+        // say so — that's exactly what the card can't show.
+        double look = Math.max(0d, Math.min(1d, c.visualStrength));
+        double move = Math.max(0d, Math.min(1d, c.share * 2.2d));
+        if (look >= 0.55d && move <= 0.30d) return "big gap, but counts less in this lens";
+        if (look <= 0.30d && move >= 0.45d) return "small gap, but weighted heavily here";
+        return "";
     }
 
     // v43: electric-energy polish - VS arcs and winner-side stat rail sparks.
@@ -10887,6 +10937,25 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         return 1d;
     }
 
+    // v245: correlated-stat families. When several scored stats restate the same underlying
+    // story (run margin, or the slash-line production family), the weighting deliberately
+    // discounts them so they don't multiply-count — the expander surfaces that so several
+    // glowing bars don't look like several independent pieces of evidence.
+    private String edgeFamilyForKey(String key) {
+        if (key == null) return "";
+        switch (key) {
+            case "teamWinPct": case "teamRunDiff": case "teamRPG": case "teamRAPG":
+            case "teamRunsScored": case "teamRunsAllowed":
+                return "run margin";
+            case "ops": case "obp": case "slg": case "wOBA": case "xwOBA":
+            case "teamOPS": case "teamWOBA": case "teamXWOBA":
+                return "overall production";
+            case "era": case "whip": case "teamERA": case "teamWHIP":
+                return "run prevention";
+            default: return "";
+        }
+    }
+
     private StatScoreSummary summarizeHeadToHeadEdges(HeadToHeadComparison h, ArrayList<Metric> metricList) {
         // v130: keep the math weighted, but expose it as a clearer edge-share visual.
         // This keeps quick-glance behavior while avoiding a misleading row-count scoreboard.
@@ -10914,14 +10983,18 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 summary.tossUpRows++;
                 summary.aPts += 0.5d * weight;
                 summary.bPts += 0.5d * weight;
-                summary.contributions.add(new EdgeContribution(m.label, 0, 0d, valA, valB));
+                EdgeContribution ec = new EdgeContribution(m.label, 0, 0d, valA, valB, weight, edge.visualStrength);
+                ec.family = edgeFamilyForKey(m.key);
+                summary.contributions.add(ec);
             } else {
                 double winnerShare = 0.5d + 0.5d * Math.max(0d, Math.min(1d, edge.scoreStrength));
                 double loserShare = 1d - winnerShare;
                 // points the winner gained over a neutral 50/50 split, scaled by lens weight —
                 // the cleanest "how much did this stat drive the edge" measure.
                 double drive = weight * (winnerShare - 0.5d);
-                summary.contributions.add(new EdgeContribution(m.label, edge.winner, drive, valA, valB));
+                EdgeContribution ec = new EdgeContribution(m.label, edge.winner, drive, valA, valB, weight, edge.visualStrength);
+                ec.family = edgeFamilyForKey(m.key);
+                summary.contributions.add(ec);
                 if (edge.winner < 0) {
                     summary.aPts += winnerShare * weight;
                     summary.bPts += loserShare * weight;
@@ -10980,17 +11053,25 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         double qGap = (qa - qb) * 0.70d;
         double fGap = (fa - fb) * 0.30d;
         summary.contributions.add(new EdgeContribution("Bullpen Quality", qGap == 0 ? 0 : (qGap < 0 ? 1 : -1),
-                Math.abs(qGap), String.valueOf(Math.round(qa)), String.valueOf(Math.round(qb))));
+                Math.abs(qGap), String.valueOf(Math.round(qa)), String.valueOf(Math.round(qb)),
+                0.70d, Math.min(1d, Math.abs(qa - qb) / 35d)));
         summary.contributions.add(new EdgeContribution("Bullpen Freshness", fGap == 0 ? 0 : (fGap < 0 ? 1 : -1),
-                Math.abs(fGap), String.valueOf(Math.round(fa)), String.valueOf(Math.round(fb))));
+                Math.abs(fGap), String.valueOf(Math.round(fa)), String.valueOf(Math.round(fb)),
+                0.30d, Math.min(1d, Math.abs(fa - fb) / 35d)));
         return summary;
     }
 
     static class EdgeContribution {
-        final String label; final int winner; final double share; // share = points toward winner (0..1 of this row's weight)
+        final String label; final int winner; final double share; // share = weighted points toward winner over 50/50
         final String valueA; final String valueB;
-        EdgeContribution(String label, int winner, double share, String valueA, String valueB) {
+        // v245: extra signal for the lens-weighting view.
+        final double weight;        // this stat's lens weight (0..1 within the scored set)
+        final double visualStrength; // how big the raw gap looked (0..1) — drives the card glow
+        String family = "";          // correlated-stat family tag (e.g. "run margin"); empty = standalone
+        EdgeContribution(String label, int winner, double share, String valueA, String valueB,
+                         double weight, double visualStrength) {
             this.label = label; this.winner = winner; this.share = share; this.valueA = valueA; this.valueB = valueB;
+            this.weight = weight; this.visualStrength = visualStrength;
         }
     }
 
