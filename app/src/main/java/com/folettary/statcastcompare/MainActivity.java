@@ -717,7 +717,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v240", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v241", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -8389,9 +8389,10 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         LinearLayout headTextCol = new LinearLayout(this);
         headTextCol.setOrientation(LinearLayout.VERTICAL);
         headTextCol.addView(text("WHY THIS EDGE", 10, Color.rgb(244, 192, 54), true));
+        int winnerPct = Math.max(pctA, 100 - pctA);
         String summaryLine = winner == 0
                 ? "The stats balance out to a near-even read."
-                : winnerName + " leads on the stats that matter most in this lens.";
+                : "What's driving " + winnerName + "'s " + winnerPct + "% edge — and what's pushing back.";
         TextView sub = text(summaryLine, 12, INK_DIM, false);
         sub.setPadding(0, dp(2), 0, 0);
         headTextCol.addView(sub);
@@ -8401,26 +8402,58 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         header.addView(chevron);
         card.addView(header, matchWrap());
 
-        // Body — top contributors, hidden until expanded.
+        // Body — leader-centric: what's driving the leader's edge vs working against them.
         final LinearLayout body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
         body.setVisibility(View.GONE);
         LinearLayout.LayoutParams bodyLp = matchWrap();
         bodyLp.setMargins(0, dp(10), 0, 0);
 
-        int shown = 0;
-        for (EdgeContribution c : ranked) {
-            if (shown >= 4) break;
-            if (c.winner == 0 && c.share <= 0d) continue; // skip pure toss-ups
-            body.addView(whyEdgeRow(c, nameA, nameB, paletteA, paletteB));
-            shown++;
-        }
-        if (shown == 0) {
-            body.addView(text("Every scored stat was close — no single factor decided it.", 12, INK_DIM, false));
+        if (winner == 0) {
+            body.addView(text("The stats balance out — no side has a meaningful edge in this lens.", 12, INK_DIM, false));
+        } else {
+            // Split contributions by whether each stat helps or hurts the leader.
+            ArrayList<EdgeContribution> driving = new ArrayList<>();
+            ArrayList<EdgeContribution> against = new ArrayList<>();
+            for (EdgeContribution c : ranked) {
+                if (c.winner == 0 || c.share <= 0d) continue; // toss-ups don't drive either way
+                if (c.winner == winner) driving.add(c); else against.add(c);
+            }
+            int leaderColor = winner < 0 ? (paletteA == null ? INK : paletteA.primary)
+                    : (paletteB == null ? INK : paletteB.primary);
+
+            // Driving group
+            TextView drivingHead = text("DRIVING THE " + winnerName.toUpperCase(Locale.US) + " EDGE", 10, INK_SOFT, true);
+            drivingHead.setLetterSpacing(0.12f);
+            body.addView(drivingHead);
+            int shown = 0;
+            for (EdgeContribution c : driving) {
+                if (shown >= 4) break;
+                body.addView(whyEdgeRow(c, nameA, nameB, paletteA, paletteB, true, leaderColor));
+                shown++;
+            }
+            if (shown == 0) {
+                body.addView(text("No single stat stands out — the edge comes from small advantages across the board.", 12, INK_DIM, false));
+            }
+
+            // Against group (only if there's something meaningful working against the leader)
+            if (!against.isEmpty()) {
+                TextView againstHead = text("WORKING AGAINST " + winnerName.toUpperCase(Locale.US), 10, EYEBROW, true);
+                againstHead.setLetterSpacing(0.12f);
+                LinearLayout.LayoutParams ahLp = matchWrap();
+                ahLp.setMargins(0, dp(12), 0, 0);
+                body.addView(againstHead, ahLp);
+                int shownAgainst = 0;
+                for (EdgeContribution c : against) {
+                    if (shownAgainst >= 3) break;
+                    body.addView(whyEdgeRow(c, nameA, nameB, paletteA, paletteB, false, leaderColor));
+                    shownAgainst++;
+                }
+            }
         }
         // Footnote: make the lens dependency explicit, since the answer changes per lens.
         TextView foot = text("Ranked by impact on the score under the " + presetDisplayName(activeComparisonPreset, roleForScope(h.scope)) + " lens.", 11, EYEBROW, false);
-        foot.setPadding(0, dp(8), 0, 0);
+        foot.setPadding(0, dp(10), 0, 0);
         body.addView(foot);
 
         card.addView(body, bodyLp);
@@ -8438,32 +8471,35 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         headerBox.addView(card, cardLp);
     }
 
-    private LinearLayout whyEdgeRow(EdgeContribution c, String nameA, String nameB, TeamPalette paletteA, TeamPalette paletteB) {
+    private LinearLayout whyEdgeRow(EdgeContribution c, String nameA, String nameB, TeamPalette paletteA, TeamPalette paletteB, boolean towardLeader, int leaderColor) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(0, dp(5), 0, dp(5));
 
-        // Left: stat label + who won it, with the two values.
+        // Left: stat label + the two values (winner of the stat shown first contextually).
         LinearLayout labelCol = new LinearLayout(this);
         labelCol.setOrientation(LinearLayout.VERTICAL);
         labelCol.addView(text(c.label, 13, INK, true));
-        String winSide = c.winner == 0 ? "Even" : (c.winner < 0 ? nameA : nameB);
-        int winColor = c.winner < 0 ? (paletteA == null ? INK : paletteA.primary)
-                : (c.winner > 0 ? (paletteB == null ? INK : paletteB.primary) : INK_DIM);
-        TextView detail = text(winSide + " · " + c.valueA + " vs " + c.valueB, 11, INK_DIM, false);
+        // Values are always A vs B for consistency with the card above.
+        TextView detail = text(nameA + " " + c.valueA + "  ·  " + nameB + " " + c.valueB, 11, INK_DIM, false);
         detail.setPadding(0, dp(1), 0, 0);
         labelCol.addView(detail);
         row.addView(labelCol, new LinearLayout.LayoutParams(0, -2, 1));
 
-        // Right: a small impact meter (longer = bigger driver).
+        // Right: a directional impact meter. Toward-leader stats use the leader's color and a
+        // solid bar; against-leader stats use a muted gray bar — so direction reads at a glance.
         View meter = new View(this);
-        double mag = Math.max(0.04d, Math.min(1d, c.share * 2.2d)); // scale for visibility
+        double mag = Math.max(0.06d, Math.min(1d, c.share * 2.2d));
         GradientDrawable mb = new GradientDrawable();
         mb.setCornerRadius(dp(3));
-        mb.setColor(c.winner == 0 ? Color.argb(90, 190, 205, 226) : Color.argb(220, Color.red(winColor), Color.green(winColor), Color.blue(winColor)));
+        if (towardLeader) {
+            mb.setColor(Color.argb(230, Color.red(leaderColor), Color.green(leaderColor), Color.blue(leaderColor)));
+        } else {
+            mb.setColor(Color.argb(120, 150, 164, 188)); // muted: this one pulls against the leader
+        }
         meter.setBackground(mb);
-        LinearLayout.LayoutParams meterLp = new LinearLayout.LayoutParams(dp((int)(18 + 64 * mag)), dp(6));
+        LinearLayout.LayoutParams meterLp = new LinearLayout.LayoutParams(dp((int)(16 + 58 * mag)), dp(6));
         meterLp.setMargins(dp(10), 0, 0, 0);
         row.addView(meter, meterLp);
         return row;
