@@ -80,6 +80,12 @@ public class MainActivity extends Activity {
 
     // Mutable color fields – reassigned in initColors() on each dark/light switch
     private int NAVY, NAVY_2, TEAL, TEAL_DARK, SALMON, AMBER, BG, INK, MUTED, LINE, CARD;
+    // v228: neutral "chrome" text tiers. Before this, ~228 inline blue-grey literals across
+    // ~131 near-identical values were used for non-team UI text (secondary labels, captions,
+    // eyebrows, dividers). They were visually indistinguishable but inconsistent, which reads
+    // as unintentional. These tokens are the single source of truth for neutral text; team
+    // colors, accents (TEAL/AMBER/SALMON), and palette-derived colors are untouched.
+    private int INK_SOFT, INK_DIM, EYEBROW, FAINT;
 
     // v29: Font weight ladder – initialized in initColors()
     private Typeface tfRegular, tfMedium, tfBold;
@@ -613,8 +619,18 @@ public class MainActivity extends Activity {
             SALMON   = Color.rgb(255, 122, 107);
             AMBER    = Color.rgb(255, 190, 89);
             BG       = Color.rgb(13, 18, 30);
-            INK      = Color.rgb(225, 233, 245);
-            MUTED    = Color.rgb(130, 145, 168);
+            INK      = Color.rgb(238, 245, 252);   // primary text
+            INK_SOFT = Color.rgb(212, 223, 238);   // secondary text / values
+            INK_DIM  = Color.rgb(184, 198, 220);   // tertiary / supporting copy
+            // v231: EYEBROW/FAINT were 140/96 luminance in v228 — readable on flat dark, but the
+            // app's surfaces are frequently TEAM-COLOR-TINTED (bright red/orange/gold glows on
+            // the matchup hero), where those tiers dropped below readable contrast and text like
+            // team city names, section eyebrows, and stat-row labels washed out. Both tiers are
+            // lifted so they clear ~3:1+ on tinted surfaces while staying clearly below INK_DIM
+            // in the hierarchy.
+            EYEBROW  = Color.rgb(168, 182, 205);   // small-caps labels, captions
+            FAINT    = Color.rgb(140, 154, 178);   // hints, faint meta
+            MUTED    = Color.rgb(168, 182, 205);   // legacy alias → EYEBROW tier
             LINE     = Color.rgb(38, 52, 74);
             CARD     = Color.rgb(20, 28, 44);
         } else {
@@ -625,8 +641,19 @@ public class MainActivity extends Activity {
             SALMON   = Color.rgb(255, 122, 107);
             AMBER    = Color.rgb(255, 190, 89);
             BG       = Color.rgb(242, 246, 251);
-            INK      = Color.rgb(22, 29, 43);
-            MUTED    = Color.rgb(94, 105, 124);
+            // v233 FIX: this branch (isDark=false) is the one the app actually runs. But every
+            // SURFACE in the app is dark (dark navy cards, team-tinted panels) — the isDark flag
+            // is a historical artifact, not a real light theme. In v228 I consolidated ~290 text
+            // colors onto these tokens and set them to DARK values here (correct for a true light
+            // theme, wrong for this app), which made labels render dark-on-dark — the invisible
+            // text. The neutral TEXT tokens must be BRIGHT because they sit on dark surfaces.
+            // Structural tokens (BG/LINE/CARD) stay as-is.
+            INK      = Color.rgb(238, 245, 252);
+            INK_SOFT = Color.rgb(214, 224, 240);
+            INK_DIM  = Color.rgb(188, 202, 224);
+            EYEBROW  = Color.rgb(166, 180, 204);
+            FAINT    = Color.rgb(140, 154, 178);
+            MUTED    = Color.rgb(166, 180, 204);   // legacy alias → EYEBROW tier
             LINE     = Color.rgb(221, 229, 241);
             CARD     = Color.WHITE;
         }
@@ -676,7 +703,7 @@ public class MainActivity extends Activity {
         TextView title = text("STATCAST", 20, Color.WHITE, true);
         title.setLetterSpacing(0.01f);
         titleColApp.addView(title);
-        TextView subtitle = text("Matchup · Search · Rankings", 9, Color.rgb(217, 230, 245), false);
+        TextView subtitle = text("Matchup · Search · Rankings", 9, INK, false);
         subtitle.setPadding(0, dp(1), 0, 0);
         titleColApp.addView(subtitle);
 
@@ -689,7 +716,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v225", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v237", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -723,7 +750,7 @@ public class MainActivity extends Activity {
         commandTitleView = text("WORKSPACE CONTROLS", 15, Color.rgb(126, 235, 226), true);
         commandTitleView.setLetterSpacing(0.12f);
         commandText.addView(commandTitleView);
-        commandSubtitleView = text("Matchups, profiles, and rankings share one premium control surface.", 11, Color.rgb(201, 215, 233), false);
+        commandSubtitleView = text("Matchups, profiles, and rankings share one premium control surface.", 11, INK_SOFT, false);
         commandSubtitleView.setPadding(0, dp(2), 0, 0);
         commandText.addView(commandSubtitleView);
 
@@ -795,7 +822,7 @@ public class MainActivity extends Activity {
         searchInput.setSingleLine(true);
         searchInput.setTextSize(16);
         searchInput.setTextColor(Color.WHITE);
-        searchInput.setHintTextColor(Color.rgb(160, 175, 196));
+        searchInput.setHintTextColor(INK_DIM);
         searchInput.setPadding(dp(14), dp(11), dp(14), dp(11));
         searchInput.setBackground(roundedStroke(Color.argb(14, 255, 255, 255), Color.argb(82, 190, 214, 236), 18, 1));
         searchInput.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
@@ -852,7 +879,7 @@ public class MainActivity extends Activity {
         compareSearchInput.setSingleLine(true);
         compareSearchInput.setTextSize(16);
         compareSearchInput.setTextColor(Color.WHITE);
-        compareSearchInput.setHintTextColor(Color.rgb(160, 175, 196));
+        compareSearchInput.setHintTextColor(INK_DIM);
         compareSearchInput.setPadding(dp(14), dp(11), dp(14), dp(11));
         compareSearchInput.setBackground(roundedStroke(Color.argb(14, 255, 255, 255), Color.argb(82, 190, 214, 236), 18, 1));
         compareSearchInput.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
@@ -956,7 +983,7 @@ public class MainActivity extends Activity {
         compareButton.setEnabled(false);
         controlsCard.addView(compareButton, new LinearLayout.LayoutParams(dp(1), dp(1)));
 
-        statusView = text("Loading MLB teams and active players…", 12, Color.rgb(187, 203, 224), false);
+        statusView = text("Loading MLB teams and active players…", 12, INK_SOFT, false);
         statusView.setPadding(dp(2), dp(9), dp(2), 0);
         statusView.setVisibility(View.GONE);
 
@@ -1040,10 +1067,10 @@ public class MainActivity extends Activity {
 
         LinearLayout titleRow = new LinearLayout(this);
         titleRow.setOrientation(LinearLayout.VERTICAL);
-        matchupHubTitle = text("MATCHUPS", 14, Color.rgb(235, 244, 252), true);
+        matchupHubTitle = text("MATCHUPS", 14, INK, true);
         matchupHubTitle.setLetterSpacing(0.10f);
         titleRow.addView(matchupHubTitle, matchWrap());
-        matchupHubSubtitle = text("Choose live games or build a custom matchup.", 11, Color.rgb(180, 198, 220), false);
+        matchupHubSubtitle = text("Choose live games or build a custom matchup.", 11, INK_SOFT, false);
         matchupHubSubtitle.setPadding(0, dp(3), 0, 0);
         titleRow.addView(matchupHubSubtitle, matchWrap());
         hub.addView(titleRow, matchWrap());
@@ -1115,9 +1142,9 @@ public class MainActivity extends Activity {
 
     private void styleMatchupPathChip(TextView tv, boolean active, int accent) {
         if (tv == null) return;
-        tv.setTextColor(active ? Color.rgb(8, 13, 22) : Color.rgb(220, 232, 246));
+        tv.setTextColor(active ? Color.rgb(8, 13, 22) : INK);
         tv.setBackground(active
-                ? roundedGradientStroke(new int[] { Color.rgb(255, 255, 255), softColor(accent, 0.20f) }, 15, Color.argb(130, Color.red(accent), Color.green(accent), Color.blue(accent)), 1)
+                ? roundedGradientStroke(new int[] { INK, softColor(accent, 0.20f) }, 15, Color.argb(130, Color.red(accent), Color.green(accent), Color.blue(accent)), 1)
                 : roundedStroke(Color.argb(8, 255, 255, 255), Color.argb(44, 255, 255, 255), 15, 1));
     }
 
@@ -1199,7 +1226,7 @@ public class MainActivity extends Activity {
         b.setSingleLine(false);
         b.setMaxLines(2);
         b.setEllipsize(null);
-        b.setTextColor(active ? Color.WHITE : Color.rgb(71, 83, 105));
+        b.setTextColor(active ? Color.WHITE : FAINT);
         b.setBackground(active ? roundedGradient(new int[] { NAVY, Color.rgb(24, 62, 109) }, 15) : rounded(Color.TRANSPARENT, 15));
         return b;
     }
@@ -1208,7 +1235,7 @@ public class MainActivity extends Activity {
         TextView tv = new TextView(this);
         tv.setText(value);
         tv.setTextSize(10);
-        tv.setTextColor(Color.rgb(171, 188, 209));
+        tv.setTextColor(INK_DIM);
         tv.setTypeface(tfMedium);               // v29: medium weight for section labels
         tv.setLetterSpacing(0.12f);
         tv.setPadding(dp(2), dp(2), dp(2), dp(2));
@@ -1244,7 +1271,7 @@ public class MainActivity extends Activity {
         heroTitle.setPadding(0, dp(6), 0, 0);
         hero.addView(heroTitle);
 
-        TextView heroSub = text("Select any two players or teams and see who owns the edge.", 11, Color.rgb(204, 216, 234), false);
+        TextView heroSub = text("Select any two players or teams and see who owns the edge.", 11, INK_SOFT, false);
         heroSub.setPadding(0, dp(7), 0, 0);
         hero.addView(heroSub);
 
@@ -1386,7 +1413,7 @@ public class MainActivity extends Activity {
         if (box == null) return;
         box.removeAllViews();
         renderHomeLiveHeader(box, "Loading");
-        TextView loading = text("Loading today’s MLB slate…", 11, Color.rgb(193, 209, 229), true);
+        TextView loading = text("Loading today’s MLB slate…", 11, INK_SOFT, true);
         loading.setGravity(Gravity.CENTER);
         loading.setPadding(dp(10), dp(13), dp(10), dp(13));
         loading.setBackground(roundedStroke(Color.argb(54, 255, 255, 255), Color.argb(54, 255, 255, 255), 18, 1));
@@ -1414,12 +1441,12 @@ public class MainActivity extends Activity {
         int count = games == null ? 0 : games.size();
         renderHomeLiveHeader(homeLiveMatchupsBox, count <= 0 ? "See all" : count + " games");
 
-        TextView sub = text("Jump straight into team, starter, or key-hitter comparisons.", 11, Color.rgb(174, 190, 211), false);
+        TextView sub = text("Jump straight into team, starter, or key-hitter comparisons.", 11, INK_DIM, false);
         sub.setPadding(0, dp(5), 0, 0);
         homeLiveMatchupsBox.addView(sub, matchWrap());
 
         if (games == null || games.isEmpty()) {
-            TextView empty = text("No MLB games found for today. The Matchups tab still lets you build your own.", 11, Color.rgb(210, 222, 238), true);
+            TextView empty = text("No MLB games found for today. The Matchups tab still lets you build your own.", 11, INK_SOFT, true);
             empty.setGravity(Gravity.CENTER);
             empty.setPadding(dp(10), dp(13), dp(10), dp(13));
             empty.setBackground(roundedStroke(Color.argb(54, 255, 255, 255), Color.argb(54, 255, 255, 255), 18, 1));
@@ -1466,7 +1493,7 @@ public class MainActivity extends Activity {
         if (homeLiveMatchupsBox == null) return;
         homeLiveMatchupsBox.removeAllViews();
         renderHomeLiveHeader(homeLiveMatchupsBox, "Retry");
-        TextView error = text("Could not load live games. Tap See all from the Matchups tab to try again. " + safe(message), 11, Color.rgb(210, 222, 238), false);
+        TextView error = text("Could not load live games. Tap See all from the Matchups tab to try again. " + safe(message), 11, INK_SOFT, false);
         error.setPadding(dp(10), dp(12), dp(10), dp(12));
         error.setBackground(roundedStroke(Color.argb(54, 255, 255, 255), Color.argb(54, 255, 255, 255), 18, 1));
         LinearLayout.LayoutParams lp = matchWrap();
@@ -1524,7 +1551,7 @@ private View homeFeaturedLiveGameCard(LiveGame game) {
     LinearLayout top = new LinearLayout(this);
     top.setOrientation(LinearLayout.HORIZONTAL);
     top.setGravity(Gravity.CENTER_VERTICAL);
-    TextView label = text("FEATURED GAME", 9, Color.rgb(225, 236, 250), true);
+    TextView label = text("FEATURED GAME", 9, INK, true);
     label.setLetterSpacing(0.11f);
     top.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
     String statusText = game == null ? "MLB" : game.statusLabel() + (safe(game.timeLabel()).isEmpty() ? "" : " · " + game.timeLabel());
@@ -1547,14 +1574,14 @@ private View homeFeaturedLiveGameCard(LiveGame game) {
 
     String pitchers = game == null ? "Open today’s slate" : ((safe(game.awayPitcher).isEmpty() ? "Away SP TBD" : lastNameOnly(game.awayPitcher))
             + " vs " + (safe(game.homePitcher).isEmpty() ? "Home SP TBD" : lastNameOnly(game.homePitcher)));
-    TextView sub = text(pitchers, 11, Color.rgb(205, 218, 236), true);
+    TextView sub = text(pitchers, 11, INK_SOFT, true);
     sub.setGravity(Gravity.CENTER);
     sub.setSingleLine(true);
     sub.setEllipsize(TextUtils.TruncateAt.END);
     sub.setPadding(0, dp(4), 0, 0);
     content.addView(sub, matchWrap());
 
-    TextView cta = text("Open recommended matchups  ❯", 10, Color.rgb(238, 245, 252), true);
+    TextView cta = text("Open recommended matchups  ❯", 10, INK, true);
     cta.setGravity(Gravity.CENTER);
     cta.setPadding(0, dp(8), 0, 0);
     content.addView(cta, matchWrap());
@@ -1591,7 +1618,7 @@ private View homeMiniLiveGameTile(LiveGame game) {
 
     String sp = (safe(game.awayPitcher).isEmpty() ? "TBD" : lastNameOnly(game.awayPitcher))
             + " / " + (safe(game.homePitcher).isEmpty() ? "TBD" : lastNameOnly(game.homePitcher));
-    TextView pitchers = text(sp, 8, Color.rgb(172, 188, 210), false);
+    TextView pitchers = text(sp, 8, INK_DIM, false);
     pitchers.setGravity(Gravity.CENTER);
     pitchers.setSingleLine(true);
     pitchers.setEllipsize(TextUtils.TruncateAt.END);
@@ -1900,7 +1927,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         close.setOnClickListener(v -> closeHomeInlineSelector());
         titleRow.addView(close);
 
-        homeInlineHint = text("Type at least 2 letters. Pick a player or team and the home preview updates live.", 11, Color.rgb(160, 176, 198), false);
+        homeInlineHint = text("Type at least 2 letters. Pick a player or team and the home preview updates live.", 11, INK_DIM, false);
         homeInlineHint.setPadding(0, dp(6), 0, 0);
         card.addView(homeInlineHint);
 
@@ -2014,7 +2041,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
         homeInlineSearchInput = new EditText(this);
         homeInlineSearchInput.setHint(homeInlineTeamMode ? "Search teams" : "Search players");
-        homeInlineSearchInput.setHintTextColor(Color.rgb(110, 126, 150));
+        homeInlineSearchInput.setHintTextColor(FAINT);
         homeInlineSearchInput.setTextColor(Color.WHITE);
         homeInlineSearchInput.setSingleLine(true);
         homeInlineSearchInput.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
@@ -2024,7 +2051,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         inputLp.setMargins(0, dp(12), 0, 0);
         sheet.addView(homeInlineSearchInput, inputLp);
 
-        TextView miniHint = text(homeInlineTeamMode ? "Scroll for all teams · or search city, nickname, abbreviation" : "Try: Tatis, Ohtani, Judge", 10, Color.rgb(128, 145, 168), false);
+        TextView miniHint = text(homeInlineTeamMode ? "Scroll for all teams · or search city, nickname, abbreviation" : "Try: Tatis, Ohtani, Judge", 10, EYEBROW, false);
         miniHint.setPadding(dp(2), dp(7), dp(2), 0);
         sheet.addView(miniHint, matchWrap());
 
@@ -2127,7 +2154,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         tv.setMaxLines(1);
         tv.setEllipsize(TextUtils.TruncateAt.END);
         tv.setIncludeFontPadding(false);
-        tv.setTextColor(active ? Color.WHITE : Color.rgb(188, 198, 216));
+        tv.setTextColor(active ? Color.WHITE : INK_SOFT);
         if (active) {
             tv.setBackground(roundedGradientStroke(new int[] {
                     Color.argb(235, Math.max(9, Color.red(accent) / 5), Math.max(14, Color.green(accent) / 5), Math.max(20, Color.blue(accent) / 5)),
@@ -2463,7 +2490,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     }
 
     private TextView homeClearBadge() {
-        TextView tv = text("×", 13, Color.rgb(224, 233, 246), true);
+        TextView tv = text("×", 13, INK, true);
         tv.setGravity(Gravity.CENTER);
         tv.setIncludeFontPadding(false);
         tv.setAlpha(0.88f);
@@ -2548,7 +2575,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
     private void styleHomeSelectorPill(TextView tv, int accent, boolean selected, boolean leftSide) {
         if (tv == null) return;
-        int c = selected ? accent : Color.rgb(162, 174, 194);
+        int c = selected ? accent : INK_DIM;
         tv.setTextColor(selected ? mixColor(Color.WHITE, c, 0.30f) : c);
         tv.setTextSize(selected ? 10 : 9);
         tv.setLetterSpacing(selected ? 0.10f : 0.12f);
@@ -2587,7 +2614,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 homeCreateButton.setText("SELECT TWO FIRST  ❯");
                 homeCreateButton.setTextSize(12);
                 homeCreateButton.setLetterSpacing(0.052f);
-                homeCreateButton.setTextColor(Color.rgb(130, 139, 154));
+                homeCreateButton.setTextColor(EYEBROW);
                 homeCreateButton.setShadowLayer(0, 0, 0, Color.TRANSPARENT);
                 homeCreateButton.setBackground(roundedGradientStroke(new int[] {
                         Color.rgb(26, 31, 42),
@@ -2629,7 +2656,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             int midTone = mixColor(teamAccent, Color.rgb(10, 16, 28), 0.28f);
             int deepTone = mixColor(teamAccent, Color.rgb(4, 7, 14), 0.46f);
             if (abbr.equals("NYY")) {
-                hotCore = mixColor(Color.rgb(225, 233, 244), teamAccent, 0.38f);
+                hotCore = mixColor(INK, teamAccent, 0.38f);
                 midTone = mixColor(Color.rgb(122, 142, 178), teamAccent, 0.56f);
                 deepTone = mixColor(teamAccent, Color.rgb(8, 12, 20), 0.30f);
             } else if (abbr.equals("COL")) {
@@ -2778,7 +2805,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     }
 
     private TextView homeStatsSelectorButton() {
-        TextView tv = text("Stat Lens\nRecommended", 9, Color.rgb(226, 236, 248), true);
+        TextView tv = text("Stat Lens\nRecommended", 9, INK, true);
         tv.setGravity(Gravity.CENTER);
         tv.setSingleLine(false);
         tv.setMaxLines(2);
@@ -2854,7 +2881,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         card.setOrientation(LinearLayout.VERTICAL);
         card.setGravity(Gravity.CENTER);
         card.setPadding(dp(12), dp(12), dp(12), dp(12));
-        card.setForeground(ripple(true));
+        card.setForeground(ripple(true, 26f));
         card.setElevation(dp(2));
 
         TextView icon = text(glyph, glyph.length() > 1 ? 17 : 24, Color.WHITE, true);
@@ -2931,11 +2958,11 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         item.setOrientation(LinearLayout.VERTICAL);
         item.setGravity(Gravity.CENTER);
         item.setPadding(dp(2), dp(2), dp(2), dp(1));
-        TextView icon = text(iconText, 21, Color.rgb(206, 216, 232), true);
+        TextView icon = text(iconText, 21, INK_SOFT, true);
         icon.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(dp(38), dp(26));
         item.addView(icon, iconLp);
-        TextView label = text(labelText, 7, Color.rgb(186, 198, 216), true);
+        TextView label = text(labelText, 7, INK_SOFT, true);
         label.setGravity(Gravity.CENTER);
         item.addView(label);
         View line = new View(this);
@@ -2961,8 +2988,8 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     private void styleBottomTab(LinearLayout item, TextView icon, TextView label, View line, boolean active, int accent) {
         if (item == null || icon == null || label == null || line == null) return;
         item.setBackground(rounded(Color.TRANSPARENT, 16));
-        icon.setTextColor(active ? accent : Color.rgb(198, 208, 224));
-        label.setTextColor(active ? Color.WHITE : Color.rgb(154, 166, 188));
+        icon.setTextColor(active ? accent : INK_SOFT);
+        label.setTextColor(active ? Color.WHITE : INK_DIM);
         line.setBackground(rounded(active ? accent : Color.TRANSPARENT, 2));
         icon.setBackground(rounded(Color.TRANSPARENT, 14));
     }
@@ -3156,14 +3183,15 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     }
 
     private TextView choiceChip(String label, boolean active) {
-        TextView tv = text(label, 13, active ? Color.WHITE : Color.rgb(214, 225, 240), true);
+        TextView tv = text(label, 13, active ? Color.WHITE : INK, true);
         tv.setGravity(Gravity.CENTER);
         tv.setPadding(dp(14), dp(8), dp(14), dp(8));
         tv.setSingleLine(true);
         tv.setBackground(active
                 ? roundedGradientStroke(new int[] { TEAL, TEAL_DARK }, 18, Color.argb(150, 116, 247, 238), 1)
                 : roundedStroke(Color.argb(18, 255, 255, 255), Color.argb(70, 190, 214, 236), 18, 1));
-        tv.setForeground(ripple(active));
+        tv.setForeground(ripple(active, 18f));
+        attachPremiumPress(tv, 0.95f);
         return tv;
     }
 
@@ -3262,6 +3290,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         close.setPadding(dp(12), dp(8), dp(12), dp(8));
         close.setBackground(roundedStroke(Color.argb(26, 255, 255, 255), Color.argb(70, 255, 255, 255), 14, 1));
         close.setOnClickListener(v -> dialog.dismiss());
+        makePremiumButton(close, 14f);  // v235: consistent press feedback
         header.addView(close);
 
         EditText filter = new EditText(this);
@@ -3269,7 +3298,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         filter.setSingleLine(true);
         filter.setTextSize(15);
         filter.setTextColor(Color.WHITE);
-        filter.setHintTextColor(Color.rgb(110, 126, 150));
+        filter.setHintTextColor(FAINT);
         filter.setPadding(dp(14), dp(12), dp(14), dp(12));
         filter.setBackground(roundedStroke(Color.argb(34, 255, 255, 255), Color.argb(72, 255, 255, 255), 18, 1));
         LinearLayout.LayoutParams inputLp = matchWrap();
@@ -3402,6 +3431,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         close.setPadding(dp(12), dp(8), dp(12), dp(8));
         close.setBackground(roundedStroke(Color.argb(26, 255, 255, 255), Color.argb(70, 255, 255, 255), 14, 1));
         close.setOnClickListener(v -> dialog.dismiss());
+        makePremiumButton(close, 14f);  // v235: consistent press feedback
         header.addView(close);
 
         final String[] activeCategory = new String[] { "all" };
@@ -3419,7 +3449,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         filter.setSingleLine(true);
         filter.setTextSize(15);
         filter.setTextColor(Color.WHITE);
-        filter.setHintTextColor(Color.rgb(110, 126, 150));
+        filter.setHintTextColor(FAINT);
         filter.setPadding(dp(14), dp(12), dp(14), dp(12));
         filter.setBackground(roundedStroke(Color.argb(34, 255, 255, 255), Color.argb(72, 255, 255, 255), 18, 1));
         LinearLayout.LayoutParams inputLp = matchWrap();
@@ -3531,7 +3561,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     }
 
     private TextView rankSelectorFilterChip(String label, boolean active) {
-        TextView chip = text(label, 11, active ? Color.rgb(8, 12, 20) : Color.rgb(224, 236, 248), true);
+        TextView chip = text(label, 11, active ? Color.rgb(8, 12, 20) : INK, true);
         chip.setGravity(Gravity.CENTER);
         chip.setSingleLine(true);
         chip.setPadding(dp(12), dp(7), dp(12), dp(7));
@@ -3543,7 +3573,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
     private void styleRankSelectorFilterChip(TextView chip, boolean active) {
         if (chip == null) return;
-        chip.setTextColor(active ? Color.rgb(8, 12, 20) : Color.rgb(224, 236, 248));
+        chip.setTextColor(active ? Color.rgb(8, 12, 20) : INK);
         chip.setBackground(active
                 ? roundedGradientStroke(new int[] { Color.rgb(255, 245, 132), Color.rgb(244, 192, 54), Color.rgb(217, 132, 24) }, 999, Color.argb(190, 255, 245, 142), 1)
                 : roundedStroke(Color.argb(28, 255, 255, 255), Color.argb(72, 255, 255, 255), 999, 1));
@@ -3560,7 +3590,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 String value = getItem(position);
                 boolean active = value != null && value.trim().startsWith("✓");
                 tv.setText(value == null ? "" : value.replace("✓", "").trim());
-                tv.setTextColor(active ? Color.rgb(8, 13, 21) : Color.rgb(232, 241, 252));
+                tv.setTextColor(active ? Color.rgb(8, 13, 21) : INK);
                 tv.setTextSize(14);
                 tv.setTypeface(active ? tfBold : tfMedium);
                 tv.setPadding(dp(14), dp(12), dp(14), dp(12));
@@ -3610,7 +3640,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 chip.setTextColor(year == selectedSeasonValue ? Color.WHITE : NAVY);
                 chip.setBackground(year == selectedSeasonValue
                         ? roundedGradient(new int[] { NAVY, Color.rgb(24, 62, 109) }, 16)
-                        : roundedStroke(Color.WHITE, Color.rgb(205, 216, 230), 16, 1));
+                        : roundedStroke(Color.WHITE, INK_SOFT, 16, 1));
             } catch (Exception ignored) {}
         }
     }
@@ -3707,7 +3737,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         b.setSingleLine(false);
         b.setMaxLines(2);
         b.setEllipsize(null);
-        b.setTextColor(Color.rgb(235, 244, 252));
+        b.setTextColor(INK);
         b.setBackground(active ? roundedGradient(new int[] { TEAL, TEAL_DARK }, 16) : roundedStroke(Color.argb(30, 255, 255, 255), Color.argb(78, 190, 214, 236), 16, 1));
         return b;
     }
@@ -3737,7 +3767,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         b.setAllCaps(false);
         b.setTypeface(Typeface.DEFAULT_BOLD);
         b.setTextSize(14);
-        b.setTextColor(Color.rgb(235, 244, 252));
+        b.setTextColor(INK);
         b.setMinHeight(0);
         b.setMinWidth(0);
         b.setPadding(dp(12), dp(10), dp(12), dp(10));
@@ -3806,7 +3836,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         if (sticky) {
             styleStickyNavButtonBase(b);
             b.setText(active ? "• " + label : label);
-            b.setTextColor(active ? Color.rgb(252, 255, 255) : Color.rgb(154, 174, 192));
+            b.setTextColor(active ? INK : INK_DIM);
             b.setBackground(active
                     ? roundedStroke(Color.argb(54, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1)
                     : roundedStroke(Color.argb(4, 255, 255, 255), Color.argb(18, 255, 255, 255), 14, 1));
@@ -3821,7 +3851,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     private void styleEntityButton(Button b, boolean active, String label) {
         if (b == null) return;
         b.setText(label);
-        b.setTextColor(active ? Color.WHITE : Color.rgb(225, 235, 244));
+        b.setTextColor(active ? Color.WHITE : INK);
         b.setBackground(active
                 ? roundedGradient(new int[] { TEAL, TEAL_DARK }, 16)
                 : roundedStroke(Color.argb(8, 255, 255, 255), Color.argb(70, 190, 214, 236), 16, 1));
@@ -3830,7 +3860,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     private void styleSubModeButton(Button b, boolean active, String label) {
         if (b == null) return;
         b.setText(label);
-        b.setTextColor(active ? Color.WHITE : Color.rgb(225, 235, 244));
+        b.setTextColor(active ? Color.WHITE : INK);
         b.setBackground(active
                 ? roundedGradientStroke(new int[] { Color.rgb(45, 92, 138), Color.rgb(8, 28, 45) }, 18, Color.argb(128, 120, 210, 255), 1)
                 : roundedStroke(Color.argb(12, 255, 255, 255), Color.argb(70, 190, 214, 236), 18, 1));
@@ -4542,8 +4572,8 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         String preset = metricPresetNameForRole(checkedMetricKeys(boxes), role);
         boolean custom = "Custom".equals(preset);
         pill.setText(custom ? "Lens · Custom" : "Lens · " + preset);
-        int accent = custom ? Color.rgb(150, 166, 190) : Color.rgb(246, 198, 68);
-        pill.setTextColor(custom ? Color.rgb(190, 204, 224) : Color.rgb(255, 235, 152));
+        int accent = custom ? INK_DIM : Color.rgb(246, 198, 68);
+        pill.setTextColor(custom ? INK_SOFT : Color.rgb(255, 235, 152));
         pill.setBackground(roundedGradientStroke(new int[] {
                 Color.argb(210, 6, 10, 18),
                 Color.argb(160, Color.red(accent), Color.green(accent), Color.blue(accent))
@@ -4574,6 +4604,10 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
     private void showMetricPicker() {
         if (lastHeadToHead != null && resultsBox != null && resultsBox.getVisibility() == View.VISIBLE) {
+            if (isBullpenHeroComparison(lastHeadToHead)) {
+                showSpecialModelTip("Bullpen Matchup Model", "This card rates each team’s bullpen and how rested it is tonight.\n\nQuality (70% of the edge) blends reliever ERA, WHIP, K-BB%, and home runs allowed into a 0–100 score. Freshness (30%) reflects recent workload — innings over the last two days, back-to-back arms, and heavily-used relievers.\n\nThe lens is locked because this is a fixed bullpen matchup, not a normal stat lens.");
+                return;
+            }
             if (isOffenseVsStarterComparison(lastHeadToHead)) {
                 showSpecialModelTip("Offense vs Starter Model", "This card compares each lineup against the opposing probable starter.\n\nIt weighs lineup on-base pressure, lineup power/contact quality, plate discipline, starter vulnerability, and recent offensive quality.\n\nThe model is locked so the rows stay aligned with this specific game matchup.");
                 return;
@@ -4600,7 +4634,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         handleLp.gravity = Gravity.CENTER_HORIZONTAL;
         sheet.addView(handle, handleLp);
 
-        TextView title = text("Stat Lens", 19, Color.rgb(238, 245, 252), true);
+        TextView title = text("Stat Lens", 19, INK, true);
         title.setLetterSpacing(0.02f);
         LinearLayout.LayoutParams titleLp = matchWrap();
         titleLp.setMargins(0, dp(11), 0, 0);
@@ -4680,7 +4714,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         titleView.setLetterSpacing(0.02f);
         sheet.addView(titleView, matchWrap());
 
-        TextView body = text(message, 12, Color.rgb(190, 207, 229), false);
+        TextView body = text(message, 12, INK_SOFT, false);
         body.setPadding(0, dp(8), 0, dp(12));
         body.setLineSpacing(dp(3), 1.0f);
         sheet.addView(body, matchWrap());
@@ -4725,7 +4759,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         top.setGravity(Gravity.CENTER_VERTICAL);
         top.setPadding(dp(12), 0, dp(12), 0);
         top.setPadding(dp(12), 0, dp(12), 0);
-        TextView title = text("Custom Lens", 14, Color.rgb(238, 245, 252), true);
+        TextView title = text("Custom Lens", 14, INK, true);
         top.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
         TextView badge = text("Edit", 10, Color.rgb(255, 235, 152), true);
         badge.setGravity(Gravity.CENTER);
@@ -4769,7 +4803,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.HORIZONTAL);
         top.setGravity(Gravity.CENTER_VERTICAL);
-        TextView name = text((active ? "✓ " : "") + label, 14, active ? Color.rgb(9, 13, 21) : Color.rgb(238, 245, 252), true);
+        TextView name = text((active ? "✓ " : "") + label, 14, active ? Color.rgb(9, 13, 21) : INK, true);
         name.setSingleLine(true);
         name.setEllipsize(TextUtils.TruncateAt.END);
         top.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
@@ -4786,7 +4820,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         desc.setPadding(0, dp(3), 0, dp(5));
         card.addView(desc, matchWrap());
 
-        TextView preview = text(lensPreviewForPreset(preset, role), 11, active ? Color.rgb(18, 24, 35) : Color.rgb(226, 236, 248), true);
+        TextView preview = text(lensPreviewForPreset(preset, role), 11, active ? Color.rgb(18, 24, 35) : INK, true);
         preview.setSingleLine(false);
         preview.setMaxLines(2);
         preview.setEllipsize(TextUtils.TruncateAt.END);
@@ -4822,7 +4856,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 Color.rgb(5, 24, 40)
         }, 28, Color.argb(96, 96, 228, 222), 1));
 
-        TextView title = text("Customize Lens", 19, Color.rgb(238, 245, 252), true);
+        TextView title = text("Customize Lens", 19, INK, true);
         title.setPadding(0, dp(4), 0, 0);
         sheet.addView(title, matchWrap());
 
@@ -4838,9 +4872,9 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         columnHeader.setOrientation(LinearLayout.HORIZONTAL);
         columnHeader.setGravity(Gravity.CENTER_VERTICAL);
         columnHeader.setPadding(dp(10), dp(4), dp(10), dp(4));
-        columnHeader.addView(text("STAT", 9, Color.rgb(132, 148, 172), true), new LinearLayout.LayoutParams(0, -2, 1));
-        TextView showHdr = text("SCORE", 9, Color.rgb(132, 148, 172), true); showHdr.setGravity(Gravity.CENTER);
-        TextView keyHdr = text("CARD", 9, Color.rgb(132, 148, 172), true); keyHdr.setGravity(Gravity.CENTER);
+        columnHeader.addView(text("STAT", 9, EYEBROW, true), new LinearLayout.LayoutParams(0, -2, 1));
+        TextView showHdr = text("SCORE", 9, EYEBROW, true); showHdr.setGravity(Gravity.CENTER);
+        TextView keyHdr = text("CARD", 9, EYEBROW, true); keyHdr.setGravity(Gravity.CENTER);
         columnHeader.addView(showHdr, new LinearLayout.LayoutParams(dp(66), -2));
         columnHeader.addView(keyHdr, new LinearLayout.LayoutParams(dp(78), -2));
         list.addView(columnHeader, matchWrap());
@@ -4848,7 +4882,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         String lastGroup = "";
         for (Metric m : pickerMetrics) {
             if (!m.group.equals(lastGroup)) {
-                TextView sub = text(m.group, 11, Color.rgb(194, 208, 228), true);
+                TextView sub = text(m.group, 11, INK_SOFT, true);
                 sub.setLetterSpacing(0.08f);
                 sub.setPadding(dp(2), dp(10), 0, dp(5));
                 list.addView(sub);
@@ -4868,9 +4902,9 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
             LinearLayout labelCol = new LinearLayout(this);
             labelCol.setOrientation(LinearLayout.VERTICAL);
-            TextView label = text(m.label, 13, Color.rgb(234, 241, 250), true);
+            TextView label = text(m.label, 13, INK, true);
             labelCol.addView(label);
-            TextView meta = text(("team".equals(m.side) ? "Team" : ("pitch".equals(m.side) ? "Pitching" : "Hitting")) + " · " + m.group.replace("Standard ", "").replace("Statcast ", ""), 9, Color.rgb(126, 141, 164), false);
+            TextView meta = text(("team".equals(m.side) ? "Team" : ("pitch".equals(m.side) ? "Pitching" : "Hitting")) + " · " + m.group.replace("Standard ", "").replace("Statcast ", ""), 9, EYEBROW, false);
             meta.setPadding(0, dp(2), 0, 0);
             labelCol.addView(meta);
             row.addView(labelCol, new LinearLayout.LayoutParams(0, -2, 1));
@@ -4999,7 +5033,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     }
 
     private TextView dialogLensCard(String label, String preview, Runnable action) {
-        TextView tv = text(label + "\n" + preview, 10, Color.rgb(226, 236, 248), true);
+        TextView tv = text(label + "\n" + preview, 10, INK, true);
         tv.setGravity(Gravity.CENTER_VERTICAL);
         tv.setPadding(dp(9), dp(7), dp(9), dp(7));
         tv.setSingleLine(false);
@@ -5074,7 +5108,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
     private void styleDialogPresetChip(TextView tv, boolean active) {
         if (tv == null) return;
-        tv.setTextColor(active ? Color.rgb(10, 14, 22) : Color.rgb(226, 236, 248));
+        tv.setTextColor(active ? Color.rgb(10, 14, 22) : INK);
         tv.setShadowLayer(0, 0, 0, Color.TRANSPARENT);
         tv.setBackground(active
                 ? roundedGradientStroke(new int[] { Color.rgb(255, 245, 132), Color.rgb(244, 192, 54), Color.rgb(217, 132, 24) }, 15, Color.argb(230, 255, 245, 142), 2)
@@ -5082,7 +5116,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     }
 
     private TextView dialogPresetChip(String label, Runnable action) {
-        TextView tv = text(label, 11, Color.rgb(226, 236, 248), true);
+        TextView tv = text(label, 11, INK, true);
         tv.setGravity(Gravity.CENTER);
         tv.setPadding(dp(7), dp(8), dp(7), dp(8));
         tv.setSingleLine(true);
@@ -5097,13 +5131,13 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     }
 
     private TextView statsDialogAction(String label, boolean primary) {
-        TextView tv = text(label, 12, primary ? Color.rgb(11, 13, 20) : Color.rgb(210, 224, 244), true);
+        TextView tv = text(label, 12, primary ? Color.rgb(11, 13, 20) : INK, true);
         tv.setGravity(Gravity.CENTER);
         tv.setSingleLine(true);
         tv.setBackground(primary
                 ? roundedGradientStroke(new int[] { Color.rgb(255, 245, 132), Color.rgb(244, 192, 54), Color.rgb(221, 138, 26) }, 18, Color.argb(220, 255, 245, 142), 2)
                 : roundedGradientStroke(new int[] { Color.rgb(8, 13, 22), Color.rgb(10, 18, 31) }, 18, Color.argb(72, 255, 255, 255), 1));
-        tv.setForeground(ripple(true));
+        tv.setForeground(ripple(true, 18f));
         attachPremiumPress(tv, 0.97f);
         return tv;
     }
@@ -5162,7 +5196,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             LinearLayout col = new LinearLayout(this);
             col.setOrientation(LinearLayout.VERTICAL);
             col.addView(text(selectedTeam.name, 14, Color.WHITE, true));
-            col.addView(text(headToHeadMode ? "Team A · " + selectedTeam.abbr : "Team profile · " + selectedTeam.abbr, 11, Color.rgb(228, 238, 248), false));
+            col.addView(text(headToHeadMode ? "Team A · " + selectedTeam.abbr : "Team profile · " + selectedTeam.abbr, 11, INK, false));
             selectedPreviewBox.addView(col, new LinearLayout.LayoutParams(0, -2, 1));
             TextView hint = text(headToHeadMode ? "A" : (rankingsModeActive ? "Ranks" : "Change"), 10, Color.WHITE, true);
             hint.setGravity(Gravity.CENTER);
@@ -5182,8 +5216,23 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             LinearLayout col = new LinearLayout(this);
             col.setOrientation(LinearLayout.VERTICAL);
             col.addView(text(selectedPlayer.fullName, 14, Color.WHITE, true));
-            col.addView(text(headToHeadMode ? "Player A · " + selectedPlayer.teamAbbr + " · " + selectedPlayer.position : selectedPlayer.teamAbbr + " · " + selectedPlayer.position, 11, Color.rgb(228, 238, 248), false));
+            col.addView(text(headToHeadMode ? "Player A · " + selectedPlayer.teamAbbr + " · " + selectedPlayer.position : selectedPlayer.teamAbbr + " · " + selectedPlayer.position, 11, INK, false));
             selectedPreviewBox.addView(col, new LinearLayout.LayoutParams(0, -2, 1));
+            // v237: favorite-star toggle. Filled gold when favorited, hollow otherwise; tapping
+            // persists immediately and updates in place.
+            final Player favPlayer = selectedPlayer;
+            TextView star = text(isFavoritePlayer(favPlayer.id) ? "★" : "☆", 18,
+                    isFavoritePlayer(favPlayer.id) ? Color.rgb(244, 192, 54) : INK_DIM, true);
+            star.setGravity(Gravity.CENTER);
+            star.setPadding(dp(8), dp(2), dp(10), dp(2));
+            star.setContentDescription("Toggle favorite");
+            makePremiumButton(star, 16f);
+            star.setOnClickListener(v -> {
+                boolean nowFav = toggleFavoritePlayer(favPlayer);
+                star.setText(nowFav ? "★" : "☆");
+                star.setTextColor(nowFav ? Color.rgb(244, 192, 54) : INK_DIM);
+            });
+            selectedPreviewBox.addView(star);
             TextView hint = text(headToHeadMode ? "A" : (rankingsModeActive ? "Ranks" : "Change"), 10, Color.WHITE, true);
             hint.setGravity(Gravity.CENTER);
             hint.setPadding(dp(8), dp(4), dp(8), dp(4));
@@ -5237,7 +5286,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             tv.setTextColor(Color.rgb(8, 16, 26));
             tv.setBackground(roundedGradientStroke(new int[] { Color.rgb(255, 243, 140), Color.rgb(88, 210, 232) }, 999, Color.argb(210, 255, 245, 150), 1));
         } else {
-            tv.setTextColor(Color.rgb(220, 229, 242));
+            tv.setTextColor(INK);
             tv.setBackground(roundedStroke(Color.argb(16, 255, 255, 255), Color.argb(70, 190, 214, 236), 999, 1));
         }
         return tv;
@@ -5251,7 +5300,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         top.setOrientation(LinearLayout.VERTICAL);
         top.addView(text("Comparison Lens", 14, Color.WHITE, true));
         String current = metricPresetNameForRole(selectedMetricKeys, allowedMetricRoleForCurrentContext());
-        TextView hint = text("One Lens controls the matchup card, key edge stats, and default rows below. Current: " + current, 12, Color.rgb(190, 205, 223), false);
+        TextView hint = text("One Lens controls the matchup card, key edge stats, and default rows below. Current: " + current, 12, INK_SOFT, false);
         hint.setPadding(0, dp(3), 0, dp(8));
         top.addView(hint);
         filterBox.addView(top, matchWrap());
@@ -5288,7 +5337,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         TextView custom = text("Custom Card", 13, Color.WHITE, true);
         custom.setPadding(0, dp(12), 0, dp(2));
         filterBox.addView(custom);
-        TextView customHint = text("Check stats below to create a Custom Lens. Selected stats become the scored card stats and the default rows below.", 11, Color.rgb(190, 205, 223), false);
+        TextView customHint = text("Check stats below to create a Custom Lens. Selected stats become the scored card stats and the default rows below.", 11, INK_SOFT, false);
         customHint.setPadding(0, 0, 0, dp(6));
         filterBox.addView(customHint);
 
@@ -5322,7 +5371,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         cb.setChecked(selectedMetricKeys.contains(m.key));
         cb.setButtonTintList(ColorStateList.valueOf(TEAL));
         cb.setPadding(dp(8), dp(6), dp(8), dp(6));
-        cb.setBackground(roundedStroke(Color.rgb(248, 250, 253), LINE, 14, 1));
+        cb.setBackground(roundedStroke(INK, LINE, 14, 1));
         cb.setOnCheckedChangeListener((buttonView, isChecked) -> {
             if (updatingMetricChecks) return;
             metricsManuallyCustomized = true;
@@ -5738,7 +5787,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             LinearLayout col = new LinearLayout(this);
             col.setOrientation(LinearLayout.VERTICAL);
             col.addView(text(compareTeam.name, 16, Color.WHITE, true));
-            col.addView(text("Head-to-head opponent · " + compareTeam.abbr, 11, Color.rgb(228, 238, 248), false));
+            col.addView(text("Head-to-head opponent · " + compareTeam.abbr, 11, INK, false));
             comparePreviewBox.addView(col, new LinearLayout.LayoutParams(0, -2, 1));
         } else {
             ImageView img = new ImageView(this);
@@ -5753,7 +5802,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             LinearLayout col = new LinearLayout(this);
             col.setOrientation(LinearLayout.VERTICAL);
             col.addView(text(comparePlayer.fullName, 16, Color.WHITE, true));
-            col.addView(text("Opponent · " + comparePlayer.teamAbbr + " · " + comparePlayer.position, 11, Color.rgb(228, 238, 248), false));
+            col.addView(text("Opponent · " + comparePlayer.teamAbbr + " · " + comparePlayer.position, 11, INK, false));
             comparePreviewBox.addView(col, new LinearLayout.LayoutParams(0, -2, 1));
         }
         TextView hint = text("VS", 11, Color.WHITE, true);
@@ -6003,7 +6052,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     }
 
     private TextView premiumMatchupLoadingStatusCard(String title, String subtitle) {
-        TextView tv = text(title + "\n" + subtitle, 11, Color.rgb(210, 226, 244), true);
+        TextView tv = text(title + "\n" + subtitle, 11, INK, true);
         tv.setGravity(Gravity.CENTER);
         tv.setSingleLine(false);
         tv.setMaxLines(3);
@@ -6168,7 +6217,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         card.addView(eyebrow);
         String statName = metric == null ? "selected stats" : metric.label;
         card.addView(text("Loading " + statName, 22, Color.WHITE, true));
-        TextView sub = text(season + " season · " + (teamMode ? "all MLB teams" : "qualified MLB players"), 12, Color.rgb(190, 205, 223), false);
+        TextView sub = text(season + " season · " + (teamMode ? "all MLB teams" : "qualified MLB players"), 12, INK_SOFT, false);
         sub.setPadding(0, dp(6), 0, dp(10));
         card.addView(sub);
 
@@ -6357,12 +6406,12 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         String subject = teamRows ? ((generalRankingsMode || selectedTeam == null) ? "Team leaders" : selectedTeam.name) : ((generalRankingsMode || selectedPlayer == null) ? "Player leaders" : selectedPlayer.fullName);
         card.addView(text(subject, 20, Color.WHITE, true));
         addRankingScopeToggle(card, teamRows);
-        TextView sub = text(season + " season · rank, value, and current leader", 12, Color.rgb(178, 195, 216), false);
+        TextView sub = text(season + " season · rank, value, and current leader", 12, INK_DIM, false);
         sub.setPadding(0, dp(3), 0, dp(8));
         card.addView(sub);
         lastStandingsText = subject + " " + season + " rankings across selected stats\nMetric\tRank\tValue\tLeader\tLeader Value\n";
         if (rows.isEmpty()) {
-            TextView empty = text("No ranking rows found for the selected stats. Try a different stat preset.", 14, Color.rgb(178, 195, 216), false);
+            TextView empty = text("No ranking rows found for the selected stats. Try a different stat preset.", 14, INK_DIM, false);
             empty.setPadding(0, dp(10), 0, dp(10));
             card.addView(empty);
         }
@@ -6391,7 +6440,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         } else if (!teamRows && r.playerId > 0) {
             ImageView avatar = new ImageView(this);
             avatar.setScaleType(ImageView.ScaleType.FIT_CENTER);
-            avatar.setBackground(roundedStroke(Color.rgb(235, 241, 248), LINE, 17, 1));
+            avatar.setBackground(roundedStroke(INK, LINE, 17, 1));
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(34), dp(34));
             lp.setMargins(0, 0, dp(8), 0);
             row.addView(avatar, lp);
@@ -6402,7 +6451,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         col.setOrientation(LinearLayout.VERTICAL);
         String rankText = displayRankLabel(r.rank, r.total, teamRows);
         col.addView(text(r.metric.label + " · " + rankText, 13, Color.WHITE, true));
-        col.addView(text("Leader: " + r.leaderName + " " + format(r.leaderValue, r.metric), 10, Color.rgb(178, 195, 216), false));
+        col.addView(text("Leader: " + r.leaderName + " " + format(r.leaderValue, r.metric), 10, INK_DIM, false));
         row.addView(col, new LinearLayout.LayoutParams(0, -2, 1));
 
         TextView info = compactStatInfoButton(r.metric);
@@ -6724,7 +6773,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         TextView profileLabel = text(c.isTeam ? "TEAM PROFILE" : "PLAYER PROFILE", 10, softColor(palette.primary, 0.12f), true);
         profileLabel.setLetterSpacing(0.10f);
         topMeta.addView(profileLabel, new LinearLayout.LayoutParams(0, -2, 1));
-        TextView seasonBadge = text(String.valueOf(c.season), 10, Color.rgb(235, 242, 251), true);
+        TextView seasonBadge = text(String.valueOf(c.season), 10, INK, true);
         seasonBadge.setGravity(Gravity.CENTER);
         seasonBadge.setPadding(dp(9), dp(4), dp(9), dp(4));
         seasonBadge.setBackground(roundedStroke(Color.argb(28, 255, 255, 255), Color.argb(78, 255, 255, 255), 15, 1));
@@ -6835,7 +6884,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         TextView name = text(c.name, 16, Color.WHITE, true);
         name.setLetterSpacing(0.02f);
         titleCol.addView(name);
-        TextView meta = text(c.meta + " · " + c.season, 10, Color.rgb(214, 223, 236), true);
+        TextView meta = text(c.meta + " · " + c.season, 10, INK_SOFT, true);
         meta.setPadding(0, 0, 0, dp(3));
         titleCol.addView(meta);
         if (c.isTeam) {
@@ -6855,7 +6904,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         sectionRow.setOrientation(LinearLayout.HORIZONTAL);
         sectionRow.setGravity(Gravity.CENTER_VERTICAL);
         sectionRow.setPadding(0, dp(9), 0, dp(3));
-        TextView tableTitle = text(c.isTeam ? "Profile comparison" : "Lens vs MLB average", 17, Color.rgb(214, 225, 242), true);
+        TextView tableTitle = text(c.isTeam ? "Profile comparison" : "Lens vs MLB average", 17, INK, true);
         sectionRow.addView(tableTitle, new LinearLayout.LayoutParams(0, -2, 1));
         sectionRow.addView(c.isTeam ? comparisonLegend(c.thirdLabelShort(), palette) : profileSparkLegend());
         metricBox.addView(sectionRow, matchWrap());
@@ -6930,7 +6979,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         modesLp.setMargins(0, dp(5), 0, 0);
         shell.addView(modes, modesLp);
 
-        TextView mlbChip = profileControlChip("MLB Avg", Color.rgb(210, 222, 238), !expectedMode, () -> {
+        TextView mlbChip = profileControlChip("MLB Avg", INK_SOFT, !expectedMode, () -> {
             int keepY = mainScroll == null ? 0 : mainScroll.getScrollY();
             expectedMode = false;
             suppressNextAutoScroll = true;
@@ -7054,7 +7103,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         TextView title = text(c.isTeam ? "TEAM SNAPSHOT" : "PLAYER SNAPSHOT", 11, softColor(palette.primary, 0.16f), true);
         title.setLetterSpacing(0.12f);
         head.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
-        TextView season = text(c.season + " SEASON", 10, Color.rgb(218, 230, 244), true);
+        TextView season = text(c.season + " SEASON", 10, INK, true);
         season.setGravity(Gravity.CENTER);
         season.setPadding(dp(9), dp(4), dp(9), dp(4));
         season.setBackground(roundedStroke(Color.argb(24, 255, 255, 255), Color.argb(72, 255, 255, 255), 999, 1));
@@ -7085,7 +7134,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         tile.setBackground(roundedStroke(Color.argb(104, 13, 17, 25), Color.argb(56, 255, 255, 255), 14, 1));
         String label = snapshotMetricLabel(m, key);
         Double v = c == null || c.seasonStats == null ? null : c.seasonStats.get(key);
-        TextView lab = text(label, 9, Color.rgb(204, 214, 230), true);
+        TextView lab = text(label, 9, INK_SOFT, true);
         lab.setGravity(Gravity.CENTER);
         lab.setLetterSpacing(0.06f);
         tile.addView(lab, matchWrap());
@@ -7129,13 +7178,13 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         TextView title = text(c.isTeam ? "KEY TEAM METRICS" : "KEY METRICS · " + currentLensNameForUi().toUpperCase(Locale.US), 10, softColor(palette.primary, 0.14f), true);
         title.setLetterSpacing(0.10f);
         head.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
-        TextView sub = text(modeLabel, 9, Color.rgb(168, 184, 206), true);
+        TextView sub = text(modeLabel, 9, INK_DIM, true);
         sub.setGravity(Gravity.RIGHT);
         head.addView(sub);
         shell.addView(head, matchWrap());
 
         if (metrics == null || metrics.isEmpty()) {
-            TextView empty = text(expectedMode ? "No xStat pairs are available for this lens." : "No key metrics available.", 12, Color.rgb(178, 195, 216), true);
+            TextView empty = text(expectedMode ? "No xStat pairs are available for this lens." : "No key metrics available.", 12, INK_DIM, true);
             empty.setGravity(Gravity.CENTER);
             empty.setPadding(dp(10), dp(16), dp(10), dp(16));
             empty.setBackground(roundedStroke(Color.argb(18, 255, 255, 255), Color.argb(54, 190, 214, 236), 17, 1));
@@ -7331,7 +7380,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     }
 
     private TextView compactStatInfoButton(Metric m) {
-        TextView info = text("i", 9, Color.rgb(178, 195, 216), true);
+        TextView info = text("i", 9, INK_DIM, true);
         info.setGravity(Gravity.CENTER);
         info.setPadding(0, 0, 0, dp(1));
         info.setBackground(roundedStroke(Color.argb(24, 255, 255, 255), Color.argb(72, 255, 255, 255), 999, 1));
@@ -7392,8 +7441,8 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         vals.setOrientation(LinearLayout.HORIZONTAL);
         vals.setGravity(Gravity.CENTER_VERTICAL);
         vals.addView(metricTileMiniValue("THIS YEAR", format(value, m), accent), new LinearLayout.LayoutParams(0, -2, 1));
-        vals.addView(metricTileMiniValue("MLB AVG", format(league, m), Color.rgb(220, 228, 240)), new LinearLayout.LayoutParams(0, -2, 1));
-        vals.addView(metricTileMiniValue(c.isTeam ? "2015+" : "CAREER", format(career, m), Color.rgb(220, 228, 240)), new LinearLayout.LayoutParams(0, -2, 1));
+        vals.addView(metricTileMiniValue("MLB AVG", format(league, m), INK), new LinearLayout.LayoutParams(0, -2, 1));
+        vals.addView(metricTileMiniValue(c.isTeam ? "2015+" : "CAREER", format(career, m), INK), new LinearLayout.LayoutParams(0, -2, 1));
         LinearLayout.LayoutParams valsLp = matchWrap();
         valsLp.setMargins(0, dp(1), 0, 0);
         tile.addView(vals, valsLp);
@@ -7407,7 +7456,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         Double expected = c.seasonStats == null ? null : c.seasonStats.get(expectedKey);
         Double gap = diff(actual, expected);
         int accent = gap == null || Math.abs(gap) < 0.000001
-                ? Color.rgb(210, 222, 238)
+                ? INK_SOFT
                 : (gap > 0 ? softColor(palette.primary, 0.08f) : profileNegativeColor());
 
         LinearLayout tile = new LinearLayout(this);
@@ -7443,7 +7492,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         LinearLayout actualCol = new LinearLayout(this);
         actualCol.setOrientation(LinearLayout.VERTICAL);
         TextView actualLabel = text("ACTUAL", 8, softColor(palette.primary, 0.08f), true);
-        TextView actualVal = text(format(actual, actualMetric), 18, Color.rgb(238, 245, 252), true);
+        TextView actualVal = text(format(actual, actualMetric), 18, INK, true);
         actualVal.setFontFeatureSettings("'tnum' 1");
         actualCol.addView(actualLabel);
         actualCol.addView(actualVal);
@@ -7454,7 +7503,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         expectedCol.setGravity(Gravity.RIGHT);
         TextView expLabel = text("EXPECTED", 8, Color.rgb(174, 218, 255), true);
         expLabel.setGravity(Gravity.RIGHT);
-        TextView expVal = text(format(expected, expectedMetric), 18, Color.rgb(238, 245, 252), true);
+        TextView expVal = text(format(expected, expectedMetric), 18, INK, true);
         expVal.setGravity(Gravity.RIGHT);
         expVal.setFontFeatureSettings("'tnum' 1");
         expectedCol.addView(expLabel);
@@ -7506,7 +7555,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         if (p >= 80) return softColor(palette.primary, 0.08f);
         if (p >= 60) return mixColor(Color.WHITE, softColor(palette.primary, 0.10f), 0.30f);
         if (p <= 35) return profileNegativeColor();
-        return Color.rgb(220, 228, 240);
+        return INK;
     }
 
     private String ordinalPercentile(Double pct) {
@@ -7526,7 +7575,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         LinearLayout legend = new LinearLayout(this);
         legend.setOrientation(LinearLayout.HORIZONTAL);
         legend.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
-        legend.addView(legendMini("Avg", Color.rgb(190, 202, 222)));
+        legend.addView(legendMini("Avg", INK_SOFT));
         legend.addView(legendMini("Better", profilePositiveColor()));
         return legend;
     }
@@ -7596,7 +7645,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
     private int profilePositiveColor() { return Color.rgb(78, 229, 235); }
     private int profileNegativeColor() { return Color.rgb(255, 135, 112); }
-    private int profileNeutralColor() { return Color.rgb(210, 220, 235); }
+    private int profileNeutralColor() { return INK_SOFT; }
 
     private int profileSparkColor(Double signedEdge) {
         if (signedEdge == null || Double.isNaN(signedEdge) || Math.abs(signedEdge) < 0.08d) return profileNeutralColor();
@@ -7705,7 +7754,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         TextView sub = text(showAllResultsStats
                 ? allCount + " available stats"
                 : "Lens: " + lensName + " · " + lensCount + " stats",
-                11, Color.rgb(178, 195, 216), false);
+                11, INK_DIM, false);
         sub.setPadding(0, dp(2), 0, 0);
         copy.addView(sub);
         top.addView(copy, new LinearLayout.LayoutParams(0, -2, 1));
@@ -7737,11 +7786,11 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
         header.setPadding(0, dp(2), 0, dp(5));
-        TextView label = text("Stat tabs", 12, Color.rgb(166, 182, 205), true);
+        TextView label = text("Stat tabs", 12, INK_DIM, true);
         header.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
         int matching = 0;
         for (Metric m : rowMetrics) if (metricMatchesCategory(m, activeResultsStatCategory)) matching++;
-        TextView status = text(("all".equals(activeResultsStatCategory) ? "Selected" : categoryLabel(activeResultsStatCategory)) + " · " + matching + " stats", 11, Color.rgb(132, 146, 166), false);
+        TextView status = text(("all".equals(activeResultsStatCategory) ? "Selected" : categoryLabel(activeResultsStatCategory)) + " · " + matching + " stats", 11, EYEBROW, false);
         header.addView(status);
         metricBox.addView(header, matchWrap());
 
@@ -7760,7 +7809,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
     private TextView profileCategoryChip(String key) {
         boolean active = key.equals(activeResultsStatCategory);
-        TextView tv = text(categoryLabel(key), 12, active ? Color.rgb(7, 18, 28) : Color.rgb(220, 229, 242), true);
+        TextView tv = text(categoryLabel(key), 12, active ? Color.rgb(7, 18, 28) : INK, true);
         tv.setGravity(Gravity.CENTER);
         tv.setSingleLine(true);
         tv.setPadding(dp(12), dp(8), dp(12), dp(8));
@@ -7831,7 +7880,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         copy.addView(text(m.label, 14, Color.WHITE, true));
         String desc = metricDescription(m.key);
         if (desc == null || desc.trim().isEmpty()) desc = m.group;
-        copy.addView(text(desc, 11, Color.rgb(178, 195, 216), false));
+        copy.addView(text(desc, 11, INK_DIM, false));
         row.addView(copy, new LinearLayout.LayoutParams(0, -2, 1));
 
         LinearLayout valueCol = new LinearLayout(this);
@@ -7846,7 +7895,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         valueCol.addView(rankTv);
         row.addView(valueCol);
 
-        TextView arrow = text("›", 20, Color.rgb(178, 195, 216), false);
+        TextView arrow = text("›", 20, INK_DIM, false);
         arrow.setPadding(dp(8), 0, 0, 0);
         row.addView(arrow);
         row.setClickable(true);
@@ -7888,7 +7937,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         TextView title = text(c.isTeam ? "TEAM CARD" : "PLAYER CARD", 10, softColor(palette.primary, 0.18f), true);
         title.setLetterSpacing(0.08f);
         headText.addView(title);
-        headText.addView(text(c.isTeam ? "Recent seasons + 2015+ avg" : "Seasons + career", 11, Color.rgb(244, 248, 252), true));
+        headText.addView(text(c.isTeam ? "Recent seasons + 2015+ avg" : "Seasons + career", 11, INK, true));
         head.addView(headText, new LinearLayout.LayoutParams(0, -2, 1));
         TextView chip = text(String.valueOf(c.season), 10, Color.WHITE, true);
         chip.setGravity(Gravity.CENTER);
@@ -7964,12 +8013,12 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             line.setOrientation(LinearLayout.HORIZONTAL);
             line.setGravity(Gravity.CENTER_VERTICAL);
             line.setPadding(0, dp(3), 0, 0);
-            TextView lab = text(m.label, 9, Color.rgb(184, 196, 212), true);
+            TextView lab = text(m.label, 9, INK_SOFT, true);
             lab.setLetterSpacing(0.06f);
             line.addView(lab, new LinearLayout.LayoutParams(dp(52), -2));
             for (Map.Entry<String, Stats> e : windows) {
                 Double v = e.getValue() == null ? null : e.getValue().get(m.key);
-                TextView val = text(format(v, m), 10, Color.rgb(240, 245, 252), true);
+                TextView val = text(format(v, m), 10, INK, true);
                 val.setGravity(Gravity.CENTER);
                 val.setPadding(dp(2), dp(2), dp(2), dp(2));
                 val.setBackground(roundedStroke(Color.argb(32, 255, 255, 255), Color.argb(58, 255, 255, 255), 12, 1));
@@ -8021,9 +8070,9 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(0, 0, 0, dp(5));
-        TextView season = tableCell("Season", 50, Color.rgb(186, 199, 216), true, Gravity.LEFT);
+        TextView season = tableCell("Season", 50, INK_SOFT, true, Gravity.LEFT);
         row.addView(season);
-        for (Metric m : cols) row.addView(tableCell(m.label, 58, Color.rgb(186, 199, 216), true, Gravity.CENTER));
+        for (Metric m : cols) row.addView(tableCell(m.label, 58, INK_SOFT, true, Gravity.CENTER));
         return row;
     }
 
@@ -8038,8 +8087,8 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         int fill = current ? Color.argb(188, 18, 22, 30) : (career ? Color.argb(146, 28, 32, 40) : Color.argb(28, 255, 255, 255));
         int stroke = current ? softColor(palette.primary, 0.28f) : (career ? softColor(palette.primary, 0.50f) : Color.argb(44, 255, 255, 255));
         row.setBackground(roundedStroke(fill, stroke, 14, 1));
-        int labelColor = current ? softColor(palette.primary, 0.18f) : (career ? Color.rgb(248, 236, 210) : Color.rgb(235, 242, 250));
-        int valueColor = current ? Color.WHITE : (career ? Color.rgb(246, 239, 221) : Color.rgb(235, 242, 250));
+        int labelColor = current ? softColor(palette.primary, 0.18f) : (career ? Color.rgb(248, 236, 210) : INK);
+        int valueColor = current ? Color.WHITE : (career ? Color.rgb(246, 239, 221) : INK);
         row.addView(tableCell(label, 50, labelColor, true, Gravity.LEFT));
         for (Metric m : cols) {
             Double val = stats == null ? null : stats.get(m.key);
@@ -8159,7 +8208,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         sectionRow.setOrientation(LinearLayout.HORIZONTAL);
         sectionRow.setGravity(Gravity.CENTER_VERTICAL);
         sectionRow.setPadding(0, dp(9), 0, dp(3));
-        sectionRow.addView(text("Side-by-side stats", 18, Color.rgb(202, 214, 232), true), new LinearLayout.LayoutParams(0, -2, 1));
+        sectionRow.addView(text("Side-by-side stats", 18, INK_SOFT, true), new LinearLayout.LayoutParams(0, -2, 1));
         TextView statsChip = filterChip("Stats", () -> showMetricPicker());
         LinearLayout.LayoutParams statsChipLp = new LinearLayout.LayoutParams(dp(82), dp(34));
         statsChipLp.setMargins(0, 0, dp(7), 0);
@@ -8209,7 +8258,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
         header.setPadding(0, dp(2), 0, dp(5));
-        TextView label = text("Stat tabs", 12, Color.rgb(166, 182, 205), true);
+        TextView label = text("Stat tabs", 12, INK_DIM, true);
         header.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
         int matching = 0;
         for (Metric m : rowMetrics) if (metricMatchesCategory(m, activeResultsStatCategory)) matching++;
@@ -8232,7 +8281,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
     private TextView headToHeadCategoryChip(String key) {
         boolean active = key.equals(activeResultsStatCategory);
-        TextView tv = text(categoryLabel(key), 12, active ? Color.rgb(7, 18, 28) : Color.rgb(220, 229, 242), true);
+        TextView tv = text(categoryLabel(key), 12, active ? Color.rgb(7, 18, 28) : INK, true);
         tv.setGravity(Gravity.CENTER);
         tv.setSingleLine(true);
         tv.setPadding(dp(12), dp(8), dp(12), dp(8));
@@ -8266,7 +8315,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             ImageView img = new ImageView(this);
             img.setScaleType(ImageView.ScaleType.FIT_CENTER);
             img.setAdjustViewBounds(true);
-            img.setBackground(roundedStroke(Color.rgb(235, 241, 248), LINE, 18, 1));
+            img.setBackground(roundedStroke(INK, LINE, 18, 1));
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(44), dp(44));
             lp.setMargins(0, 0, dp(8), 0);
             tile.addView(img, lp);
@@ -9242,9 +9291,9 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             float lastSpacing = h.isTeam && lastUpper.length() > 11 ? 0.04f : 0.07f;
             float firstSize = fitTextSize(paint, firstUpper, dp(12), dp(10), h.isTeam ? dp(170) : dp(128), firstSpacing, false);
             float lastSize = fitTextSize(paint, lastUpper, h.isTeam ? dp(21) : dp(23), h.isTeam ? dp(15) : dp(18), h.isTeam ? dp(184) : dp(140), lastSpacing, true);
-            drawText(canvas, firstUpper, cx, y, firstSize, Color.rgb(207, 218, 232), false, Paint.Align.CENTER, firstSpacing);
-            drawText(canvas, lastUpper, cx, y + dp(30), lastSize, Color.rgb(239, 243, 249), true, Paint.Align.CENTER, lastSpacing);
-            int metaColor = mixColor(ensureReadableColor(readableTeamColor(palette.primary, palette.secondary, left), 178), Color.rgb(218, 226, 238), 0.08f);
+            drawText(canvas, firstUpper, cx, y, firstSize, INK_SOFT, false, Paint.Align.CENTER, firstSpacing);
+            drawText(canvas, lastUpper, cx, y + dp(30), lastSize, INK, true, Paint.Align.CENTER, lastSpacing);
+            int metaColor = mixColor(ensureReadableColor(readableTeamColor(palette.primary, palette.secondary, left), 178), INK, 0.08f);
             paint.setShadowLayer(dp(6), 0, 0, Color.argb(120, 0, 0, 0));
             drawText(canvas, safe(meta).toUpperCase(Locale.US), cx, y + dp(58), dp(11), metaColor, true, Paint.Align.CENTER, 0.11f);
             paint.clearShadowLayer();
@@ -9279,8 +9328,8 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             int rightPct = keyScore.edgePctB();
             boolean aAhead = leftPct > rightPct;
             boolean bAhead = rightPct > leftPct;
-            int leftColor = mixColor(ensureReadableColor(boostNeonColor(leftBase, aAhead ? 1.22f : 1.08f, aAhead ? 1.14f : 1.05f), aAhead ? 176 : 164), Color.rgb(216, 224, 236), 0.06f);
-            int rightColor = mixColor(ensureReadableColor(boostNeonColor(rightBase, bAhead ? 1.22f : 1.08f, bAhead ? 1.14f : 1.05f), bAhead ? 176 : 164), Color.rgb(216, 224, 236), 0.06f);
+            int leftColor = mixColor(ensureReadableColor(boostNeonColor(leftBase, aAhead ? 1.22f : 1.08f, aAhead ? 1.14f : 1.05f), aAhead ? 176 : 164), INK, 0.06f);
+            int rightColor = mixColor(ensureReadableColor(boostNeonColor(rightBase, bAhead ? 1.22f : 1.08f, bAhead ? 1.14f : 1.05f), bAhead ? 176 : 164), INK, 0.06f);
             int leaderGlow = aAhead ? leftColor : (bAhead ? rightColor : Color.WHITE);
             String leader = aAhead ? shortName(h.nameA).toUpperCase(Locale.US) : (bAhead ? shortName(h.nameB).toUpperCase(Locale.US) : "EVEN");
             int pctDiff = Math.abs(leftPct - rightPct);
@@ -9288,9 +9337,9 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             String title = pctDiff <= 2 ? "WEIGHTED EDGE · EVEN" : "WEIGHTED EDGE · " + leader + " " + leadWord;
 
             float titleSize = fitTextSize(paint, title, dp(9), dp(7), score.width() - dp(30), 0.10f, true);
-            drawText(canvas, title, score.centerX(), score.top + dp(20), titleSize, Color.rgb(232, 240, 249), true, Paint.Align.CENTER, 0.10f);
-            drawText(canvas, premiumCardScoreContextLine(), score.centerX(), score.top + dp(37), dp(7), isBullpenHeroComparison(h) ? Color.rgb(247, 197, 77) : Color.rgb(194, 210, 232), true, Paint.Align.CENTER, 0.10f);
-            drawText(canvas, premiumCardScoreMetaLine(), score.centerX(), score.top + dp(51), dp(7), Color.rgb(166, 181, 202), true, Paint.Align.CENTER, 0.11f);
+            drawText(canvas, title, score.centerX(), score.top + dp(20), titleSize, INK, true, Paint.Align.CENTER, 0.10f);
+            drawText(canvas, premiumCardScoreContextLine(), score.centerX(), score.top + dp(37), dp(7), isBullpenHeroComparison(h) ? Color.rgb(247, 197, 77) : INK_SOFT, true, Paint.Align.CENTER, 0.10f);
+            drawText(canvas, premiumCardScoreMetaLine(), score.centerX(), score.top + dp(51), dp(7), INK_DIM, true, Paint.Align.CENTER, 0.11f);
 
             float midY = score.top + dp(78);
             float scoreSize = dp(35);
@@ -9306,7 +9355,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             drawText(canvas, leftScoreText, xA, midY, scoreSize, leftColor, true, Paint.Align.CENTER, 0.00f);
             paint.clearShadowLayer();
 
-            drawText(canvas, "–", score.centerX(), midY - dp(2), hyphenSize, Color.rgb(226, 234, 244), true, Paint.Align.CENTER, 0.00f);
+            drawText(canvas, "–", score.centerX(), midY - dp(2), hyphenSize, INK, true, Paint.Align.CENTER, 0.00f);
 
             paint.setShadowLayer(dp(4), 0, dp(2), Color.argb(150, 0, 0, 0));
             drawText(canvas, rightScoreText, xB, midY, scoreSize, rightColor, true, Paint.Align.CENTER, 0.00f);
@@ -9353,7 +9402,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             keyEdgePickerHotspot.set(card.left + dp(10), keyY - dp(26), card.left + dp(244), keyY + dp(16));
             String sectionTitle = premiumCardStatSectionTitle();
             float sectionTitleSize = fitTextSize(paint, sectionTitle, dp(11), dp(8), card.width() - dp(90), 0.10f, true);
-            drawText(canvas, sectionTitle, card.left + dp(48), keyY, sectionTitleSize, Color.rgb(228, 235, 245), true, Paint.Align.LEFT, 0.10f);
+            drawText(canvas, sectionTitle, card.left + dp(48), keyY, sectionTitleSize, INK, true, Paint.Align.LEFT, 0.10f);
             paint.setStyle(Paint.Style.FILL);
             paint.setShader(null);
             paint.setColor(Color.argb(48, 255, 255, 255));
@@ -9444,7 +9493,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             strokePaint.clearShadowLayer();
             strokePaint.setStrokeCap(Paint.Cap.BUTT);
 
-            drawText(canvas, m.label, panel.centerX(), centeredTextBaseline(cy, dp(8.0f), true), dp(8.0f), Color.rgb(230, 238, 248), true, Paint.Align.CENTER, 0.12f);
+            drawText(canvas, m.label, panel.centerX(), centeredTextBaseline(cy, dp(8.0f), true), dp(8.0f), INK, true, Paint.Align.CENTER, 0.12f);
         }
 
         private void drawTextFit(Canvas canvas, String txt, float x, float y, float maxW, float size,
@@ -9470,8 +9519,8 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             int bBase = battleTeamColor(paletteB, paletteA, false);
             int aStrong = boostNeonColor(aBase, 1.58f, 1.18f);
             int bStrong = boostNeonColor(bBase, 1.58f, 1.18f);
-            int aColor = mixColor(ensureReadableColor(boostNeonColor(aBase, 1.16f, 1.05f), 168), Color.rgb(216, 224, 236), 0.07f);
-            int bColor = mixColor(ensureReadableColor(boostNeonColor(bBase, 1.16f, 1.05f), 168), Color.rgb(216, 224, 236), 0.07f);
+            int aColor = mixColor(ensureReadableColor(boostNeonColor(aBase, 1.16f, 1.05f), 168), INK, 0.07f);
+            int bColor = mixColor(ensureReadableColor(boostNeonColor(bBase, 1.16f, 1.05f), 168), INK, 0.07f);
 
             float rowH = bottom - top;
             float leftX = panel.left + dp(22);
@@ -9491,7 +9540,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             drawText(canvas, shareFormat(b, m), rightX, centeredTextBaseline(valueY, valueSize, true), valueSize, winner > 0 ? bStrong : bColor, true, Paint.Align.RIGHT, 0.00f);
             paint.clearShadowLayer();
 
-            drawText(canvas, m.label, cX, centeredTextBaseline(labelY, labelSize, true), labelSize, Color.rgb(224, 232, 242), true, Paint.Align.CENTER, 0.10f);
+            drawText(canvas, m.label, cX, centeredTextBaseline(labelY, labelSize, true), labelSize, INK, true, Paint.Align.CENTER, 0.10f);
 
             float railLeft = panel.left + dp(126);
             float railRight = panel.right - dp(126);
@@ -9499,9 +9548,9 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
             String[] leftLines = bullpenCategorySubLines(m.key, h.statsA);
             String[] rightLines = bullpenCategorySubLines(m.key, h.statsB);
-            drawTextFit(canvas, leftLines[0], leftX, sub1Y, dp(190), dp(7.4f), Color.rgb(190, 205, 226), true, Paint.Align.LEFT, 0.02f);
+            drawTextFit(canvas, leftLines[0], leftX, sub1Y, dp(190), dp(7.4f), INK_SOFT, true, Paint.Align.LEFT, 0.02f);
             drawTextFit(canvas, leftLines[1], leftX, sub2Y, dp(190), dp(7.2f), Color.rgb(150, 168, 194), true, Paint.Align.LEFT, 0.02f);
-            drawTextFit(canvas, rightLines[0], rightX, sub1Y, dp(190), dp(7.4f), Color.rgb(190, 205, 226), true, Paint.Align.RIGHT, 0.02f);
+            drawTextFit(canvas, rightLines[0], rightX, sub1Y, dp(190), dp(7.4f), INK_SOFT, true, Paint.Align.RIGHT, 0.02f);
             drawTextFit(canvas, rightLines[1], rightX, sub2Y, dp(190), dp(7.2f), Color.rgb(150, 168, 194), true, Paint.Align.RIGHT, 0.02f);
         }
 
@@ -9582,12 +9631,12 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             float railRight = panel.right - dp(92);
             float cX = (railLeft + railRight) / 2f;
 
-            int valueColor = Color.rgb(190, 203, 222);
-            int labelColor = Color.rgb(166, 181, 202);
+            int valueColor = INK_SOFT;
+            int labelColor = INK_DIM;
             drawText(canvas, shareFormat(a, m), leftValueX, valueBaseline, valueSize, valueColor, true, Paint.Align.LEFT, 0.00f);
             drawText(canvas, shareFormat(b, m), rightValueX, valueBaseline, valueSize, valueColor, true, Paint.Align.RIGHT, 0.00f);
             drawText(canvas, m.label, cX, labelBaseline, labelSize, labelColor, true, Paint.Align.CENTER, 0.09f);
-            drawShareMiniBadge(canvas, "CTX", Math.min(railRight - dp(21), cX + dp(74)), top + rowH * 0.40f, Color.rgb(150, 166, 190));
+            drawShareMiniBadge(canvas, "CTX", Math.min(railRight - dp(21), cX + dp(74)), top + rowH * 0.40f, INK_DIM);
 
             strokePaint.setStyle(Paint.Style.STROKE);
             strokePaint.setStrokeCap(Paint.Cap.ROUND);
@@ -9625,8 +9674,8 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             int bStrong = boostNeonColor(bBase, 1.58f, 1.18f);
             // Keep stat text hues stable row-to-row so the same team does not drift between different purples/blues.
             // Winners get emphasis from glow/rail treatment, not from random text hue shifts.
-            int aColor = mixColor(ensureReadableColor(boostNeonColor(aBase, 1.16f, 1.05f), 168), Color.rgb(216, 224, 236), 0.07f);
-            int bColor = mixColor(ensureReadableColor(boostNeonColor(bBase, 1.16f, 1.05f), 168), Color.rgb(216, 224, 236), 0.07f);
+            int aColor = mixColor(ensureReadableColor(boostNeonColor(aBase, 1.16f, 1.05f), 168), INK, 0.07f);
+            int bColor = mixColor(ensureReadableColor(boostNeonColor(bBase, 1.16f, 1.05f), 168), INK, 0.07f);
             float rowH = bottom - top;
             float cy = (top + bottom) / 2f;
 
@@ -9666,13 +9715,13 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             drawText(canvas, rightText, rightValueX, valueBaseline, valueSize, bColor, true, Paint.Align.RIGHT, 0.00f);
             paint.clearShadowLayer();
 
-            drawText(canvas, m.label, cX, labelBaseline, labelSize, Color.rgb(224, 232, 242), true, Paint.Align.CENTER, 0.10f);
+            drawText(canvas, m.label, cX, labelBaseline, labelSize, INK, true, Paint.Align.CENTER, 0.10f);
             if (edge != null && edge.badge != null && !edge.badge.isEmpty()) {
                 paint.setTextSize(labelSize);
                 paint.setTypeface(tfBold);
                 float labelW = paint.measureText(m.label);
                 float badgeX = Math.min(railRight - dp(21), cX + labelW / 2f + dp(18));
-                int badgeColor = edge.contextOnly ? Color.rgb(176, 188, 206) : (edge.volumeSensitive ? Color.rgb(188, 198, 215) : Color.rgb(199, 211, 231));
+                int badgeColor = edge.contextOnly ? INK_DIM : (edge.volumeSensitive ? INK_SOFT : INK_SOFT);
                 drawShareMiniBadge(canvas, edge.badge, badgeX, labelCenterY, badgeColor);
             }
 
@@ -10084,23 +10133,47 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         }
 
         private int readableTeamColor(int primary, int secondary, boolean leftSide) {
-            // v110: strongly prefer the actual team identity color so neon effects stay
-            // recognizable (Rockies purple, A's green, Cubs blue, etc.) instead of drifting
-            // toward whichever palette swatch is brightest.
+            return readableTeamColor(primary, secondary, leftSide, false);
+        }
+
+        // v230: differentiate=true is used when two teams share a hue and we've already chosen
+        // this team's most-distinct color. In that case we must NOT mix back toward the
+        // secondary (the old code did, which dragged a differentiating navy back toward the
+        // shared red and the neon boost then turned it magenta — the ATL/STL bug). Instead we
+        // lift brightness on the color's OWN hue so the two sides stay genuinely different.
+        private int readableTeamColor(int primary, int secondary, boolean leftSide, boolean differentiate) {
             float[] hsvPrimary = new float[3];
             float[] hsvSecondary = new float[3];
             Color.colorToHSV(primary, hsvPrimary);
             Color.colorToHSV(secondary, hsvSecondary);
 
             int base = primary;
-            if (hsvPrimary[2] < 0.42f) {
-                base = mixColor(primary, secondary, 0.24f);
-            } else if (hsvPrimary[1] < 0.32f && hsvSecondary[1] > hsvPrimary[1] + 0.08f) {
-                base = mixColor(primary, secondary, 0.18f);
+            if (!differentiate) {
+                // v110: prefer the actual identity color; only nudge toward secondary when the
+                // primary is too dark or too desaturated to read on its own.
+                if (hsvPrimary[2] < 0.42f) {
+                    base = mixColor(primary, secondary, 0.24f);
+                } else if (hsvPrimary[1] < 0.32f && hsvSecondary[1] > hsvPrimary[1] + 0.08f) {
+                    base = mixColor(primary, secondary, 0.18f);
+                }
+            } else if (hsvPrimary[2] < 0.55f) {
+                // Dark differentiating color (e.g. a navy): brighten on its own hue instead of
+                // mixing toward the opponent, so it reads clearly as navy/green/etc.
+                base = brightenKeepingHue(primary, 0.62f);
             }
 
-            base = ensureReadableColor(base, leftSide ? 146 : 142);
+            base = ensureReadableColor(base, leftSide ? 152 : 150);
             return boostNeonColor(base, 1.24f, leftSide ? 1.12f : 1.10f);
+        }
+
+        // v230: raise a color's brightness toward a target value while holding hue, and only
+        // gently lifting saturation, so the hue stays unmistakable (no drift toward pink).
+        private int brightenKeepingHue(int color, float targetValue) {
+            float[] hsv = new float[3];
+            Color.colorToHSV(color, hsv);
+            hsv[2] = Math.max(hsv[2], targetValue);
+            hsv[1] = Math.min(1f, hsv[1] * 0.94f); // ease saturation a touch so it doesn't glow muddy
+            return Color.HSVToColor(hsv);
         }
 
         private boolean palettesTooSimilar(TeamPalette a, TeamPalette b) {
@@ -10117,13 +10190,19 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
         private int battleTeamColor(TeamPalette own, TeamPalette other, boolean leftSide) {
             if (own == null) return Color.WHITE;
-            int primary = own.primary;
-            int secondary = own.secondary;
-            if (!leftSide && palettesTooSimilar(own, other)) {
-                primary = own.secondary;
-                secondary = own.primary;
+            // v230: when two teams read as the same color, differentiate the RIGHT side by
+            // choosing whichever of its OWN palette colors sits furthest from the opponent's
+            // displayed color, then lift it on its own hue (differentiate=true) rather than the
+            // old primary↔secondary swap that got re-mixed back into magenta. The left side
+            // always keeps its true primary so one team's identity is never compromised.
+            if (!leftSide && other != null && palettesTooSimilar(own, other)) {
+                float toPrimary = colorDistance(own.primary, other.primary);
+                float toSecondary = colorDistance(own.secondary, other.primary);
+                int chosen = toSecondary > toPrimary ? own.secondary : own.primary;
+                int alt = chosen == own.secondary ? own.primary : own.secondary;
+                return readableTeamColor(chosen, alt, false, true);
             }
-            return readableTeamColor(primary, secondary, leftSide);
+            return readableTeamColor(own.primary, own.secondary, leftSide);
         }
 
         private int colorLuminance(int color) {
@@ -10818,6 +10897,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             out.glowStrength = 0d;
             out.scoreStrength = 0d;
         } else {
+            // VISUAL strength drives glows/sparks. Kept punchy so a real edge looks like one.
             double span = m.isCount() ? 42d : 35d;
             double linear = Math.max(0d, Math.min(1d, (out.adjustedEdge - deadZone) / span));
             double eased = 1d - Math.pow(1d - linear, 1.55d);
@@ -10826,7 +10906,21 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             if (out.contextOnly) eased = Math.min(eased, 0.52d);
             out.visualStrength = Math.max(0d, Math.min(1d, eased));
             out.glowStrength = out.visualStrength * (0.58d + 0.42d * out.reliability);
-            out.scoreStrength = out.contextOnly ? 0d : Math.max(0d, Math.min(1d, 0.20d + 0.80d * out.visualStrength));
+
+            // v226: SCORE strength is computed on its OWN, much gentler curve and decoupled
+            // from the visual curve. The old code did scoreStrength = 0.20 + 0.80*visualStrength,
+            // which (a) gave every winning row a 0.20 floor — so even a near-tie handed the
+            // winner 60% of that row — and (b) inherited the aggressive visual easing, so a
+            // routine ~40-pt percentile gap produced a 98-2 row. With one side leading most
+            // rows the weighted aggregate then pinned at the 88% safety cap, making every card
+            // look like a blowout. The new curve has no floor, a wider span, and a gentler
+            // exponent, and a single rate row's winner share maxes at ~0.85 so no lone row can
+            // scream 95-5. Calibration: 25-pt gap ≈ 61-39 row, 40-pt ≈ 69-31, 70-pt ≈ 82-18.
+            double scoreSpan = m.isCount() ? 56d : 62d;
+            double scoreLinear = Math.max(0d, Math.min(1d, (out.adjustedEdge - deadZone) / scoreSpan));
+            double scoreEased = 1d - Math.pow(1d - scoreLinear, 1.15d);
+            double scoreCap = m.isCount() ? 0.62d : 0.70d;
+            out.scoreStrength = out.contextOnly ? 0d : Math.max(0d, Math.min(1d, scoreCap * scoreEased));
         }
 
         if (out.contextOnly) out.badge = "CTX";
@@ -11226,7 +11320,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         tile.addView(outer, frameLp);
 
         int nameColor = onDark ? Color.WHITE : INK;
-        int metaColor = onDark ? Color.rgb(225, 234, 246) : Color.rgb(98, 110, 130);
+        int metaColor = onDark ? INK : FAINT;
         TextView name = text(twoLineName(left ? h.nameA : h.nameB), 16, nameColor, true);
         name.setPadding(0, dp(8), 0, 0);
         name.setGravity(left ? Gravity.LEFT : Gravity.RIGHT);
@@ -11253,7 +11347,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         box.setGravity(Gravity.CENTER);
         box.setPadding(dp(4), dp(2), dp(4), dp(2));
 
-        TextView num = text(wins, active ? 32 : 24, active ? Color.WHITE : Color.rgb(225, 233, 244), true);
+        TextView num = text(wins, active ? 32 : 24, active ? Color.WHITE : INK, true);
         num.setGravity(Gravity.CENTER);
         num.setFontFeatureSettings("'tnum' 1");
         if (active) {
@@ -11262,7 +11356,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         }
         box.addView(num, matchWrap());
 
-        TextView label = text(name, 9, onDark ? Color.rgb(214, 224, 239) : Color.rgb(108, 119, 138), true);
+        TextView label = text(name, 9, onDark ? INK : EYEBROW, true);
         label.setGravity(Gravity.CENTER);
         label.setSingleLine(true);
         label.setPadding(0, dp(4), 0, 0);
@@ -11274,7 +11368,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         Double a = h.statsA.get(m.key);
         Double b = h.statsB.get(m.key);
         int winner = headToHeadWinner(h, m);
-        int winnerColor = winner < 0 ? paletteA.primary : (winner > 0 ? paletteB.primary : Color.rgb(112, 122, 138));
+        int winnerColor = winner < 0 ? paletteA.primary : (winner > 0 ? paletteB.primary : EYEBROW);
 
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.VERTICAL);
@@ -11282,7 +11376,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         LinearLayout.LayoutParams lp = matchWrap();
         lp.setMargins(0, dp(5), 0, 0);
         row.setLayoutParams(lp);
-        row.setBackground(roundedStroke(Color.rgb(252, 253, 255), Color.rgb(229, 235, 245), 18, 1));
+        row.setBackground(roundedStroke(INK, INK, 18, 1));
 
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.HORIZONTAL);
@@ -11310,11 +11404,11 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         View rail = new View(this);
         int[] railColors;
         if (winner < 0) {
-            railColors = new int[] { softColor(paletteA.primary, 0.18f), softColor(paletteA.primary, 0.62f), Color.rgb(226, 232, 242), softColor(paletteB.primary, 0.78f) };
+            railColors = new int[] { softColor(paletteA.primary, 0.18f), softColor(paletteA.primary, 0.62f), INK, softColor(paletteB.primary, 0.78f) };
         } else if (winner > 0) {
-            railColors = new int[] { softColor(paletteA.primary, 0.78f), Color.rgb(226, 232, 242), softColor(paletteB.primary, 0.60f), softColor(paletteB.primary, 0.18f) };
+            railColors = new int[] { softColor(paletteA.primary, 0.78f), INK, softColor(paletteB.primary, 0.60f), softColor(paletteB.primary, 0.18f) };
         } else {
-            railColors = new int[] { softColor(paletteA.primary, 0.70f), Color.rgb(226, 232, 242), softColor(paletteB.primary, 0.70f) };
+            railColors = new int[] { softColor(paletteA.primary, 0.70f), INK, softColor(paletteB.primary, 0.70f) };
         }
         rail.setBackground(roundedGradient(railColors, 6));
         LinearLayout.LayoutParams railLp = new LinearLayout.LayoutParams(-1, dp(6));
@@ -11346,7 +11440,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         lp.setMargins(dp(2), 0, dp(2), 0);
         box.setLayoutParams(lp);
         box.setBackground(roundedStroke(softColor(color, 0.93f), softColor(color, 0.65f), 15, 1));
-        TextView top = text(label.toUpperCase(Locale.US), 8, Color.rgb(112, 124, 144), true);
+        TextView top = text(label.toUpperCase(Locale.US), 8, EYEBROW, true);
         top.setGravity(Gravity.CENTER);
         top.setLetterSpacing(0.05f);
         box.addView(top, matchWrap());
@@ -11393,7 +11487,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         String leader = isContextOnlyMetric(m) ? "Context" : "Even";
         int accentA = boostNeonColor(readableTeamColor(paletteA.primary, paletteA.secondary, true), 1.14f, 1.05f);
         int accentB = boostNeonColor(readableTeamColor(paletteB.primary, paletteB.secondary, false), 1.14f, 1.05f);
-        int leaderColor = Color.rgb(116, 130, 154);
+        int leaderColor = FAINT;
         StatEdgeResult rowEdge = statEdgeForMetric(h, m);
         if (rowEdge != null && rowEdge.valid && !rowEdge.contextOnly && rowEdge.winner != 0) {
             aLeads = rowEdge.winner < 0;
@@ -11436,7 +11530,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         LinearLayout topLine = new LinearLayout(this);
         topLine.setOrientation(LinearLayout.HORIZONTAL);
         topLine.setGravity(Gravity.CENTER_VERTICAL);
-        TextView metricTitle = text(m.label, 16, Color.rgb(239, 244, 251), true);
+        TextView metricTitle = text(m.label, 16, INK, true);
         metricTitle.setLetterSpacing(0.01f);
         topLine.addView(metricTitle, new LinearLayout.LayoutParams(0, -2, 1));
         TextView leaderBadge = text(leader, 11, Color.WHITE, true);
@@ -11479,18 +11573,18 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         LinearLayout.LayoutParams sideSheenLp = new LinearLayout.LayoutParams(-1, dp(2));
         sideSheenLp.setMargins(dp(3), 0, dp(3), dp(8));
         sideA.addView(sideASheen, sideSheenLp);
-        TextView valA = text(valueA == null ? "—" : format(valueA, m), aLeads ? 22 : 20, aLeads ? softColor(accentA, 0.10f) : Color.rgb(226, 234, 245), true);
+        TextView valA = text(valueA == null ? "—" : format(valueA, m), aLeads ? 22 : 20, aLeads ? softColor(accentA, 0.10f) : INK, true);
         valA.setGravity(Gravity.CENTER);
         valA.setFontFeatureSettings("'tnum' 1");
         sideA.addView(valA, matchWrap());
-        TextView ctxA = text(leagueContextLabel(pctA, m), 9, aLeads ? softColor(accentA, 0.18f) : Color.rgb(142, 154, 174), true);
+        TextView ctxA = text(leagueContextLabel(pctA, m), 9, aLeads ? softColor(accentA, 0.18f) : EYEBROW, true);
         ctxA.setGravity(Gravity.CENTER);
         ctxA.setPadding(0, dp(2), 0, 0);
         sideA.addView(ctxA, matchWrap());
         faceOff.addView(sideA, new LinearLayout.LayoutParams(0, -2, 1));
 
         // Center "vs"
-        TextView vsTv = text("vs", 10, Color.rgb(138, 150, 170), true);
+        TextView vsTv = text("vs", 10, EYEBROW, true);
         vsTv.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams vsLp = new LinearLayout.LayoutParams(dp(30), -2);
         vsLp.gravity = Gravity.CENTER_VERTICAL;
@@ -11515,11 +11609,11 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         LinearLayout.LayoutParams sideSheenLpB = new LinearLayout.LayoutParams(-1, dp(2));
         sideSheenLpB.setMargins(dp(3), 0, dp(3), dp(8));
         sideB.addView(sideBSheen, sideSheenLpB);
-        TextView valB = text(valueB == null ? "—" : format(valueB, m), bLeads ? 22 : 20, bLeads ? softColor(accentB, 0.10f) : Color.rgb(226, 234, 245), true);
+        TextView valB = text(valueB == null ? "—" : format(valueB, m), bLeads ? 22 : 20, bLeads ? softColor(accentB, 0.10f) : INK, true);
         valB.setGravity(Gravity.CENTER);
         valB.setFontFeatureSettings("'tnum' 1");
         sideB.addView(valB, matchWrap());
-        TextView ctxB = text(leagueContextLabel(pctB, m), 9, bLeads ? softColor(accentB, 0.18f) : Color.rgb(142, 154, 174), true);
+        TextView ctxB = text(leagueContextLabel(pctB, m), 9, bLeads ? softColor(accentB, 0.18f) : EYEBROW, true);
         ctxB.setGravity(Gravity.CENTER);
         ctxB.setPadding(0, dp(2), 0, 0);
         sideB.addView(ctxB, matchWrap());
@@ -11583,7 +11677,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         rankTvA.setFontFeatureSettings("'tnum' 1");
         gapRow.addView(rankTvA, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView rankMid = text(rankTypeLabel(h.isTeam), 10, Color.rgb(132, 146, 166), false);
+        TextView rankMid = text(rankTypeLabel(h.isTeam), 10, EYEBROW, false);
         rankMid.setGravity(Gravity.CENTER);
         gapRow.addView(rankMid, new LinearLayout.LayoutParams(0, -2, 1));
 
@@ -11673,7 +11767,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         }, 999));
         wrap.addView(lineL, new LinearLayout.LayoutParams(0, dp(2), 1));
 
-        TextView chip = text(label.toUpperCase(Locale.US), 10, Color.rgb(222, 233, 246), true);
+        TextView chip = text(label.toUpperCase(Locale.US), 10, INK, true);
         chip.setGravity(Gravity.CENTER);
         chip.setLetterSpacing(0.14f);
         chip.setPadding(dp(10), dp(5), dp(10), dp(5));
@@ -11747,7 +11841,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         TextView tv = text(label + "\n" + value, 12, INK, true);
         tv.setGravity(Gravity.CENTER);
         tv.setPadding(dp(6), dp(9), dp(6), dp(9));
-        tv.setBackground(roundedStroke(Color.rgb(248, 250, 253), LINE, 16, 1));
+        tv.setBackground(roundedStroke(INK, LINE, 16, 1));
         tv.setLineSpacing(dp(2), 1.0f);
         return tv;
     }
@@ -11767,7 +11861,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         TextView tv = text(value, 11, Color.rgb(64, 75, 94), true);
         tv.setGravity(Gravity.CENTER);
         tv.setPadding(dp(6), dp(4), dp(6), dp(4));
-        tv.setBackground(roundedStroke(Color.WHITE, Color.rgb(222, 231, 242), 12, 1));
+        tv.setBackground(roundedStroke(Color.WHITE, INK, 12, 1));
         tv.setFontFeatureSettings("'tnum' 1");  // v29: tabular figures for count pills
         return tv;
     }
@@ -11776,7 +11870,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         TextView tv = text(label + "\n" + value, 12, accent, true);
         tv.setGravity(Gravity.CENTER);
         tv.setPadding(dp(6), dp(8), dp(6), dp(8));
-        tv.setBackground(roundedStroke(Color.WHITE, Color.rgb(224, 232, 243), 16, 1));
+        tv.setBackground(roundedStroke(Color.WHITE, INK, 16, 1));
         tv.setLineSpacing(dp(2), 1.0f);
         return tv;
     }
@@ -11850,7 +11944,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         LinearLayout metricTitle = new LinearLayout(this);
         metricTitle.setOrientation(LinearLayout.HORIZONTAL);
         metricTitle.setGravity(Gravity.CENTER_VERTICAL);
-        TextView label = text(m.label, 16, Color.rgb(235, 242, 250), true);
+        TextView label = text(m.label, 16, INK, true);
         metricTitle.addView(label);
         TextView info = text("i", 9, MUTED, true);
         info.setGravity(Gravity.CENTER);
@@ -11875,7 +11969,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
         String rankLabel = rankTypeLabel(c.isTeam);
         String rankLine = rank == null ? rankLabel + " unavailable for this stat" : rankLabel + ": " + displayRankLabel(rank, total, c.isTeam);
-        TextView rankTv = text(rankLine, 11, Color.rgb(146, 160, 182), false);
+        TextView rankTv = text(rankLine, 11, EYEBROW, false);
         rankTv.setPadding(0, dp(5), 0, 0);
         row.addView(rankTv);
 
@@ -11938,10 +12032,10 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     }
 
     private void addTrendTab(LinearLayout tabs, String label, String mode, TeamPalette palette, boolean enabled) {
-        TextView tv = text(label, 11, enabled ? (mode.equals(trendWindowMode) ? Color.WHITE : palette.primary) : Color.rgb(150, 158, 172), true);
+        TextView tv = text(label, 11, enabled ? (mode.equals(trendWindowMode) ? Color.WHITE : palette.primary) : INK_DIM, true);
         tv.setGravity(Gravity.CENTER);
         tv.setPadding(dp(11), dp(6), dp(11), dp(6));
-        tv.setBackground(mode.equals(trendWindowMode) && enabled ? roundedGradient(new int[] { palette.primary, palette.secondary }, 14) : roundedStroke(Color.WHITE, Color.rgb(218, 226, 238), 14, 1));
+        tv.setBackground(mode.equals(trendWindowMode) && enabled ? roundedGradient(new int[] { palette.primary, palette.secondary }, 14) : roundedStroke(Color.WHITE, INK, 14, 1));
         tv.setOnClickListener(v -> {
             trendWindowMode = mode;
             if (lastComparison != null) {
@@ -11986,7 +12080,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         tabs.setOrientation(LinearLayout.HORIZONTAL);
         tabs.setGravity(Gravity.CENTER_VERTICAL);
         tabs.setPadding(0, dp(6), 0, 0);
-        tabs.addView(text("Trend", 10, Color.rgb(148, 161, 181), true), new LinearLayout.LayoutParams(0, -2, 1));
+        tabs.addView(text("Trend", 10, INK_DIM, true), new LinearLayout.LayoutParams(0, -2, 1));
         addInlineTrendTab(tabs, m, "Season", "season", palette, hasTrendForMode(c, m, "season", hasSeasons), mode);
         if (currentSeason) {
             addInlineTrendTab(tabs, m, "30d", "30d", palette, hasTrendForMode(c, m, "30d", hasSeasons), mode);
@@ -12087,7 +12181,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         LinearLayout titleRow = new LinearLayout(this);
         titleRow.setOrientation(LinearLayout.HORIZONTAL);
         titleRow.setGravity(Gravity.CENTER_VERTICAL);
-        TextView sparkTitle = text(title, 10, Color.rgb(184, 198, 218), true);
+        TextView sparkTitle = text(title, 10, INK_SOFT, true);
         sparkTitle.setLetterSpacing(0.06f);
         titleRow.addView(sparkTitle, new LinearLayout.LayoutParams(0, -2, 1));
         String chipText;
@@ -12152,7 +12246,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     }
 
     private TextView trendDateLabel(String s, int gravity) {
-        TextView tv = text(s, 11, Color.rgb(188, 202, 222), true);
+        TextView tv = text(s, 11, INK_SOFT, true);
         tv.setGravity(gravity);
         tv.setSingleLine(true);
         tv.setFontFeatureSettings("'tnum' 1");
@@ -12168,7 +12262,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         ArrayList<String> months = uniqueTrendMonths(labels);
         if (months.isEmpty()) return trendDateRow(labels);
         for (String month : months) {
-            TextView tv = text(month, 10, Color.rgb(188, 202, 222), true);
+            TextView tv = text(month, 10, INK_SOFT, true);
             tv.setGravity(Gravity.CENTER);
             tv.setSingleLine(true);
             tv.setFontFeatureSettings("'tnum' 1");
@@ -12277,7 +12371,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         row.setPadding(dp(2), dp(5), dp(2), 0);
         Double career = lastComparison == null || lastComparison.careerStats == null || m == null ? null : lastComparison.careerStats.get(m.key);
         String textValue = career == null || Double.isNaN(career) ? "Career baseline unavailable" : "Career avg " + format(career, m);
-        TextView tv = text(textValue, 10, Color.rgb(170, 186, 208), true);
+        TextView tv = text(textValue, 10, INK_DIM, true);
         tv.setGravity(Gravity.RIGHT);
         row.addView(tv, new LinearLayout.LayoutParams(0, -2, 1));
         return row;
@@ -12301,7 +12395,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     }
 
     private TextView trendRefText(String s, int gravity) {
-        TextView tv = text(s, 11, Color.rgb(188, 202, 222), true);
+        TextView tv = text(s, 11, INK_SOFT, true);
         tv.setGravity(gravity);
         tv.setSingleLine(true);
         tv.setFontFeatureSettings("'tnum' 1");
@@ -12341,12 +12435,12 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         box.setBackground(roundedGradientStroke(new int[] { mixColor(fillA, Color.WHITE, emphasized ? 0.04f : 0.02f), fillB }, 15,
                 Color.argb(emphasized ? 118 : 62, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
 
-        TextView top = text(title.toUpperCase(Locale.US), 8, emphasized ? softColor(accent, 0.18f) : Color.rgb(142, 154, 174), true);
+        TextView top = text(title.toUpperCase(Locale.US), 8, emphasized ? softColor(accent, 0.18f) : EYEBROW, true);
         top.setGravity(Gravity.CENTER);
         top.setLetterSpacing(0.08f);
         box.addView(top, matchWrap());
 
-        TextView primary = text(value == null ? "—" : value, 16, emphasized ? softColor(accent, 0.10f) : Color.rgb(232, 239, 248), true);
+        TextView primary = text(value == null ? "—" : value, 16, emphasized ? softColor(accent, 0.10f) : INK, true);
         primary.setGravity(Gravity.CENTER);
         primary.setPadding(0, dp(2), 0, 0);
         primary.setFontFeatureSettings("'tnum' 1");  // v29: tabular figures for stat values
@@ -12370,7 +12464,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(8), dp(6), dp(8), dp(6));
-        box.setBackground(roundedStroke(Color.rgb(250, 252, 255), softColor(color, 0.55f), 14, 1));
+        box.setBackground(roundedStroke(INK, softColor(color, 0.55f), 14, 1));
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.HORIZONTAL);
         top.setGravity(Gravity.CENTER_VERTICAL);
@@ -12454,11 +12548,11 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
         copy.addView(text(title, 21, Color.WHITE, true));
-        TextView sub = text(subtitle, 12, Color.rgb(178, 195, 216), false);
+        TextView sub = text(subtitle, 12, INK_DIM, false);
         sub.setPadding(0, dp(3), 0, 0);
         copy.addView(sub);
         head.addView(copy, new LinearLayout.LayoutParams(0, -2, 1));
-        TextView info = text("i", 11, Color.rgb(178, 195, 216), true);
+        TextView info = text("i", 11, INK_DIM, true);
         info.setGravity(Gravity.CENTER);
         info.setBackground(roundedStroke(Color.argb(16, 255, 255, 255), Color.argb(90, 126, 235, 226), 14, 1));
         head.addView(info, new LinearLayout.LayoutParams(dp(28), dp(28)));
@@ -12538,7 +12632,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         if (playerId > 0) {
             ImageView avatar = new ImageView(this);
             avatar.setScaleType(ImageView.ScaleType.FIT_CENTER);
-            avatar.setBackground(roundedStroke(Color.rgb(235, 241, 248), LINE, 18, 1));
+            avatar.setBackground(roundedStroke(INK, LINE, 18, 1));
             LinearLayout.LayoutParams aLp = new LinearLayout.LayoutParams(dp(44), dp(44));
             aLp.setMargins(0, 0, dp(8), 0);
             row.addView(avatar, aLp);
@@ -12553,7 +12647,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         LinearLayout nameCol = new LinearLayout(this);
         nameCol.setOrientation(LinearLayout.VERTICAL);
         nameCol.addView(text(name, 15, Color.WHITE, true));
-        nameCol.addView(text(meta + " · " + statLineSummary(stats), 11, Color.rgb(178, 195, 216), false));
+        nameCol.addView(text(meta + " · " + statLineSummary(stats), 11, INK_DIM, false));
         row.addView(nameCol, new LinearLayout.LayoutParams(0, -2, 1));
 
         LinearLayout valCol = new LinearLayout(this);
@@ -12562,7 +12656,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         TextView val = text(value, 18, Color.rgb(88, 210, 232), true);
         val.setGravity(Gravity.RIGHT);
         valCol.addView(val);
-        TextView valMeta = text(valueLabel == null ? "" : valueLabel, 10, Color.rgb(160, 176, 198), false);
+        TextView valMeta = text(valueLabel == null ? "" : valueLabel, 10, INK_DIM, false);
         valMeta.setGravity(Gravity.RIGHT);
         valCol.addView(valMeta);
         row.addView(valCol);
@@ -14176,7 +14270,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         if (team == null || callback == null) return;
         String code = espnTeamCode(team);
         String abbr = safe(team.abbr).toUpperCase(Locale.US).replaceAll("[^A-Z]", "");
-        String preparedKey = "prepared_team_logo_" + team.id + "_" + abbr;
+        String preparedKey = "prepared_team_logo_v229_" + team.id + "_" + abbr;
         Bitmap preparedCached = imageCache.get(preparedKey);
         if (preparedCached != null) {
             callback.onBitmap(preparedCached);
@@ -14185,22 +14279,23 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
         ArrayList<String> urls = new ArrayList<>();
         if (!code.isEmpty()) {
-            // v95: avoid broken/near-black marks on the dark home circles. Some teams need the
-            // light mark first; SD still needs the bright gold dark mark.
-            boolean preferLight = abbr.equals("COL") || abbr.equals("CWS") || abbr.equals("CHW") || abbr.equals("NYY") || abbr.equals("TB") || abbr.equals("PIT") || abbr.equals("SF") || abbr.equals("LAD") || abbr.equals("STL");
-            boolean preferDark = abbr.equals("SD") || abbr.equals("SDP") || abbr.equals("BAL");
-            if (preferLight) {
-                urls.add("https://a.espncdn.com/i/teamlogos/mlb/500-light/" + code + ".png");
-                urls.add("https://a.espncdn.com/i/teamlogos/mlb/500/" + code + ".png");
-                urls.add("https://a.espncdn.com/i/teamlogos/mlb/500-dark/" + code + ".png");
-            } else if (preferDark) {
-                urls.add("https://a.espncdn.com/i/teamlogos/mlb/500-dark/" + code + ".png");
-                urls.add("https://a.espncdn.com/i/teamlogos/mlb/500/" + code + ".png");
-                urls.add("https://a.espncdn.com/i/teamlogos/mlb/500-light/" + code + ".png");
+            // v229: logo variant chosen per team so the mark stays fully legible on that team's
+            // colored card background — the "hat logo" rule of thumb (use the version whose fill
+            // contrasts the background: white/light marks on dark or saturated backgrounds, the
+            // dark/full-color mark on light or pale backgrounds). ESPN's naming is inverted:
+            // "500-dark" is the mark BUILT FOR dark backgrounds (light fill), "500-light" is
+            // built for light backgrounds (dark fill). This replaces a scattered, incomplete
+            // hardcoded list; every team is now an intentional choice rather than a default.
+            int variant = teamLogoVariant(abbr);   // -1 light-fill mark, +1 dark-fill mark, 0 full-color
+            String darkFill  = "https://a.espncdn.com/i/teamlogos/mlb/500-dark/" + code + ".png";  // light/white fill
+            String lightFill = "https://a.espncdn.com/i/teamlogos/mlb/500-light/" + code + ".png"; // dark fill
+            String fullColor = "https://a.espncdn.com/i/teamlogos/mlb/500/" + code + ".png";
+            if (variant < 0) {
+                urls.add(darkFill); urls.add(fullColor); urls.add(lightFill);
+            } else if (variant > 0) {
+                urls.add(lightFill); urls.add(fullColor); urls.add(darkFill);
             } else {
-                urls.add("https://a.espncdn.com/i/teamlogos/mlb/500/" + code + ".png");
-                urls.add("https://a.espncdn.com/i/teamlogos/mlb/500-light/" + code + ".png");
-                urls.add("https://a.espncdn.com/i/teamlogos/mlb/500-dark/" + code + ".png");
+                urls.add(fullColor); urls.add(darkFill); urls.add(lightFill);
             }
         }
 
@@ -14252,12 +14347,74 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         });
     }
 
+    // v229: per-team logo variant selection. Returns -1 to prefer the light/white-fill mark
+    // (for dark or saturated backgrounds), +1 to prefer the dark-fill mark (for light/pale
+    // backgrounds), or 0 for the full-color primary mark. Chosen from each team's primary
+    // background color plus the "hat logo" intent — high-contrast, instantly readable cap marks.
+    private int teamLogoVariant(String abbr) {
+        switch (abbr) {
+            // Pale / light backgrounds → use the dark-fill mark so it reads as a crisp cap logo.
+            case "NYY": // pinstripe navy interlocking NY on near-white
+            case "CWS": case "CHW": // black/silver Sox on white
+            case "SD": case "SDP": // brown/gold — gold bg needs the brown mark
+            case "MIL": // gold bg needs the navy ball-glove
+            case "PIT": // gold bg needs the black mark
+            case "TB": case "TBR": // pale columbia blue bg needs the navy mark
+            case "ARI": // bright sedona/turquoise bg needs the dark mark
+            case "HOU": // bright orange bg reads best with the navy star
+                return 1;
+            // Dark / deep saturated backgrounds → white/light-fill mark (true "hat" contrast).
+            case "LAD": // Dodger blue → white interlocking LA
+            case "STL": // cardinal red → white birds-on-bat / StL
+            case "CHC": // deep royal → light mark
+            case "ATH": case "OAK": // green → light mark
+            case "WSH": case "WSN": // deep red → white curly W
+            case "CIN": // red → white wishbone C
+            case "LAA": // deep red → light halo A
+            case "PHI": // red → white P
+            case "BOS": // red → white/navy hangs better as light on the red field
+            case "CLE": // red → light mark
+            case "MIN": // red → light mark
+            case "ATL": // red → white tomahawk/A
+            case "TEX": // royal/red → light mark
+            case "TOR": // royal → white maple leaf
+            case "KC": // royal → white crown
+                return -1;
+            // Mid-tone backgrounds where the full-color primary mark is the strongest identity
+            // and already contrasts well (orange/teal/purple fields with darker mark elements).
+            case "BAL": // orange field, black-and-orange bird reads great in full color
+            case "DET": // orange field, full-color Old English D
+            case "SF": case "SFG": // orange field, full-color SF
+            case "NYM": // orange/blue, full-color NY
+            case "MIA": // teal field, full-color M
+            case "SEA": // teal/navy, full-color compass S
+            case "COL": // purple field, full-color CR mountains
+            default:
+                return 0;
+        }
+    }
+
     private Bitmap prepareTeamLogoBitmap(Team team, Bitmap bitmap) {
         if (team == null || bitmap == null) return bitmap;
         String abbr = safe(team.abbr).toUpperCase(Locale.US).replaceAll("[^A-Z]", "");
-        if (abbr.equals("LAD") || abbr.equals("STL")) return tintLogoBitmapKeepingAlpha(bitmap, Color.WHITE);
-        if (abbr.equals("SD") || abbr.equals("SDP")) return tintLogoBitmapKeepingAlpha(bitmap, Color.rgb(255, 205, 40));
+        // v229: a few teams ship marks that are near-monochrome in the wrong direction for our
+        // colored card (e.g. ESPN's LAD/STL marks come through dark). For these we re-tint the
+        // opaque pixels to a single on-brand high-contrast fill so the cap logo pops cleanly,
+        // rather than rendering a dark mark on a dark-blue/red field. Hue stays on-brand; only
+        // these explicit cases are tinted, everything else renders as ESPN ships it.
+        Integer tint = teamLogoTint(abbr);
+        if (tint != null) return tintLogoBitmapKeepingAlpha(bitmap, tint);
         return bitmap;
+    }
+
+    // v229: explicit tint overrides for marks that don't contrast their own card background.
+    private Integer teamLogoTint(String abbr) {
+        switch (abbr) {
+            case "LAD": return Color.WHITE;                 // white LA on Dodger blue
+            case "STL": return Color.WHITE;                 // white on cardinal red
+            case "SD": case "SDP": return Color.rgb(255, 205, 40); // padres gold on brown
+            default: return null;
+        }
     }
 
     private Bitmap tintLogoBitmapKeepingAlpha(Bitmap src, int tint) {
@@ -14444,7 +14601,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         if (a.equals("BAL")) return new TeamPalette(Color.rgb(255, 110, 24), Color.rgb(39, 37, 31));
         if (a.equals("BOS")) return new TeamPalette(Color.rgb(222, 52, 63), Color.rgb(12, 35, 64));
         if (a.equals("CHC")) return new TeamPalette(Color.rgb(0, 94, 184), Color.rgb(233, 70, 63));
-        if (a.equals("CWS") || a.equals("CHW")) return new TeamPalette(Color.rgb(235, 239, 245), Color.rgb(35, 35, 35));
+        if (a.equals("CWS") || a.equals("CHW")) return new TeamPalette(INK, Color.rgb(35, 35, 35));
         if (a.equals("CIN")) return new TeamPalette(Color.rgb(227, 15, 56), Color.rgb(20, 20, 20));
         if (a.equals("CLE")) return new TeamPalette(Color.rgb(234, 31, 63), Color.rgb(0, 43, 92));
         if (a.equals("COL")) return new TeamPalette(Color.rgb(150, 78, 255), Color.rgb(214, 196, 255));
@@ -14457,7 +14614,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         if (a.equals("MIL")) return new TeamPalette(Color.rgb(255, 205, 52), Color.rgb(18, 40, 75));
         if (a.equals("MIN")) return new TeamPalette(Color.rgb(229, 32, 87), Color.rgb(0, 43, 92));
         if (a.equals("NYM")) return new TeamPalette(Color.rgb(255, 116, 26), Color.rgb(0, 76, 151));
-        if (a.equals("NYY")) return new TeamPalette(Color.rgb(203, 214, 232), Color.rgb(12, 35, 64));
+        if (a.equals("NYY")) return new TeamPalette(INK_SOFT, Color.rgb(12, 35, 64));
         if (a.equals("ATH") || a.equals("OAK")) return new TeamPalette(Color.rgb(0, 122, 71), Color.rgb(255, 199, 44));
         if (a.equals("PHI")) return new TeamPalette(Color.rgb(255, 41, 63), Color.rgb(0, 45, 114));
         if (a.equals("PIT")) return new TeamPalette(Color.rgb(255, 205, 52), Color.rgb(39, 37, 31));
@@ -15085,7 +15242,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             RectF track = new RectF(left, midY - dp(3), right, midY + dp(3));
             paint.setStyle(Paint.Style.FILL);
             paint.setShader(null);
-            paint.setColor(Color.rgb(228, 235, 245));
+            paint.setColor(INK);
             canvas.drawRoundRect(track, dp(8), dp(8), paint);
             if (pct != null && !Double.isNaN(pct)) {
                 float x = (float) (left + (Math.max(0, Math.min(100, pct)) / 100.0) * (right - left));
@@ -15126,7 +15283,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             Double gap = diff(actual, expected);
             int actualColor = softColor(palette.primary, 0.08f);
             int expectedColor = Color.rgb(174, 218, 255);
-            int gapColor = gap == null || Math.abs(gap) < 0.000001 ? Color.rgb(214, 224, 238) : (gap > 0 ? actualColor : profileNegativeColor());
+            int gapColor = gap == null || Math.abs(gap) < 0.000001 ? INK : (gap > 0 ? actualColor : profileNegativeColor());
 
             paint.setStyle(Paint.Style.STROKE);
             paint.setStrokeCap(Paint.Cap.ROUND);
@@ -15156,7 +15313,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             paint.setStyle(Paint.Style.FILL);
             paint.setTypeface(tfBold);
             paint.setTextSize(dp(8));
-            paint.setColor(Color.rgb(126, 141, 165));
+            paint.setColor(EYEBROW);
             paint.setTextAlign(Paint.Align.LEFT);
             canvas.drawText("Expected", left, y + dp(20), paint);
             paint.setTextAlign(Paint.Align.RIGHT);
@@ -15181,7 +15338,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             paint.setColor(color);
             canvas.drawCircle(cx, cy, dp(9.5f), paint);
             paint.setStyle(Paint.Style.FILL);
-            paint.setColor(Color.rgb(246, 249, 253));
+            paint.setColor(INK);
             paint.setTextAlign(Paint.Align.CENTER);
             paint.setTextSize(dp(8.5f));
             paint.setTypeface(Typeface.DEFAULT_BOLD);
@@ -15258,7 +15415,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             LinearGradient gradient = new LinearGradient(left, y, right, y + h,
                     new int[] {
                             mixColor(boostNeonColor(paletteA.primary, 1.08f, 1.03f), Color.rgb(8, 12, 20), 0.26f),
-                            Color.rgb(86, 90, 120),
+                            FAINT,
                             mixColor(boostNeonColor(paletteB.primary, 1.08f, 1.03f), Color.rgb(8, 12, 20), 0.26f)
                     },
                     new float[] { 0f, 0.50f, 1f }, Shader.TileMode.CLAMP);
@@ -15307,7 +15464,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         private void drawPercentileScale(Canvas canvas, float left, float right, float baseline) {
             paint.setShader(null);
             paint.setStyle(Paint.Style.FILL);
-            paint.setColor(Color.rgb(126, 141, 165));
+            paint.setColor(EYEBROW);
             paint.setTextSize(dp(8));
             paint.setTypeface(tfBold);                  // v29: weight ladder
             paint.setFontFeatureSettings("'tnum' 1");   // v29: tabular figures
@@ -15420,7 +15577,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             float radius = dp(28);
             int playerAccent = boostNeonColor(readableTeamColor(palette.primary, palette.secondary, true), 1.20f, 1.08f);
             int leagueAccent = profileSparkColor(averageLensSignedEdge(c, lensMetrics));
-            if (leagueAccent == profileNeutralColor()) leagueAccent = Color.rgb(210, 220, 235);
+            if (leagueAccent == profileNeutralColor()) leagueAccent = INK_SOFT;
             int neutralBlue = Color.rgb(112, 181, 255);
             int blend = mixColor(playerAccent, leagueAccent == profileNeutralColor() ? neutralBlue : leagueAccent, 0.50f);
 
@@ -15446,10 +15603,10 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             drawVignette(canvas, card);
 
             float titleY = card.top + dp(28);
-            drawCardText(canvas, c.season + " PLAYER LENS CARD", card.centerX(), titleY, dp(10), Color.rgb(204, 215, 230), true, Paint.Align.CENTER);
+            drawCardText(canvas, c.season + " PLAYER LENS CARD", card.centerX(), titleY, dp(10), INK_SOFT, true, Paint.Align.CENTER);
             String lensName = currentLensNameForUi();
             String statPill = lensName.toUpperCase(Locale.US) + " · " + lensMetrics.size() + " SCORED STATS";
-            drawPill(canvas, statPill, card.centerX(), titleY + dp(24), Math.min(card.width() - dp(56), dp(206)), dp(25), Color.argb(38, 255, 255, 255), Color.argb(78, 255, 255, 255), Color.rgb(220, 230, 244), dp(9));
+            drawPill(canvas, statPill, card.centerX(), titleY + dp(24), Math.min(card.width() - dp(56), dp(206)), dp(25), Color.argb(38, 255, 255, 255), Color.argb(78, 255, 255, 255), INK, dp(9));
 
             drawCornerLogo(canvas, card.left + dp(34), card.top + dp(54), dp(66), playerAccent, true);
             drawMlbCornerMark(canvas, card.right - dp(34), card.top + dp(54), dp(66), neutralBlue);
@@ -15544,7 +15701,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             Double pct = averageLensPercentile(c, lensMetrics);
             double signed = averageLensSignedEdge(c, lensMetrics);
             int sparkColor = profileSparkColor(signed);
-            if (sparkColor == profileNeutralColor()) sparkColor = Color.rgb(218, 228, 242);
+            if (sparkColor == profileNeutralColor()) sparkColor = INK;
             String big = pct == null ? "—" : Math.round(Math.max(0, Math.min(100, pct))) + "%";
             String tier = pct == null ? "League context" : percentileTierLabel(pct);
             String edge = signedEdgeSummary(signed);
@@ -15560,12 +15717,12 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             stroke.setColor(Color.argb(82, 255, 255, 255));
             canvas.drawRoundRect(score, dp(24), dp(24), stroke);
 
-            drawCardText(canvas, "LENS EDGE", score.left + dp(18), score.top + dp(24), dp(10), Color.rgb(155, 171, 195), true, Paint.Align.LEFT);
+            drawCardText(canvas, "LENS EDGE", score.left + dp(18), score.top + dp(24), dp(10), INK_DIM, true, Paint.Align.LEFT);
             drawCardText(canvas, edge, score.left + dp(18), score.top + dp(47), dp(16), Color.WHITE, true, Paint.Align.LEFT);
-            drawCardText(canvas, currentLensNameForUi(), score.left + dp(18), score.top + dp(69), dp(10), Color.rgb(156, 172, 196), false, Paint.Align.LEFT);
+            drawCardText(canvas, currentLensNameForUi(), score.left + dp(18), score.top + dp(69), dp(10), INK_DIM, false, Paint.Align.LEFT);
 
             drawCardText(canvas, big, score.right - dp(18), score.top + dp(42), dp(31), sparkColor, true, Paint.Align.RIGHT);
-            drawCardText(canvas, tier, score.right - dp(18), score.top + dp(66), dp(12), Color.rgb(226, 235, 247), true, Paint.Align.RIGHT);
+            drawCardText(canvas, tier, score.right - dp(18), score.top + dp(66), dp(12), INK, true, Paint.Align.RIGHT);
 
             float railLeft = score.left + dp(18);
             float railRight = score.right - dp(18);
@@ -15587,11 +15744,11 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
         private void drawKeyStats(Canvas canvas, RectF card, float startY, int playerAccent, int leagueAccent) {
             ArrayList<Metric> metrics = displayMetrics();
-            drawCardText(canvas, "KEY LENS STATS", card.left + dp(24), startY, dp(10), Color.rgb(190, 205, 224), true, Paint.Align.LEFT);
+            drawCardText(canvas, "KEY LENS STATS", card.left + dp(24), startY, dp(10), INK_SOFT, true, Paint.Align.LEFT);
             drawCardText(canvas, "PLAYER", card.left + dp(24), startY + dp(22), dp(8), softColor(playerAccent, 0.14f), true, Paint.Align.LEFT);
             drawCardText(canvas, "MLB AVG", card.right - dp(24), startY + dp(22), dp(8), Color.rgb(186, 205, 232), true, Paint.Align.RIGHT);
             if (metrics.isEmpty()) {
-                drawCardText(canvas, "No comparable stats in this lens yet.", card.centerX(), startY + dp(78), dp(13), Color.rgb(172, 186, 208), false, Paint.Align.CENTER);
+                drawCardText(canvas, "No comparable stats in this lens yet.", card.centerX(), startY + dp(78), dp(13), INK_DIM, false, Paint.Align.CENTER);
                 return;
             }
             float y = startY + dp(48);
@@ -15603,15 +15760,15 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 Double signed = signedLeagueEdge(value, league, m);
                 if (signed == null) signed = 0d;
                 int color = profileSparkColor(signed);
-                if (color == profileNeutralColor()) color = Color.rgb(218, 228, 242);
+                if (color == profileNeutralColor()) color = INK;
                 RectF row = new RectF(card.left + dp(18), y - dp(21), card.right - dp(18), y + dp(20));
                 paint.setStyle(Paint.Style.FILL);
                 paint.setColor(i % 2 == 0 ? Color.argb(74, 255, 255, 255) : Color.argb(40, 255, 255, 255));
                 canvas.drawRoundRect(row, dp(14), dp(14), paint);
 
-                drawCardText(canvas, m.label, card.left + dp(28), y - dp(2), dp(11), Color.rgb(236, 243, 251), true, Paint.Align.LEFT);
+                drawCardText(canvas, m.label, card.left + dp(28), y - dp(2), dp(11), INK, true, Paint.Align.LEFT);
                 drawCardText(canvas, format(value, m), card.left + dp(28), y + dp(14), dp(10), softColor(playerAccent, 0.08f), true, Paint.Align.LEFT);
-                drawCardText(canvas, format(league, m), card.right - dp(28), y + dp(7), dp(11), Color.rgb(222, 232, 246), true, Paint.Align.RIGHT);
+                drawCardText(canvas, format(league, m), card.right - dp(28), y + dp(7), dp(11), INK, true, Paint.Align.RIGHT);
 
                 float railLeft = card.left + dp(132);
                 float railRight = card.right - dp(88);
@@ -15753,7 +15910,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             canvas.drawCircle(cx, cy, r, paint);
             paint.setShader(null);
             drawCardText(canvas, "VS", cx, cy - dp(1), dp(12), Color.WHITE, true, Paint.Align.CENTER);
-            drawCardText(canvas, "AVG", cx, cy + dp(12), dp(8), Color.rgb(222, 232, 246), true, Paint.Align.CENTER);
+            drawCardText(canvas, "AVG", cx, cy + dp(12), dp(8), INK, true, Paint.Align.CENTER);
         }
 
         private void drawBattleBeam(Canvas canvas, float x1, float y1, float x2, float y2, int color, boolean fromLeft) {
@@ -15781,7 +15938,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             drawCardText(canvas, title, cx, y, dp(18), Color.WHITE, true, Paint.Align.CENTER);
             String sub = safe(subtitle);
             if (sub.length() > 28) sub = sub.substring(0, 28) + "…";
-            drawCardText(canvas, sub, cx, y + dp(20), dp(10), Color.rgb(192, 205, 224), true, Paint.Align.CENTER);
+            drawCardText(canvas, sub, cx, y + dp(20), dp(10), INK_SOFT, true, Paint.Align.CENTER);
         }
 
         private void drawCornerLogo(Canvas canvas, float cx, float cy, float size, int accent, boolean left) {
@@ -15800,7 +15957,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             paint.setStrokeWidth(dp(1.4f));
             paint.setColor(Color.argb(92, Color.red(accent), Color.green(accent), Color.blue(accent)));
             canvas.drawRoundRect(new RectF(cx - size / 2, cy - size / 2, cx + size / 2, cy + size / 2), dp(18), dp(18), paint);
-            drawCardText(canvas, "MLB", cx, cy - dp(2), dp(13), Color.rgb(208, 224, 244), true, Paint.Align.CENTER);
+            drawCardText(canvas, "MLB", cx, cy - dp(2), dp(13), INK, true, Paint.Align.CENTER);
             drawCardText(canvas, "AVG", cx, cy + dp(15), dp(9), Color.rgb(152, 172, 198), true, Paint.Align.CENTER);
         }
 
@@ -15891,18 +16048,18 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
             drawSmallText(canvas, lensName.toUpperCase(Locale.US) + " LENS", card.left + dp(14), card.top + dp(21), dp(9), softColor(teamAccent, 0.18f), true, Paint.Align.LEFT);
             drawSmallText(canvas, "Score vs MLB average", card.left + dp(14), card.top + dp(40), dp(14), Color.WHITE, true, Paint.Align.LEFT);
-            drawSmallText(canvas, lensMetrics.size() + " scored stats", card.left + dp(14), card.top + dp(58), dp(9), Color.rgb(170, 186, 208), false, Paint.Align.LEFT);
+            drawSmallText(canvas, lensMetrics.size() + " scored stats", card.left + dp(14), card.top + dp(58), dp(9), INK_DIM, false, Paint.Align.LEFT);
 
             drawSmallText(canvas, score, card.right - dp(14), card.top + dp(37), dp(25), sparkColor, true, Paint.Align.RIGHT);
-            drawSmallText(canvas, tier, card.right - dp(14), card.top + dp(56), dp(10), Color.rgb(220, 229, 242), true, Paint.Align.RIGHT);
+            drawSmallText(canvas, tier, card.right - dp(14), card.top + dp(56), dp(10), INK, true, Paint.Align.RIGHT);
 
             float railLeft = card.left + dp(18);
             float railRight = card.right - dp(18);
             float railY = card.top + dp(78);
             drawCenteredSparkRail(canvas, railLeft, railRight, railY, signed, sparkColor, true);
 
-            drawSmallText(canvas, "Below", railLeft, railY + dp(22), dp(8), Color.rgb(163, 177, 198), false, Paint.Align.LEFT);
-            drawSmallText(canvas, "MLB avg", (railLeft + railRight) / 2f, railY + dp(22), dp(8), Color.rgb(190, 202, 222), true, Paint.Align.CENTER);
+            drawSmallText(canvas, "Below", railLeft, railY + dp(22), dp(8), INK_DIM, false, Paint.Align.LEFT);
+            drawSmallText(canvas, "MLB avg", (railLeft + railRight) / 2f, railY + dp(22), dp(8), INK_SOFT, true, Paint.Align.CENTER);
             drawSmallText(canvas, "Better", railRight, railY + dp(22), dp(8), profilePositiveColor(), true, Paint.Align.RIGHT);
         }
 
@@ -16028,10 +16185,10 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             paint.setTextSize(dp(8));
             paint.setFontFeatureSettings("'tnum' 1");
             paint.setTextAlign(Paint.Align.LEFT);
-            paint.setColor(Color.rgb(155, 169, 191));
+            paint.setColor(INK_DIM);
             canvas.drawText("Worse", left, y + dp(28), paint);
             paint.setTextAlign(Paint.Align.CENTER);
-            paint.setColor(Color.rgb(196, 208, 226));
+            paint.setColor(INK_SOFT);
             canvas.drawText("Avg", (left + right) / 2f, y + dp(28), paint);
             paint.setTextAlign(Paint.Align.RIGHT);
             paint.setColor(profilePositiveColor());
@@ -16212,7 +16369,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         private void drawPercentileScale(Canvas canvas, float left, float right, float baseline) {
             paint.setShader(null);
             paint.setStyle(Paint.Style.FILL);
-            paint.setColor(Color.rgb(138, 151, 174));
+            paint.setColor(EYEBROW);
             paint.setTextSize(dp(8));
             paint.setTypeface(tfBold);                  // v29: weight ladder
             paint.setFontFeatureSettings("'tnum' 1");   // v29: tabular figures
@@ -16668,7 +16825,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             col.setOrientation(LinearLayout.VERTICAL);
             TextView title = text(t.name, 17, Color.WHITE, true);
             col.addView(title);
-            col.addView(text((primarySide ? "Matchup side A" : "Matchup side B") + " · " + t.abbr, 11, Color.rgb(184, 198, 220), false));
+            col.addView(text((primarySide ? "Matchup side A" : "Matchup side B") + " · " + t.abbr, 11, INK_SOFT, false));
             row.addView(col, new LinearLayout.LayoutParams(0, -2, 1));
             LinearLayout chipWrap = new LinearLayout(MainActivity.this);
             chipWrap.setOrientation(LinearLayout.VERTICAL);
@@ -16678,7 +16835,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             chip.setPadding(dp(8), dp(4), dp(8), dp(4));
             chip.setBackground(roundedStroke(Color.argb(28, 255, 255, 255), Color.argb(92, 255, 255, 255), 12, 1));
             chipWrap.addView(chip);
-            TextView side = text(primarySide ? "A" : "B", 10, Color.rgb(186, 200, 220), true);
+            TextView side = text(primarySide ? "A" : "B", 10, INK_SOFT, true);
             side.setPadding(dp(7), dp(4), dp(7), dp(4));
             side.setBackground(rounded(Color.argb(12, 255, 255, 255), 11));
             LinearLayout.LayoutParams sideLp = new LinearLayout.LayoutParams(-2, -2);
@@ -16726,7 +16883,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             LinearLayout col = new LinearLayout(MainActivity.this);
             col.setOrientation(LinearLayout.VERTICAL);
             h.name = text("", 17, Color.WHITE, true);
-            h.meta = text("", 11, Color.rgb(180, 194, 214), false);
+            h.meta = text("", 11, INK_SOFT, false);
             col.addView(h.name);
             col.addView(h.meta);
             h.row.addView(col, new LinearLayout.LayoutParams(0, -2, 1));
@@ -17105,10 +17262,40 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
     /** Returns a ripple drawable suitable for use as a view foreground. */
     private RippleDrawable ripple(boolean darkBackground) {
+        return ripple(darkBackground, 0f);
+    }
+
+    // v235: a bounded ripple that respects the button's rounded corners. Passing a corner radius
+    // gives the ripple a matching round-rect mask so the press flash stays inside the button
+    // instead of bleeding into a full rectangle. radiusDp<=0 keeps the legacy unbounded ripple.
+    private RippleDrawable ripple(boolean darkBackground, float radiusDp) {
         int rippleColor = darkBackground
                 ? Color.argb(56, 255, 255, 255)   // white ripple on dark bg
                 : Color.argb(38, 10, 23, 55);      // navy ripple on light bg
-        return new RippleDrawable(ColorStateList.valueOf(rippleColor), null, null);
+        Drawable mask = null;
+        if (radiusDp > 0f) {
+            GradientDrawable g = new GradientDrawable();
+            g.setShape(GradientDrawable.RECTANGLE);
+            g.setColor(Color.WHITE);
+            g.setCornerRadius(dp(radiusDp));
+            mask = g;
+        }
+        return new RippleDrawable(ColorStateList.valueOf(rippleColor), null, mask);
+    }
+
+    // v235: one entry point so every clickable element across the app feels the same — a bounded
+    // ripple flash plus a subtle scale/alpha press. Use this for any tappable view that isn't
+    // already a styled pill/tile with its own feedback. cornerRadiusDp should match the view's
+    // background radius so the ripple stays inside the shape.
+    private void makePremiumButton(View view, float cornerRadiusDp, boolean darkBackground, float pressedScale) {
+        if (view == null) return;
+        view.setClickable(true);
+        view.setForeground(ripple(darkBackground, cornerRadiusDp));
+        attachPremiumPress(view, pressedScale);
+    }
+
+    private void makePremiumButton(View view, float cornerRadiusDp) {
+        makePremiumButton(view, cornerRadiusDp, true, 0.97f);
     }
 
     // ── Live matchups tab ──────────────────────────────────────────────────────────────────────
@@ -17127,7 +17314,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         LinearLayout titleRow = new LinearLayout(this);
         titleRow.setOrientation(LinearLayout.HORIZONTAL);
         titleRow.setGravity(Gravity.CENTER_VERTICAL);
-        TextView title = text("TODAY'S LIVE MATCHUPS", 11, Color.rgb(235, 242, 250), true);
+        TextView title = text("TODAY'S LIVE MATCHUPS", 11, INK, true);
         title.setLetterSpacing(0.08f);
         titleRow.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
         TextView slateChip = text("MLB slate", 9, Color.rgb(120, 220, 207), true);
@@ -17137,7 +17324,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         titleRow.addView(slateChip);
         panel.addView(titleRow, matchWrap());
 
-        TextView sub = text("Tap any compact game tile for team, starter, and key-hitter matchup options.", 11, Color.rgb(174, 190, 211), false);
+        TextView sub = text("Tap any compact game tile for team, starter, and key-hitter matchup options.", 11, INK_DIM, false);
         sub.setPadding(0, dp(5), 0, dp(6));
         panel.addView(sub, matchWrap());
 
@@ -17145,7 +17332,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         loadingRow.setOrientation(LinearLayout.VERTICAL);
         loadingRow.setPadding(dp(10), dp(10), dp(10), dp(10));
         loadingRow.setBackground(roundedStroke(Color.argb(76, 8, 13, 22), Color.argb(52, 255, 255, 255), 14, 1));
-        TextView loadingText = text("Loading today's games…", 12, Color.rgb(210, 222, 238), true);
+        TextView loadingText = text("Loading today's games…", 12, INK_SOFT, true);
         loadingText.setGravity(Gravity.CENTER);
         loadingRow.addView(loadingText, matchWrap());
         panel.addView(loadingRow, matchWrap());
@@ -17176,7 +17363,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         LinearLayout titleRow = new LinearLayout(this);
         titleRow.setOrientation(LinearLayout.HORIZONTAL);
         titleRow.setGravity(Gravity.CENTER_VERTICAL);
-        TextView title = text("TODAY'S LIVE MATCHUPS", 11, Color.rgb(235, 242, 250), true);
+        TextView title = text("TODAY'S LIVE MATCHUPS", 11, INK, true);
         title.setLetterSpacing(0.08f);
         titleRow.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
         TextView count = text((games == null || games.isEmpty()) ? "Off day" : games.size() + " games", 9, Color.rgb(120, 220, 207), true);
@@ -17186,12 +17373,12 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         titleRow.addView(count);
         panel.addView(titleRow, matchWrap());
 
-        TextView sub = text("Compact 2-up slate. Tap a game to choose Team Overall, Starting Pitchers, or Key Hitters.", 11, Color.rgb(174, 190, 211), false);
+        TextView sub = text("Compact 2-up slate. Tap a game to choose Team Overall, Starting Pitchers, or Key Hitters.", 11, INK_DIM, false);
         sub.setPadding(0, dp(5), 0, dp(7));
         panel.addView(sub, matchWrap());
 
         if (games == null || games.isEmpty()) {
-            TextView empty = text("No MLB games found for today.", 12, Color.rgb(210, 222, 238), true);
+            TextView empty = text("No MLB games found for today.", 12, INK_SOFT, true);
             empty.setGravity(Gravity.CENTER);
             empty.setPadding(dp(10), dp(12), dp(10), dp(12));
             empty.setBackground(roundedStroke(Color.argb(76, 8, 13, 22), Color.argb(52, 255, 255, 255), 14, 1));
@@ -17233,10 +17420,10 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(dp(12), dp(11), dp(12), dp(12));
         panel.setBackground(roundedGradientStroke(new int[] { Color.rgb(5, 9, 17), Color.rgb(10, 18, 32) }, 20, Color.argb(82, 255, 255, 255), 1));
-        TextView title = text("TODAY'S LIVE MATCHUPS", 11, Color.rgb(235, 242, 250), true);
+        TextView title = text("TODAY'S LIVE MATCHUPS", 11, INK, true);
         title.setLetterSpacing(0.08f);
         panel.addView(title, matchWrap());
-        TextView body = text("Could not load today's MLB slate. " + safe(message), 11, Color.rgb(206, 218, 234), false);
+        TextView body = text("Could not load today's MLB slate. " + safe(message), 11, INK_SOFT, false);
         body.setPadding(0, dp(7), 0, 0);
         panel.addView(body, matchWrap());
         standingsBox.addView(panel, matchWrap());
@@ -17265,7 +17452,7 @@ private View liveGameCard(LiveGame game) {
     status.setPadding(dp(7), dp(3), dp(7), dp(3));
     status.setBackground(roundedStroke(Color.argb(88, 8, 13, 22), Color.argb(106, Color.red(statusColor(game)), Color.green(statusColor(game)), Color.blue(statusColor(game))), 12, 1));
     top.addView(status);
-    TextView time = text(game.timeLabel(), 8, Color.rgb(175, 190, 210), true);
+    TextView time = text(game.timeLabel(), 8, INK_DIM, true);
     time.setGravity(Gravity.RIGHT);
     time.setSingleLine(true);
     top.addView(time, new LinearLayout.LayoutParams(0, -2, 1));
@@ -17276,13 +17463,13 @@ private View liveGameCard(LiveGame game) {
     teams.setGravity(Gravity.CENTER_VERTICAL);
     teams.setPadding(0, dp(7), 0, dp(3));
     teams.addView(liveTeamColumn(displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr), game.awayName, game.awayPitcher, game.awayScoreText(), awayPalette.primary, Gravity.LEFT), new LinearLayout.LayoutParams(0, -2, 1));
-    TextView at = text("@", 12, Color.rgb(185, 198, 218), true);
+    TextView at = text("@", 12, INK_SOFT, true);
     at.setGravity(Gravity.CENTER);
     teams.addView(at, new LinearLayout.LayoutParams(dp(20), -2));
     teams.addView(liveTeamColumn(displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr), game.homeName, game.homePitcher, game.homeScoreText(), homePalette.primary, Gravity.RIGHT), new LinearLayout.LayoutParams(0, -2, 1));
     content.addView(teams, matchWrap());
 
-    TextView hint = text("Choose matchups  ❯", 8, Color.rgb(206, 218, 234), true);
+    TextView hint = text("Choose matchups  ❯", 8, INK_SOFT, true);
     hint.setGravity(Gravity.RIGHT);
     hint.setLetterSpacing(0.04f);
     content.addView(hint, matchWrap());
@@ -17298,11 +17485,11 @@ private View liveGameCard(LiveGame game) {
         top.setGravity(gravity);
         top.setFontFeatureSettings("'tnum' 1");
         col.addView(top, matchWrap());
-        TextView full = text(safe(name), 8, Color.rgb(205, 217, 234), true);
+        TextView full = text(safe(name), 8, INK_SOFT, true);
         full.setGravity(gravity);
         full.setSingleLine(true);
         col.addView(full, matchWrap());
-        TextView pit = text(safe(pitcher).isEmpty() ? "Pitcher TBD" : lastNameOnly(pitcher), 8, Color.rgb(150, 167, 190), false);
+        TextView pit = text(safe(pitcher).isEmpty() ? "Pitcher TBD" : lastNameOnly(pitcher), 8, INK_DIM, false);
         pit.setGravity(gravity);
         pit.setSingleLine(true);
         col.addView(pit, matchWrap());
@@ -17336,7 +17523,7 @@ private View liveGameCard(LiveGame game) {
         String state = safe(game.abstractState).toLowerCase(Locale.US);
         String detail = safe(game.detailedState).toLowerCase(Locale.US);
         if (state.contains("live") || detail.contains("progress")) return Color.rgb(82, 226, 176);
-        if (state.contains("final") || detail.contains("final")) return Color.rgb(184, 198, 218);
+        if (state.contains("final") || detail.contains("final")) return INK_SOFT;
         return Color.rgb(247, 197, 77);
     }
 
@@ -17374,7 +17561,7 @@ private View liveGameCard(LiveGame game) {
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.HORIZONTAL);
         top.setGravity(Gravity.CENTER_VERTICAL);
-        TextView back = text("‹ Games", 9, Color.rgb(205, 219, 238), true);
+        TextView back = text("‹ Games", 9, INK_SOFT, true);
         back.setGravity(Gravity.CENTER);
         back.setPadding(dp(7), dp(4), dp(7), dp(4));
         back.setBackground(roundedStroke(Color.argb(24, 255, 255, 255), Color.argb(48, 255, 255, 255), 999, 1));
@@ -17395,7 +17582,7 @@ private View liveGameCard(LiveGame game) {
         lensHeader.setOrientation(LinearLayout.HORIZONTAL);
         lensHeader.setGravity(Gravity.CENTER_VERTICAL);
         lensHeader.setPadding(dp(14), 0, dp(14), dp(5));
-        TextView lensTitle = text("CHOOSE MATCHUP TYPE", 10, Color.rgb(214, 226, 242), true);
+        TextView lensTitle = text("CHOOSE MATCHUP TYPE", 10, INK, true);
         lensTitle.setLetterSpacing(0.16f);
         lensHeader.addView(lensTitle, new LinearLayout.LayoutParams(0, -2, 1));
         panel.addView(lensHeader, matchWrap());
@@ -17443,7 +17630,7 @@ private View liveGameCard(LiveGame game) {
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.HORIZONTAL);
         top.setGravity(Gravity.CENTER_VERTICAL);
-        TextView label = text("GAME MATCHUP HUB", 8, Color.rgb(222, 235, 250), true);
+        TextView label = text("GAME MATCHUP HUB", 8, INK, true);
         label.setLetterSpacing(0.14f);
         top.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
         int sc = statusColor(game);
@@ -17464,7 +17651,7 @@ private View liveGameCard(LiveGame game) {
         title.setPadding(0, dp(8), 0, 0);
         content.addView(title, matchWrap());
 
-        TextView sp = text(pitchers, 11, Color.rgb(205, 218, 236), true);
+        TextView sp = text(pitchers, 11, INK_SOFT, true);
         sp.setGravity(Gravity.CENTER);
         sp.setSingleLine(true);
         sp.setEllipsize(TextUtils.TruncateAt.END);
@@ -17475,7 +17662,7 @@ private View liveGameCard(LiveGame game) {
     }
 
     private TextView gameHeroChip(String label, int accent) {
-        TextView chip = text(label, 8, Color.rgb(226, 237, 250), true);
+        TextView chip = text(label, 8, INK, true);
         chip.setGravity(Gravity.CENTER);
         chip.setSingleLine(true);
         chip.setLetterSpacing(0.08f);
@@ -17521,8 +17708,9 @@ private View liveGameCard(LiveGame game) {
         tile.setMinimumHeight(0);
         tile.setPadding(dp(9), dp(7), dp(9), dp(7));
         tile.setClickable(true);
-        tile.setForeground(ripple(true));
+        tile.setForeground(ripple(true, 20f));
         tile.setOnClickListener(click);
+        attachPremiumPress(tile, 0.975f);
         tile.setBackground(roundedGradientStroke(new int[] {
                 Color.argb(230, 5, 10, 18),
                 mixColor(accent, Color.rgb(6, 10, 18), 0.76f),
@@ -17541,7 +17729,7 @@ private View liveGameCard(LiveGame game) {
         top.addView(arrow, new LinearLayout.LayoutParams(dp(18), -2));
         tile.addView(top, matchWrap());
 
-        TextView v = text(value, 9, Color.rgb(222, 233, 247), true);
+        TextView v = text(value, 9, INK, true);
         v.setSingleLine(true);
         v.setEllipsize(TextUtils.TruncateAt.END);
         v.setPadding(0, dp(5), 0, 0);
@@ -17622,7 +17810,7 @@ private View liveGameCard(LiveGame game) {
         heroLp.setMargins(0, dp(6), 0, dp(2));
         panel.addView(loadingView, heroLp);
 
-        TextView sub = text("Reviewing recent relief usage, bullpen quality, and tonight's freshness…", 11, Color.rgb(190, 207, 229), false);
+        TextView sub = text("Reviewing recent relief usage, bullpen quality, and tonight's freshness…", 11, INK_SOFT, false);
         sub.setGravity(Gravity.CENTER);
         sub.setPadding(dp(12), dp(4), dp(12), dp(6));
         panel.addView(sub, matchWrap());
@@ -17638,7 +17826,7 @@ private View liveGameCard(LiveGame game) {
         TextView title = text("Bullpen data unavailable", 18, Color.WHITE, true);
         title.setGravity(Gravity.CENTER);
         panel.addView(title, matchWrap());
-        TextView sub = text("Could not load bullpen usage for this game. " + safe(message), 12, Color.rgb(202, 216, 234), false);
+        TextView sub = text("Could not load bullpen usage for this game. " + safe(message), 12, INK_SOFT, false);
         sub.setGravity(Gravity.CENTER);
         sub.setPadding(0, dp(8), 0, 0);
         panel.addView(sub, matchWrap());
@@ -17663,7 +17851,7 @@ private View liveGameCard(LiveGame game) {
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.HORIZONTAL);
         top.setGravity(Gravity.CENTER_VERTICAL);
-        TextView back = text("← Game", 10, Color.rgb(218, 232, 248), true);
+        TextView back = text("← Game", 10, INK, true);
         back.setGravity(Gravity.CENTER);
         back.setPadding(dp(8), dp(5), dp(8), dp(5));
         back.setBackground(roundedStroke(Color.argb(50, 255, 255, 255), Color.argb(72, 255, 255, 255), 14, 1));
@@ -17671,7 +17859,7 @@ private View liveGameCard(LiveGame game) {
         back.setClickable(true);
         back.setOnClickListener(v -> renderLiveGameMenu(game));
         top.addView(back);
-        TextView matchup = text(game == null ? "Bullpens" : displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr) + " @ " + displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr), 11, Color.rgb(222, 235, 249), true);
+        TextView matchup = text(game == null ? "Bullpens" : displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr) + " @ " + displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr), 11, INK, true);
         matchup.setGravity(Gravity.RIGHT);
         top.addView(matchup, new LinearLayout.LayoutParams(0, -2, 1));
         panel.addView(top, matchWrap());
@@ -17765,8 +17953,8 @@ private View liveGameCard(LiveGame game) {
         Runnable refresh = () -> {
             chips[0].setBackground(bullpenDetailTabBg(selected[0] == 0, awayColor, homeColor));
             chips[1].setBackground(bullpenDetailTabBg(selected[0] == 1, awayColor, homeColor));
-            chips[0].setTextColor(selected[0] == 0 ? Color.rgb(8, 12, 20) : Color.rgb(218, 231, 246));
-            chips[1].setTextColor(selected[0] == 1 ? Color.rgb(8, 12, 20) : Color.rgb(218, 231, 246));
+            chips[0].setTextColor(selected[0] == 0 ? Color.rgb(8, 12, 20) : INK);
+            chips[1].setTextColor(selected[0] == 1 ? Color.rgb(8, 12, 20) : INK);
             detailContent.removeAllViews();
             if (selected[0] == 0) renderBullpenFreshnessDetails(detailContent, away, home, awayColor, homeColor);
             else renderBullpenQualityDetails(detailContent, away, home, awayColor, homeColor);
@@ -17785,7 +17973,7 @@ private View liveGameCard(LiveGame game) {
     }
 
     private TextView bullpenDetailTabChip(String label, Runnable onClick) {
-        TextView chip = text(label, 12, Color.rgb(218, 231, 246), true);
+        TextView chip = text(label, 12, INK, true);
         chip.setGravity(Gravity.CENTER);
         chip.setSingleLine(true);
         chip.setForeground(ripple(false));
@@ -17795,7 +17983,7 @@ private View liveGameCard(LiveGame game) {
 
     private Drawable bullpenDetailTabBg(boolean active, int awayColor, int homeColor) {
         if (active) {
-            return roundedGradientStroke(new int[] { Color.rgb(255, 255, 255), Color.rgb(126, 235, 226), Color.rgb(247, 197, 77) }, 16, Color.argb(150, 255, 255, 255), 1);
+            return roundedGradientStroke(new int[] { INK, Color.rgb(126, 235, 226), Color.rgb(247, 197, 77) }, 16, Color.argb(150, 255, 255, 255), 1);
         }
         return roundedGradientStroke(new int[] {
                 Color.argb(42, Color.red(awayColor), Color.green(awayColor), Color.blue(awayColor)),
@@ -17869,7 +18057,7 @@ private View liveGameCard(LiveGame game) {
         top.addView(winnerText);
         row.addView(top, matchWrap());
 
-        TextView statement = text(sentence, 12, Color.rgb(230, 238, 250), true);
+        TextView statement = text(sentence, 12, INK, true);
         statement.setGravity(Gravity.CENTER);
         statement.setSingleLine(true);
         statement.setEllipsize(TextUtils.TruncateAt.END);
@@ -17879,7 +18067,7 @@ private View liveGameCard(LiveGame game) {
         LinearLayout compare = new LinearLayout(this);
         compare.setOrientation(LinearLayout.HORIZONTAL);
         compare.setGravity(Gravity.CENTER_VERTICAL);
-        TextView left = text(awayAbbr + "  " + leftValue, 10, winnerSide < 0 ? awayColor : Color.rgb(196, 209, 226), true);
+        TextView left = text(awayAbbr + "  " + leftValue, 10, winnerSide < 0 ? awayColor : INK_SOFT, true);
         left.setSingleLine(true);
         left.setEllipsize(TextUtils.TruncateAt.END);
         compare.addView(left, new LinearLayout.LayoutParams(0, -2, 1));
@@ -17889,7 +18077,7 @@ private View liveGameCard(LiveGame game) {
         railLp.setMargins(dp(6), 0, dp(6), 0);
         compare.addView(rail, railLp);
 
-        TextView right = text(rightValue + "  " + homeAbbr, 10, winnerSide > 0 ? homeColor : Color.rgb(196, 209, 226), true);
+        TextView right = text(rightValue + "  " + homeAbbr, 10, winnerSide > 0 ? homeColor : INK_SOFT, true);
         right.setGravity(Gravity.RIGHT);
         right.setSingleLine(true);
         right.setEllipsize(TextUtils.TruncateAt.END);
@@ -17906,7 +18094,7 @@ private View liveGameCard(LiveGame game) {
 
 
     private TextView bullpenOverallReadCard(BullpenReport away, BullpenReport home) {
-        TextView read = text(bullpenOverallReadText(away, home), 11, Color.rgb(216, 229, 246), true);
+        TextView read = text(bullpenOverallReadText(away, home), 11, INK, true);
         read.setGravity(Gravity.CENTER);
         read.setPadding(dp(10), dp(8), dp(10), dp(8));
         read.setBackground(roundedStroke(Color.argb(42, 255, 255, 255), Color.argb(50, 255, 255, 255), 18, 1));
@@ -18149,7 +18337,7 @@ private View liveGameCard(LiveGame game) {
     }
 
     private TextView bullpenWhyCard(BullpenReport away, BullpenReport home) {
-        TextView why = text(bullpenWhyText(away, home), 10, Color.rgb(216, 229, 246), false);
+        TextView why = text(bullpenWhyText(away, home), 10, INK, false);
         why.setGravity(Gravity.CENTER);
         why.setPadding(dp(10), dp(7), dp(10), dp(7));
         why.setBackground(roundedStroke(Color.argb(42, 255, 255, 255), Color.argb(44, 255, 255, 255), 16, 1));
@@ -18194,7 +18382,7 @@ private View liveGameCard(LiveGame game) {
         TextView name = text(r.abbr, 17, Color.WHITE, true);
         name.setGravity(Gravity.CENTER);
         card.addView(name, matchWrap());
-        TextView availability = text(bullpenAvailabilitySummary(r), 9, Color.rgb(220, 233, 247), true);
+        TextView availability = text(bullpenAvailabilitySummary(r), 9, INK, true);
         availability.setGravity(Gravity.CENTER);
         availability.setSingleLine(true);
         availability.setEllipsize(TextUtils.TruncateAt.END);
@@ -18224,7 +18412,7 @@ private View liveGameCard(LiveGame game) {
     }
 
     private TextView bullpenSmallChip(String label, int awayColor, int homeColor) {
-        TextView chip = text(label, 9, Color.rgb(220, 235, 248), true);
+        TextView chip = text(label, 9, INK, true);
         chip.setGravity(Gravity.CENTER);
         chip.setSingleLine(true);
         chip.setEllipsize(TextUtils.TruncateAt.END);
@@ -18446,9 +18634,9 @@ private View liveGameCard(LiveGame game) {
         }
 
         private void drawBullpenHeader(Canvas canvas, RectF card) {
-            drawTextFit(canvas, "2026 STATCAST MATCHUP", card.centerX(), card.top + dp(29), card.width() - dp(72), dp(10), Color.rgb(204, 215, 230), true, Paint.Align.CENTER, 0.12f);
+            drawTextFit(canvas, "2026 STATCAST MATCHUP", card.centerX(), card.top + dp(29), card.width() - dp(72), dp(10), INK_SOFT, true, Paint.Align.CENTER, 0.12f);
             drawHeroPill(canvas, "BULLPEN INTELLIGENCE", card.centerX(), card.top + dp(54), Math.min(card.width() - dp(70), dp(210)), dp(25),
-                    Color.argb(38, 255, 255, 255), Color.argb(78, 255, 255, 255), Color.rgb(220, 230, 244), dp(9));
+                    Color.argb(38, 255, 255, 255), Color.argb(78, 255, 255, 255), INK, dp(9));
         }
 
 
@@ -18568,8 +18756,8 @@ private View liveGameCard(LiveGame game) {
         private void drawReadBlock(Canvas canvas, RectF score, int leftColor, int rightColor) {
             int qualitySide = bullpenWinnerSide(bullpenQualityWinnerLabel(away, home), away, home);
             int freshSide = bullpenWinnerSide(bullpenFreshnessWinnerLabel(away, home), away, home);
-            int qColor = qualitySide < 0 ? leftColor : (qualitySide > 0 ? rightColor : Color.rgb(226, 235, 247));
-            int fColor = freshSide < 0 ? leftColor : (freshSide > 0 ? rightColor : Color.rgb(226, 235, 247));
+            int qColor = qualitySide < 0 ? leftColor : (qualitySide > 0 ? rightColor : INK);
+            int fColor = freshSide < 0 ? leftColor : (freshSide > 0 ? rightColor : INK);
 
             p.setStyle(Paint.Style.FILL);
             p.setShader(new LinearGradient(score.left, score.top, score.right, score.bottom,
@@ -18582,7 +18770,7 @@ private View liveGameCard(LiveGame game) {
             stroke.setColor(Color.argb(82, 255, 255, 255));
             canvas.drawRoundRect(score, dp(24), dp(24), stroke);
 
-            drawTextFit(canvas, "BULLPEN READ", score.centerX(), score.top + dp(25), score.width() - dp(36), dp(10), Color.rgb(190, 205, 224), true, Paint.Align.CENTER, 0.14f);
+            drawTextFit(canvas, "BULLPEN READ", score.centerX(), score.top + dp(25), score.width() - dp(36), dp(10), INK_SOFT, true, Paint.Align.CENTER, 0.14f);
             drawTextFit(canvas, bullpenOverallReadText(away, home).replace("Overall: ", ""), score.centerX(), score.top + dp(48), score.width() - dp(36), dp(13), Color.WHITE, true, Paint.Align.CENTER, 0.02f);
 
             float y = score.bottom - dp(23);
@@ -18593,7 +18781,7 @@ private View liveGameCard(LiveGame game) {
         }
 
         private void drawEdgeRows(Canvas canvas, RectF card, float startY, int leftColor, int rightColor) {
-            drawTextFit(canvas, "BULLPEN EDGE DETAILS", card.left + dp(24), startY, card.width() - dp(48), dp(10), Color.rgb(190, 205, 224), true, Paint.Align.LEFT, 0.12f);
+            drawTextFit(canvas, "BULLPEN EDGE DETAILS", card.left + dp(24), startY, card.width() - dp(48), dp(10), INK_SOFT, true, Paint.Align.LEFT, 0.12f);
             drawTextFit(canvas, "QUALITY", card.left + dp(24), startY + dp(22), dp(110), dp(8), softColor(leftColor, 0.14f), true, Paint.Align.LEFT, 0.10f);
             drawTextFit(canvas, "FRESHNESS", card.right - dp(24), startY + dp(22), dp(120), dp(8), softColor(rightColor, 0.14f), true, Paint.Align.RIGHT, 0.10f);
 
@@ -18614,14 +18802,14 @@ private View liveGameCard(LiveGame game) {
             stroke.setColor(Color.argb(60, 255, 255, 255));
             canvas.drawRoundRect(row, dp(18), dp(18), stroke);
 
-            int lColor = winnerSide < 0 ? leftColor : Color.rgb(222, 232, 246);
-            int rColor = winnerSide > 0 ? rightColor : Color.rgb(222, 232, 246);
+            int lColor = winnerSide < 0 ? leftColor : INK;
+            int rColor = winnerSide > 0 ? rightColor : INK;
             drawTextFit(canvas, leftValue, row.left + dp(18), y - dp(3), dp(88), dp(18), lColor, true, Paint.Align.LEFT, 0.00f);
             drawTextFit(canvas, leftSub, row.left + dp(18), y + dp(13), dp(92), dp(8), Color.rgb(164, 181, 205), true, Paint.Align.LEFT, 0.08f);
             drawTextFit(canvas, rightValue, row.right - dp(18), y - dp(3), dp(88), dp(18), rColor, true, Paint.Align.RIGHT, 0.00f);
             drawTextFit(canvas, rightSub, row.right - dp(18), y + dp(13), dp(92), dp(8), Color.rgb(164, 181, 205), true, Paint.Align.RIGHT, 0.08f);
 
-            drawTextFit(canvas, label, row.centerX(), y - dp(2), dp(92), dp(11), Color.rgb(224, 232, 242), true, Paint.Align.CENTER, 0.10f);
+            drawTextFit(canvas, label, row.centerX(), y - dp(2), dp(92), dp(11), INK, true, Paint.Align.CENTER, 0.10f);
             drawPremiumSparkRail(canvas, row.left + dp(124), row.right - dp(124), y + dp(10), winnerSide, leftColor, rightColor);
         }
 
@@ -18910,15 +19098,15 @@ private View liveGameCard(LiveGame game) {
         }
 
         private void drawHeader(Canvas canvas, RectF card) {
-            drawTextFit(canvas, "2026 STATCAST MATCHUP", card.centerX(), card.top + dp(29), card.width() - dp(72), dp(10), Color.rgb(204, 215, 230), true, Paint.Align.CENTER, 0.12f);
+            drawTextFit(canvas, "2026 STATCAST MATCHUP", card.centerX(), card.top + dp(29), card.width() - dp(72), dp(10), INK_SOFT, true, Paint.Align.CENTER, 0.12f);
             drawHeroPill(canvas, "BULLPEN INTELLIGENCE", card.centerX(), card.top + dp(54), Math.min(card.width() - dp(70), dp(214)), dp(25),
-                    Color.argb(38, 255, 255, 255), Color.argb(78, 255, 255, 255), Color.rgb(220, 230, 244), dp(9));
+                    Color.argb(38, 255, 255, 255), Color.argb(78, 255, 255, 255), INK, dp(9));
             drawTextFit(canvas, currentLoadingStep(), card.centerX(), card.top + dp(83), card.width() - dp(52), dp(9), Color.rgb(186, 204, 228), true, Paint.Align.CENTER, 0.10f);
             drawTextFit(canvas, "Matchup type · bullpen", card.centerX(), card.top + dp(101), card.width() - dp(52), dp(8), Color.rgb(143, 162, 190), true, Paint.Align.CENTER, 0.12f);
         }
 
         private void drawTeamIdentity(Canvas canvas, String city, String mascot, float cx, float y, int color) {
-            drawTextFit(canvas, city, cx, y, dp(150), dp(12), Color.rgb(214, 224, 240), true, Paint.Align.CENTER, 0.18f);
+            drawTextFit(canvas, city, cx, y, dp(150), dp(12), INK, true, Paint.Align.CENTER, 0.18f);
             drawTextFit(canvas, mascot, cx, y + dp(26), dp(174), dp(24), Color.WHITE, true, Paint.Align.CENTER, 0.05f);
             drawTextFit(canvas, "BULLPEN", cx, y + dp(49), dp(120), dp(10), softColor(color, 0.08f), true, Paint.Align.CENTER, 0.18f);
         }
@@ -18935,14 +19123,14 @@ private View liveGameCard(LiveGame game) {
             stroke.setColor(Color.argb(82, 255, 255, 255));
             canvas.drawRoundRect(score, dp(24), dp(24), stroke);
 
-            drawTextFit(canvas, "BUILDING BULLPEN EDGE", score.centerX(), score.top + dp(23), score.width() - dp(40), dp(10), Color.rgb(214, 223, 236), true, Paint.Align.CENTER, 0.12f);
-            drawTextFit(canvas, "Quality and freshness are being scored live", score.centerX(), score.top + dp(41), score.width() - dp(44), dp(9), Color.rgb(173, 188, 209), false, Paint.Align.CENTER, 0.02f);
+            drawTextFit(canvas, "BUILDING BULLPEN EDGE", score.centerX(), score.top + dp(23), score.width() - dp(40), dp(10), INK_SOFT, true, Paint.Align.CENTER, 0.12f);
+            drawTextFit(canvas, "Quality and freshness are being scored live", score.centerX(), score.top + dp(41), score.width() - dp(44), dp(9), INK_DIM, false, Paint.Align.CENTER, 0.02f);
 
             RectF leftPct = new RectF(score.centerX() - dp(124), score.top + dp(60), score.centerX() - dp(38), score.top + dp(88));
             RectF rightPct = new RectF(score.centerX() + dp(38), score.top + dp(60), score.centerX() + dp(124), score.top + dp(88));
             drawShimmerRect(canvas, leftPct, dp(12));
             drawShimmerRect(canvas, rightPct, dp(12));
-            drawTextFit(canvas, "–", score.centerX(), score.top + dp(83), dp(28), dp(24), Color.rgb(226, 234, 244), true, Paint.Align.CENTER, 0f);
+            drawTextFit(canvas, "–", score.centerX(), score.top + dp(83), dp(28), dp(24), INK, true, Paint.Align.CENTER, 0f);
 
             float railY = score.bottom - dp(23);
             drawLoadingSparkRail(canvas, score.left + dp(28), score.right - dp(28), railY, mixColor(awayColor, homeColor, 0.50f));
@@ -18961,7 +19149,7 @@ private View liveGameCard(LiveGame game) {
             canvas.drawLine(bx + dp(6), by + dp(5), bx + dp(6), by + dp(15), stroke);
             canvas.drawLine(bx + dp(12), by + dp(1), bx + dp(12), by + dp(15), stroke);
             stroke.setStrokeCap(Paint.Cap.BUTT);
-            drawTextFit(canvas, "BULLPEN SCORING FACTORS", x + dp(36), y, dp(250), dp(11), Color.rgb(228, 235, 245), true, Paint.Align.LEFT, 0.10f);
+            drawTextFit(canvas, "BULLPEN SCORING FACTORS", x + dp(36), y, dp(250), dp(11), INK, true, Paint.Align.LEFT, 0.10f);
         }
 
         private void drawLoadingFactorsPanel(Canvas canvas, RectF panel) {
@@ -19003,7 +19191,7 @@ private View liveGameCard(LiveGame game) {
             stroke.setColor(Color.argb(46, 255, 255, 255));
             canvas.drawLine(panel.left + dp(16), y, panel.centerX() - textW / 2f - dp(8), y, stroke);
             canvas.drawLine(panel.centerX() + textW / 2f + dp(8), y, panel.right - dp(16), y, stroke);
-            drawTextFit(canvas, label, panel.centerX(), y + dp(4), textW, dp(9), Color.rgb(212, 221, 234), true, Paint.Align.CENTER, 0.11f);
+            drawTextFit(canvas, label, panel.centerX(), y + dp(4), textW, dp(9), INK_SOFT, true, Paint.Align.CENTER, 0.11f);
         }
 
         private void drawLoadingMetricRow(Canvas canvas, RectF panel, float y, String label, int leftColor, int rightColor) {
@@ -19020,7 +19208,7 @@ private View liveGameCard(LiveGame game) {
             drawShimmerRect(canvas, leftBox, dp(9));
             drawShimmerRect(canvas, rightBox, dp(9));
 
-            drawTextFit(canvas, label, panel.centerX(), y - dp(1), dp(118), dp(11), Color.rgb(224, 232, 242), true, Paint.Align.CENTER, 0.04f);
+            drawTextFit(canvas, label, panel.centerX(), y - dp(1), dp(118), dp(11), INK, true, Paint.Align.CENTER, 0.04f);
             drawLoadingSparkRail(canvas, panel.left + dp(102), panel.right - dp(102), y + dp(10), mixColor(leftColor, rightColor, 0.50f));
         }
 
@@ -19539,9 +19727,9 @@ private View liveGameCard(LiveGame game) {
         }
 
         private void drawPremiumLoadingHeader(Canvas canvas, RectF card) {
-            drawPremiumLoadingText(canvas, season + " STATCAST MATCHUP", card.centerX(), card.top + dp(29), card.width() - dp(72), dp(10), Color.rgb(204, 215, 230), true, Paint.Align.CENTER, 0.12f);
+            drawPremiumLoadingText(canvas, season + " STATCAST MATCHUP", card.centerX(), card.top + dp(29), card.width() - dp(72), dp(10), INK_SOFT, true, Paint.Align.CENTER, 0.12f);
             drawPremiumLoadingPill(canvas, title, card.centerX(), card.top + dp(54), Math.min(card.width() - dp(70), dp(220)), dp(25),
-                    Color.argb(38, 255, 255, 255), Color.argb(78, 255, 255, 255), Color.rgb(220, 230, 244), dp(9));
+                    Color.argb(38, 255, 255, 255), Color.argb(78, 255, 255, 255), INK, dp(9));
             drawPremiumLoadingText(canvas, currentPremiumLoadingStep(), card.centerX(), card.top + dp(83), card.width() - dp(52), dp(9), Color.rgb(186, 204, 228), true, Paint.Align.CENTER, 0.10f);
             drawPremiumLoadingText(canvas, typeLine, card.centerX(), card.top + dp(101), card.width() - dp(52), dp(8), Color.rgb(143, 162, 190), true, Paint.Align.CENTER, 0.12f);
         }
@@ -19558,12 +19746,12 @@ private View liveGameCard(LiveGame game) {
             stroke.setColor(Color.argb(82, 255, 255, 255));
             canvas.drawRoundRect(score, dp(24), dp(24), stroke);
 
-            drawPremiumLoadingText(canvas, "BUILDING MATCHUP EDGE", score.centerX(), score.top + dp(23), score.width() - dp(40), dp(10), Color.rgb(214, 223, 236), true, Paint.Align.CENTER, 0.12f);
-            drawPremiumLoadingText(canvas, "Scoring the selected card lens", score.centerX(), score.top + dp(41), score.width() - dp(44), dp(9), Color.rgb(173, 188, 209), false, Paint.Align.CENTER, 0.02f);
+            drawPremiumLoadingText(canvas, "BUILDING MATCHUP EDGE", score.centerX(), score.top + dp(23), score.width() - dp(40), dp(10), INK_SOFT, true, Paint.Align.CENTER, 0.12f);
+            drawPremiumLoadingText(canvas, "Scoring the selected card lens", score.centerX(), score.top + dp(41), score.width() - dp(44), dp(9), INK_DIM, false, Paint.Align.CENTER, 0.02f);
 
             drawPremiumShimmerRect(canvas, new RectF(score.centerX() - dp(124), score.top + dp(60), score.centerX() - dp(38), score.top + dp(88)), dp(12));
             drawPremiumShimmerRect(canvas, new RectF(score.centerX() + dp(38), score.top + dp(60), score.centerX() + dp(124), score.top + dp(88)), dp(12));
-            drawPremiumLoadingText(canvas, "-", score.centerX(), score.top + dp(83), dp(28), dp(24), Color.rgb(226, 234, 244), true, Paint.Align.CENTER, 0f);
+            drawPremiumLoadingText(canvas, "-", score.centerX(), score.top + dp(83), dp(28), dp(24), INK, true, Paint.Align.CENTER, 0f);
             drawPremiumLoadingSparkRail(canvas, score.left + dp(28), score.right - dp(28), score.bottom - dp(23), mixColor(leftColor, rightColor, 0.50f));
         }
 
@@ -19580,7 +19768,7 @@ private View liveGameCard(LiveGame game) {
             canvas.drawLine(bx + dp(6), by + dp(5), bx + dp(6), by + dp(15), stroke);
             canvas.drawLine(bx + dp(12), by + dp(1), bx + dp(12), by + dp(15), stroke);
             stroke.setStrokeCap(Paint.Cap.BUTT);
-            drawPremiumLoadingText(canvas, "MATCHUP SCORING FACTORS", x + dp(36), y, dp(260), dp(11), Color.rgb(228, 235, 245), true, Paint.Align.LEFT, 0.10f);
+            drawPremiumLoadingText(canvas, "MATCHUP SCORING FACTORS", x + dp(36), y, dp(260), dp(11), INK, true, Paint.Align.LEFT, 0.10f);
         }
 
         private void drawPremiumLoadingFactorsPanel(Canvas canvas, RectF panel) {
@@ -19620,7 +19808,7 @@ private View liveGameCard(LiveGame game) {
             stroke.setColor(Color.argb(46, 255, 255, 255));
             canvas.drawLine(panel.left + dp(16), y, panel.centerX() - textW / 2f - dp(8), y, stroke);
             canvas.drawLine(panel.centerX() + textW / 2f + dp(8), y, panel.right - dp(16), y, stroke);
-            drawPremiumLoadingText(canvas, label, panel.centerX(), y + dp(4), textW, dp(9), Color.rgb(212, 221, 234), true, Paint.Align.CENTER, 0.11f);
+            drawPremiumLoadingText(canvas, label, panel.centerX(), y + dp(4), textW, dp(9), INK_SOFT, true, Paint.Align.CENTER, 0.11f);
         }
 
         private void drawPremiumLoadingMetricRow(Canvas canvas, RectF panel, float y, String label) {
@@ -19633,7 +19821,7 @@ private View liveGameCard(LiveGame game) {
             }
             drawPremiumShimmerRect(canvas, new RectF(panel.left + dp(14), y - dp(11), panel.left + dp(76), y + dp(7)), dp(9));
             drawPremiumShimmerRect(canvas, new RectF(panel.right - dp(76), y - dp(11), panel.right - dp(14), y + dp(7)), dp(9));
-            drawPremiumLoadingText(canvas, label, panel.centerX(), y - dp(1), dp(128), dp(11), Color.rgb(224, 232, 242), true, Paint.Align.CENTER, 0.04f);
+            drawPremiumLoadingText(canvas, label, panel.centerX(), y - dp(1), dp(128), dp(11), INK, true, Paint.Align.CENTER, 0.04f);
             drawPremiumLoadingSparkRail(canvas, panel.left + dp(102), panel.right - dp(102), y + dp(10), mixColor(leftColor, rightColor, 0.50f));
         }
 
@@ -19780,7 +19968,7 @@ private View liveGameCard(LiveGame game) {
         }
 
         private void drawPremiumLoadingNameBlock(Canvas canvas, String top, String main, String bottom, float cx, float y, int color) {
-            drawPremiumLoadingText(canvas, top, cx, y, dp(150), dp(12), Color.rgb(214, 224, 240), true, Paint.Align.CENTER, 0.18f);
+            drawPremiumLoadingText(canvas, top, cx, y, dp(150), dp(12), INK, true, Paint.Align.CENTER, 0.18f);
             drawPremiumLoadingText(canvas, main, cx, y + dp(26), dp(174), dp(24), Color.WHITE, true, Paint.Align.CENTER, 0.05f);
             drawPremiumLoadingText(canvas, bottom, cx, y + dp(49), dp(130), dp(10), softColor(color, 0.08f), true, Paint.Align.CENTER, 0.18f);
         }
@@ -19974,7 +20162,7 @@ private View liveGameCard(LiveGame game) {
         card.addView(bullpenUsageHeaderRow(), matchWrap());
         ArrayList<BullpenArmUsage> arms = bullpenTopArms(report, 7);
         if (arms.isEmpty()) {
-            TextView empty = text("No recent bullpen usage found", 10, Color.rgb(172, 188, 210), false);
+            TextView empty = text("No recent bullpen usage found", 10, INK_DIM, false);
             empty.setGravity(Gravity.CENTER);
             empty.setPadding(0, dp(8), 0, dp(4));
             card.addView(empty, matchWrap());
@@ -20008,7 +20196,7 @@ private View liveGameCard(LiveGame game) {
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(0, dp(2), 0, dp(2));
-        TextView name = text(arm == null ? "—" : arm.displayName(), 9, Color.rgb(235, 242, 250), true);
+        TextView name = text(arm == null ? "—" : arm.displayName(), 9, INK, true);
         name.setSingleLine(true);
         name.setEllipsize(TextUtils.TruncateAt.END);
         row.addView(name, new LinearLayout.LayoutParams(dp(76), dp(28)));
@@ -20029,7 +20217,7 @@ private View liveGameCard(LiveGame game) {
     }
 
     private TextView bullpenPitchCell(int pitches, int teamColor) {
-        TextView cell = text(pitches <= 0 ? "—" : String.valueOf(pitches), 8, Color.rgb(235, 242, 250), true);
+        TextView cell = text(pitches <= 0 ? "—" : String.valueOf(pitches), 8, INK, true);
         cell.setGravity(Gravity.CENTER);
         cell.setSingleLine(true);
         int bg;
@@ -20056,9 +20244,9 @@ private View liveGameCard(LiveGame game) {
         if ("Likely down".equals(status)) return Color.rgb(255, 116, 116);
         if ("Watch".equals(status)) return Color.rgb(247, 197, 77);
         if ("Fresh".equals(status)) return Color.rgb(126, 235, 226);
-        if ("Ready".equals(status)) return Color.rgb(210, 224, 240);
+        if ("Ready".equals(status)) return INK_SOFT;
         if ("Follower".equals(status) || "Long".equals(status)) return Color.rgb(177, 196, 224);
-        return Color.rgb(210, 224, 240);
+        return INK_SOFT;
     }
 
     private String bpDateLabel(int daysAgo) {
@@ -20082,7 +20270,7 @@ private View liveGameCard(LiveGame game) {
 
 
     private void bullpenSubsectionLabel(LinearLayout panel, String label) {
-        TextView t = text(label, 9, Color.rgb(218, 232, 248), true);
+        TextView t = text(label, 9, INK, true);
         t.setLetterSpacing(0.05f);
         t.setPadding(dp(3), dp(8), 0, dp(1));
         panel.addView(t, matchWrap());
@@ -20100,7 +20288,7 @@ private View liveGameCard(LiveGame game) {
 
         String help = bullpenHelpText(title);
         if (!safe(help).isEmpty()) {
-            TextView info = text("i", 9, Color.rgb(178, 195, 216), true);
+            TextView info = text("i", 9, INK_DIM, true);
             info.setGravity(Gravity.CENTER);
             info.setPadding(0, 0, 0, dp(1));
             info.setBackground(roundedStroke(Color.argb(24, 255, 255, 255), Color.argb(72, 255, 255, 255), 999, 1));
@@ -20139,7 +20327,7 @@ private View liveGameCard(LiveGame game) {
         top.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout.LayoutParams topLp = matchWrap();
         topLp.setMargins(0, dp(12), 0, 0);
-        TextView titleView = text(title, 20, Color.rgb(238, 245, 252), true);
+        TextView titleView = text(title, 20, INK, true);
         top.addView(titleView, new LinearLayout.LayoutParams(0, -2, 1));
         TextView type = text("Bullpen", 10, Color.rgb(174, 218, 255), true);
         type.setGravity(Gravity.CENTER);
@@ -20153,7 +20341,7 @@ private View liveGameCard(LiveGame game) {
         eyebrow.setPadding(0, dp(14), 0, dp(4));
         panel.addView(eyebrow, matchWrap());
 
-        TextView body = text(bodyText, 13, Color.rgb(190, 205, 226), false);
+        TextView body = text(bodyText, 13, INK_SOFT, false);
         body.setLineSpacing(dp(3), 1.0f);
         body.setPadding(0, 0, 0, dp(14));
         panel.addView(body, matchWrap());
@@ -20167,6 +20355,7 @@ private View liveGameCard(LiveGame game) {
         final AlertDialog dialog = new AlertDialog.Builder(this).create();
         dialog.setView(panel);
         close.setOnClickListener(v -> dialog.dismiss());
+        makePremiumButton(close, 14f);  // v235: consistent press feedback
         dialog.show();
         try {
             android.view.Window w = dialog.getWindow();
@@ -20212,9 +20401,9 @@ private View liveGameCard(LiveGame game) {
 
         boolean awayMuted = bullpenValueIsMuted(awayValue);
         boolean homeMuted = bullpenValueIsMuted(homeValue);
-        int muted = Color.rgb(164, 180, 202);
+        int muted = INK_DIM;
 
-        TextView left = text(awayValue, 12, awayMuted ? muted : (edge < 0 ? awayColor : Color.rgb(220, 231, 245)), true);
+        TextView left = text(awayValue, 12, awayMuted ? muted : (edge < 0 ? awayColor : INK), true);
         left.setGravity(Gravity.LEFT);
         left.setSingleLine(true);
         row.addView(left, new LinearLayout.LayoutParams(0, -2, 1));
@@ -20225,7 +20414,7 @@ private View liveGameCard(LiveGame game) {
         mid.setEllipsize(TextUtils.TruncateAt.END);
         row.addView(mid, new LinearLayout.LayoutParams(dp(122), -2));
 
-        TextView right = text(homeValue, 12, homeMuted ? muted : (edge > 0 ? homeColor : Color.rgb(220, 231, 245)), true);
+        TextView right = text(homeValue, 12, homeMuted ? muted : (edge > 0 ? homeColor : INK), true);
         right.setGravity(Gravity.RIGHT);
         right.setSingleLine(true);
         row.addView(right, new LinearLayout.LayoutParams(0, -2, 1));
@@ -21409,6 +21598,102 @@ private View liveGameCard(LiveGame game) {
         });
     }
 
+    // ── Favorites (players + teams) ──────────────────────────────────────────────────────────────
+    // v237: persistent favorites, modeled on the recents store. Players and teams are kept in
+    // separate ordered lists so the home screen can surface "your" players and teams. Newest
+    // favorited item sorts first; toggling an existing favorite removes it.
+
+    private static final int MAX_FAVORITES = 12;
+    private static final String PREFS_FAVORITES = "statcast_favorites_v237";
+
+    private boolean isFavoritePlayer(int playerId) {
+        SharedPreferences prefs = getSharedPreferences(PREFS_FAVORITES, MODE_PRIVATE);
+        for (int i = 0; i < MAX_FAVORITES; i++) {
+            if (String.valueOf(playerId).equals(prefs.getString("fpid_" + i, null))) return true;
+        }
+        return false;
+    }
+
+    private boolean isFavoriteTeam(int teamId) {
+        SharedPreferences prefs = getSharedPreferences(PREFS_FAVORITES, MODE_PRIVATE);
+        for (int i = 0; i < MAX_FAVORITES; i++) {
+            if (String.valueOf(teamId).equals(prefs.getString("ftid_" + i, null))) return true;
+        }
+        return false;
+    }
+
+    // Returns the new favorite state (true = now a favorite).
+    private boolean toggleFavoritePlayer(Player p) {
+        if (p == null) return false;
+        return toggleFavorite("fpid_", "fpname_", String.valueOf(p.id), p.fullName);
+    }
+
+    private boolean toggleFavoriteTeam(Team t) {
+        if (t == null) return false;
+        return toggleFavorite("ftid_", "ftname_", String.valueOf(t.id), t.name);
+    }
+
+    private boolean toggleFavorite(String idKey, String nameKey, String id, String name) {
+        SharedPreferences prefs = getSharedPreferences(PREFS_FAVORITES, MODE_PRIVATE);
+        ArrayList<String> ids = new ArrayList<>();
+        ArrayList<String> names = new ArrayList<>();
+        boolean wasFavorite = false;
+        for (int i = 0; i < MAX_FAVORITES; i++) {
+            String fid = prefs.getString(idKey + i, null);
+            String fname = prefs.getString(nameKey + i, null);
+            if (fid == null) continue;
+            if (fid.equals(id)) { wasFavorite = true; continue; } // drop it (toggle off)
+            ids.add(fid); names.add(fname);
+        }
+        boolean nowFavorite;
+        if (wasFavorite) {
+            nowFavorite = false;
+        } else {
+            ids.add(0, id); names.add(0, name); // newest first
+            nowFavorite = true;
+        }
+        SharedPreferences.Editor ed = prefs.edit();
+        for (int i = 0; i < MAX_FAVORITES; i++) {
+            if (i < ids.size()) {
+                ed.putString(idKey + i, ids.get(i));
+                ed.putString(nameKey + i, names.get(i));
+            } else {
+                ed.remove(idKey + i);
+                ed.remove(nameKey + i);
+            }
+        }
+        ed.apply();
+        return nowFavorite;
+    }
+
+    private ArrayList<Player> favoritePlayers() {
+        SharedPreferences prefs = getSharedPreferences(PREFS_FAVORITES, MODE_PRIVATE);
+        ArrayList<Player> out = new ArrayList<>();
+        for (int i = 0; i < MAX_FAVORITES; i++) {
+            String idStr = prefs.getString("fpid_" + i, null);
+            if (idStr == null) continue;
+            try {
+                Player p = playerById(Integer.parseInt(idStr));
+                if (p != null) out.add(p);
+            } catch (Exception ignored) {}
+        }
+        return out;
+    }
+
+    private ArrayList<Team> favoriteTeams() {
+        SharedPreferences prefs = getSharedPreferences(PREFS_FAVORITES, MODE_PRIVATE);
+        ArrayList<Team> out = new ArrayList<>();
+        for (int i = 0; i < MAX_FAVORITES; i++) {
+            String idStr = prefs.getString("ftid_" + i, null);
+            if (idStr == null) continue;
+            try {
+                Team t = findTeamById(Integer.parseInt(idStr));
+                if (t != null) out.add(t);
+            } catch (Exception ignored) {}
+        }
+        return out;
+    }
+
     // ── Recent players ───────────────────────────────────────────────────────────────────────────
 
     private static final int MAX_RECENTS = 5;
@@ -21515,7 +21800,7 @@ private View liveGameCard(LiveGame game) {
         top.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout.LayoutParams topLp = matchWrap();
         topLp.setMargins(0, dp(12), 0, 0);
-        TextView title = text(m.label, 20, Color.rgb(238, 245, 252), true);
+        TextView title = text(m.label, 20, INK, true);
         top.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
         TextView type = text(m.group == null ? "Stat" : m.group.replace("Standard ", ""), 10, Color.rgb(174, 218, 255), true);
         type.setGravity(Gravity.CENTER);
@@ -21529,7 +21814,7 @@ private View liveGameCard(LiveGame game) {
         eyebrow.setPadding(0, dp(14), 0, dp(4));
         panel.addView(eyebrow, matchWrap());
 
-        TextView body = text(desc, 13, Color.rgb(190, 205, 226), false);
+        TextView body = text(desc, 13, INK_SOFT, false);
         body.setLineSpacing(dp(3), 1.0f);
         panel.addView(body, matchWrap());
 
@@ -21539,14 +21824,14 @@ private View liveGameCard(LiveGame game) {
         panel.addView(read, matchWrap());
 
         String readText = m.higherGood == null ? "Context stat. Use it with related lens metrics." : (m.higherGood ? "Higher is better." : "Lower is better.");
-        panel.addView(text(readText, 12, Color.rgb(190, 205, 226), false), matchWrap());
+        panel.addView(text(readText, 12, INK_SOFT, false), matchWrap());
 
         TextView used = text("USED IN", 9, Color.rgb(132, 150, 176), true);
         used.setLetterSpacing(0.10f);
         used.setPadding(0, dp(14), 0, dp(4));
         panel.addView(used, matchWrap());
 
-        TextView usedBody = text(lensesForMetric(m), 12, Color.rgb(190, 205, 226), false);
+        TextView usedBody = text(lensesForMetric(m), 12, INK_SOFT, false);
         usedBody.setPadding(0, 0, 0, dp(14));
         panel.addView(usedBody, matchWrap());
 
@@ -21559,6 +21844,7 @@ private View liveGameCard(LiveGame game) {
         final AlertDialog dialog = new AlertDialog.Builder(this).create();
         dialog.setView(panel);
         close.setOnClickListener(v -> dialog.dismiss());
+        makePremiumButton(close, 14f);  // v235: consistent press feedback
         dialog.show();
         try {
             android.view.Window w = dialog.getWindow();
@@ -21673,6 +21959,53 @@ private View liveGameCard(LiveGame game) {
             case "pGbPct": case "teamPGbPct": return "Ground-ball % allowed — share of allowed batted balls on the ground.";
             case "pFbPct": case "teamPFbPct": return "Fly-ball % allowed — share of allowed batted balls in the air.";
             case "pLdPct": case "teamPLdPct": return "Line-drive % allowed — share of allowed batted balls hit as line drives.";
+            // v227: synthetic matchup-card metrics. These previously fell through to the weak
+            // generic fallback, so tapping their "i" gave a non-answer. Each now explains what
+            // the score means and how it's built, matching how it's used on the card.
+            case "bpQualityScore": return "Bullpen Quality Score (0–100) — a rating of how good a bullpen's relievers are, blending their ERA, WHIP, K-BB%, and home runs allowed onto a single scale. Higher is better. Drives 70% of the bullpen matchup edge.";
+            case "bpFreshnessScore": return "Bullpen Freshness Score (0–100) — how rested the bullpen is tonight, based on recent workload: innings over the last two days, back-to-back appearances, and heavily-used arms. Higher means fresher. Drives 30% of the bullpen matchup edge.";
+            case "bpERA": return "Bullpen ERA — earned runs allowed per nine innings by the relievers only. Lower is better.";
+            case "bpWHIP": return "Bullpen WHIP — walks plus hits per inning pitched by the relievers only. Lower is better.";
+            case "bpKMinusBB": return "Bullpen K-BB% — strikeout rate minus walk rate for the relievers. A clean read on dominance and control in one number. Higher is better.";
+            case "bpHR9": return "Bullpen HR/9 — home runs allowed per nine innings by the relievers. Lower is better.";
+            case "bpStaffIP": return "Innings Last 2 Days — relief innings the bullpen has thrown over the past two calendar days. More recent work means more fatigue tonight.";
+            case "bpB2B": return "Back-to-Back Arms — relievers pitching on consecutive days. More B2B arms means a more taxed bullpen.";
+            case "bpWatchArms": return "Watch Arms — relievers flagged as fatigued from heavy recent use, worth watching for availability tonight.";
+            case "bpSectionQuality": return "Quality drives 70% of the bullpen edge — it captures how good the relievers are, independent of how rested they are.";
+            case "bpSectionFreshness": return "Freshness drives 30% of the bullpen edge — it captures tonight's availability, since even an elite bullpen is weaker when overworked.";
+            case "ovsOverall": return "Matchup Score (0–100) — the overall edge in a lineup-vs-starter matchup, weighting the four factors below with the starter's quality carrying the most influence. Higher favors the offense.";
+            case "ovsOnBase": return "On-Base Edge — how well the lineup reaches base (OBP, walk rate) against the starter's ability to limit baserunners. Higher favors the offense.";
+            case "ovsPower": return "Power Edge — the lineup's extra-base power (SLG, barrels) against the starter's ability to suppress hard contact. Higher favors the offense.";
+            case "ovsDiscipline": return "Discipline Edge — the lineup's strike-zone control (K avoidance, walk-vs-strikeout balance) against the starter's strikeout and swing-and-miss ability. Higher favors the offense.";
+            case "ovsStarterVuln": return "Starter Stress — how vulnerable the starter looks overall (ERA, WHIP, expected wOBA, hard contact allowed). Higher means a more exploitable starter.";
+            case "hbScore": return "Hot Bat Score — a rating of how well a hitter has been swinging recently, weighting recent production and contact quality. Higher means hotter.";
+            case "babip": case "teamBABIP": return "Batting Average on Balls in Play — how often balls in play fall for hits. Often noisy; far from .300 can signal good or bad luck that may regress.";
+            // v227: team metrics mirror their player counterparts. Route them to the same
+            // descriptions so 40+ team rows stop showing the generic fallback.
+            case "teamAVG": return metricDescription("avg");
+            case "teamOBP": return metricDescription("obp");
+            case "teamSLG": return metricDescription("slg");
+            case "teamOPS": return metricDescription("ops");
+            case "teamWOBA": return metricDescription("wOBA");
+            case "teamXWOBA": return metricDescription("xwOBA");
+            case "teamXBA": return metricDescription("xBA");
+            case "teamXSLG": return metricDescription("xSLG");
+            case "teamAvgEV": return metricDescription("avgEV");
+            case "teamBarrelPct": return metricDescription("barrelPct");
+            case "teamHardHitPct": return metricDescription("hardHitPct");
+            case "teamSweetSpotPct": return metricDescription("sweetSpotPct");
+            case "teamKPct": return metricDescription("kPct");
+            case "teamBBPct": return metricDescription("bbPct");
+            case "teamRBI": return metricDescription("rbi");
+            case "teamSB": return metricDescription("sb");
+            case "teamERA": return metricDescription("era");
+            case "teamWHIP": return metricDescription("whip");
+            case "teamK9": return metricDescription("k9");
+            case "teamBB9": return metricDescription("bb9");
+            case "teamKBB": return metricDescription("kbb");
+            case "teamWalksAllowed": return metricDescription("pitchBB");
+            case "teamPitchStrikeouts": return metricDescription("pitchK");
+            case "pHr9": return "Home Runs per 9 — home runs allowed per nine innings. Lower is better.";
             default:       return genericMetricDescription(key);
         }
     }
@@ -21784,7 +22117,7 @@ private View liveGameCard(LiveGame game) {
 
                 paint.setStyle(Paint.Style.FILL);
                 paint.setTextSize(dp(9));
-                paint.setColor(Color.rgb(198, 212, 230));
+                paint.setColor(INK_SOFT);
                 canvas.drawText(seg.month.toUpperCase(Locale.US), cx, dp(14), paint);
 
                 Double value = monthlyValueForLabel(monthlyPoints, seg.month);
@@ -21880,7 +22213,7 @@ private View liveGameCard(LiveGame game) {
                 canvas.drawLine(x, padT, x, padT + plotH, paint);
             }
 
-            paint.setColor(Color.rgb(232, 237, 246));
+            paint.setColor(INK);
             for (int i = 0; i < 3; i++) {
                 float y = padT + plotH * i / 2f;
                 canvas.drawLine(padL, y, padL + plotW, y, paint);
@@ -21890,7 +22223,7 @@ private View liveGameCard(LiveGame game) {
             paint.setTextSize(dp(8));
             paint.setTypeface(tfBold);                 // v29: weight ladder
             paint.setFontFeatureSettings("'tnum' 1");  // v29: tabular figures for axis values
-            paint.setColor(Color.rgb(116, 128, 146));
+            paint.setColor(EYEBROW);
             paint.setTextAlign(Paint.Align.LEFT);
             canvas.drawText(format(max, metric), padL + plotW + dp(5), padT + dp(3), paint);
             canvas.drawText(format(mid, metric), padL + plotW + dp(5), padT + plotH / 2f + dp(3), paint);
@@ -22637,6 +22970,19 @@ private View liveGameCard(LiveGame game) {
             if (obpDen > 0) s.put("obp", (hits + bb + hbp) / obpDen);
             Double obp = s.get("obp"), slg = s.get("slg");
             if (obp != null && slg != null) s.put("ops", obp + slg);
+            // v236: rolling wOBA from the same raw window inputs already summed above. Every
+            // component (uBB, HBP, 1B, 2B, 3B, HR, AB, SF) is present, so a true windowed wOBA
+            // is computable exactly like AVG/OBP/SLG — it was simply never derived here. Linear
+            // weights are the stable recent-era (FanGraphs ~2021-2024) constants; this is a
+            // results-based wOBA (unintentional-walk data isn't in the game log, so all walks are
+            // weighted as unintentional, the standard simplification for a per-window display).
+            double singles = hits - doubles - triples - hr;
+            if (singles < 0) singles = 0;
+            double wobaDen = ab + bb + sf + hbp;
+            if (wobaDen > 0) {
+                double wobaNum = 0.69 * bb + 0.72 * hbp + 0.88 * singles + 1.247 * doubles + 1.578 * triples + 2.031 * hr;
+                s.put("wOBA", wobaNum / wobaDen);
+            }
             s.put("h", hits);
             s.put("doubles", doubles);
             s.put("triples", triples);
@@ -22706,7 +23052,12 @@ private View liveGameCard(LiveGame game) {
 
             for (Metric m : metrics) {
                 // Prefer raw-derived period rates when available.
-                if (s.get(m.key) != null && (m.type.equals("standard") || m.type.equals("pitching") || m.type.equals("team") || m.key.equals("kPct") || m.key.equals("bbPct") || m.key.equals("bbMinusKPct") || m.key.equals("pitchKPct") || m.key.equals("pitchBBPct") || m.key.equals("pitchKMinusBBPct") || m.key.equals("ops"))) continue;
+                // v236: wOBA is type "expected" but is now genuinely raw-derived for the window
+                // (computed from the summed components above), so it must be preferred too —
+                // otherwise this loop overwrites it with a per-game weighted average. xwOBA and
+                // the batted-ball expected metrics are NOT raw-derived (no game-log source), so
+                // they remain averaged/absent as before.
+                if (s.get(m.key) != null && (m.type.equals("standard") || m.type.equals("pitching") || m.type.equals("team") || m.key.equals("wOBA") || m.key.equals("kPct") || m.key.equals("bbPct") || m.key.equals("bbMinusKPct") || m.key.equals("pitchKPct") || m.key.equals("pitchBBPct") || m.key.equals("pitchKMinusBBPct") || m.key.equals("ops"))) continue;
                 Double w = weights.get(m.key);
                 if (w == null || w <= 0) {
                     if (s.get(m.key) == null) s.put(m.key, null);
