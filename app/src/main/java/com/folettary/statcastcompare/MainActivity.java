@@ -709,7 +709,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v231", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v232", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -1700,7 +1700,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         ImageView awayLogo = new ImageView(this);
         awayLogo.setScaleType(ImageView.ScaleType.FIT_CENTER);
         awayLogo.setAdjustViewBounds(true);
-        awayLogo.setAlpha(featured ? 0.34f : 0.26f);
+        awayLogo.setAlpha(featured ? 0.22f : 0.16f); // v232: lower watermark so tile text stays legible
         FrameLayout.LayoutParams awayLp = new FrameLayout.LayoutParams(logoSize, logoSize);
         awayLp.gravity = Gravity.START | Gravity.CENTER_VERTICAL;
         awayLp.setMargins(dp(featured ? 10 : 3), dp(featured ? 18 : 8), 0, 0);
@@ -1719,7 +1719,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         ImageView homeLogo = new ImageView(this);
         homeLogo.setScaleType(ImageView.ScaleType.FIT_CENTER);
         homeLogo.setAdjustViewBounds(true);
-        homeLogo.setAlpha(featured ? 0.34f : 0.26f);
+        homeLogo.setAlpha(featured ? 0.22f : 0.16f); // v232: lower watermark so tile text stays legible
         FrameLayout.LayoutParams homeLp = new FrameLayout.LayoutParams(logoSize, logoSize);
         homeLp.gravity = Gravity.END | Gravity.CENTER_VERTICAL;
         homeLp.setMargins(0, dp(featured ? 18 : 8), dp(featured ? 10 : 3), 0);
@@ -9266,8 +9266,15 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             float lastSpacing = h.isTeam && lastUpper.length() > 11 ? 0.04f : 0.07f;
             float firstSize = fitTextSize(paint, firstUpper, dp(12), dp(10), h.isTeam ? dp(170) : dp(128), firstSpacing, false);
             float lastSize = fitTextSize(paint, lastUpper, h.isTeam ? dp(21) : dp(23), h.isTeam ? dp(15) : dp(18), h.isTeam ? dp(184) : dp(140), lastSpacing, true);
+            // v232: the city and name sit over the team-colored orb glow and skyline watermark.
+            // INK/INK_SOFT are bright, but with no scrim the busy tinted background washed them
+            // out (the "invisible team name" reports). A soft dark shadow halo — the same trick
+            // the meta line below already uses — restores contrast on any background without
+            // changing the text color or the design.
+            paint.setShadowLayer(dp(7), 0, dp(1), Color.argb(168, 0, 0, 0));
             drawText(canvas, firstUpper, cx, y, firstSize, INK_SOFT, false, Paint.Align.CENTER, firstSpacing);
             drawText(canvas, lastUpper, cx, y + dp(30), lastSize, INK, true, Paint.Align.CENTER, lastSpacing);
+            paint.clearShadowLayer();
             int metaColor = mixColor(ensureReadableColor(readableTeamColor(palette.primary, palette.secondary, left), 178), INK, 0.08f);
             paint.setShadowLayer(dp(6), 0, 0, Color.argb(120, 0, 0, 0));
             drawText(canvas, safe(meta).toUpperCase(Locale.US), cx, y + dp(58), dp(11), metaColor, true, Paint.Align.CENTER, 0.11f);
@@ -9312,9 +9319,13 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             String title = pctDiff <= 2 ? "WEIGHTED EDGE · EVEN" : "WEIGHTED EDGE · " + leader + " " + leadWord;
 
             float titleSize = fitTextSize(paint, title, dp(9), dp(7), score.width() - dp(30), 0.10f, true);
+            // v232: scrim behind the header texts so the eyebrow/context/meta stay readable over
+            // team-tinted panel glow.
+            paint.setShadowLayer(dp(6), 0, dp(1), Color.argb(150, 0, 0, 0));
             drawText(canvas, title, score.centerX(), score.top + dp(20), titleSize, INK, true, Paint.Align.CENTER, 0.10f);
             drawText(canvas, premiumCardScoreContextLine(), score.centerX(), score.top + dp(37), dp(7), isBullpenHeroComparison(h) ? Color.rgb(247, 197, 77) : INK_SOFT, true, Paint.Align.CENTER, 0.10f);
             drawText(canvas, premiumCardScoreMetaLine(), score.centerX(), score.top + dp(51), dp(7), INK_DIM, true, Paint.Align.CENTER, 0.11f);
+            paint.clearShadowLayer();
 
             float midY = score.top + dp(78);
             float scoreSize = dp(35);
@@ -9515,7 +9526,9 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             drawText(canvas, shareFormat(b, m), rightX, centeredTextBaseline(valueY, valueSize, true), valueSize, winner > 0 ? bStrong : bColor, true, Paint.Align.RIGHT, 0.00f);
             paint.clearShadowLayer();
 
+            paint.setShadowLayer(dp(5), 0, dp(1), Color.argb(150, 0, 0, 0));
             drawText(canvas, m.label, cX, centeredTextBaseline(labelY, labelSize, true), labelSize, INK, true, Paint.Align.CENTER, 0.10f);
+            paint.clearShadowLayer();
 
             float railLeft = panel.left + dp(126);
             float railRight = panel.right - dp(126);
@@ -9610,7 +9623,9 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             int labelColor = INK_DIM;
             drawText(canvas, shareFormat(a, m), leftValueX, valueBaseline, valueSize, valueColor, true, Paint.Align.LEFT, 0.00f);
             drawText(canvas, shareFormat(b, m), rightValueX, valueBaseline, valueSize, valueColor, true, Paint.Align.RIGHT, 0.00f);
+            paint.setShadowLayer(dp(5), 0, dp(1), Color.argb(150, 0, 0, 0));
             drawText(canvas, m.label, cX, labelBaseline, labelSize, labelColor, true, Paint.Align.CENTER, 0.09f);
+            paint.clearShadowLayer();
             drawShareMiniBadge(canvas, "CTX", Math.min(railRight - dp(21), cX + dp(74)), top + rowH * 0.40f, INK_DIM);
 
             strokePaint.setStyle(Paint.Style.STROKE);
@@ -9690,7 +9705,9 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             drawText(canvas, rightText, rightValueX, valueBaseline, valueSize, bColor, true, Paint.Align.RIGHT, 0.00f);
             paint.clearShadowLayer();
 
+            paint.setShadowLayer(dp(5), 0, dp(1), Color.argb(150, 0, 0, 0));
             drawText(canvas, m.label, cX, labelBaseline, labelSize, INK, true, Paint.Align.CENTER, 0.10f);
+            paint.clearShadowLayer();
             if (edge != null && edge.badge != null && !edge.badge.isEmpty()) {
                 paint.setTextSize(labelSize);
                 paint.setTypeface(tfBold);
