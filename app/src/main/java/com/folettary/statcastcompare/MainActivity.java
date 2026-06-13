@@ -716,7 +716,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v235", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v236", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -22859,6 +22859,19 @@ private View liveGameCard(LiveGame game) {
             if (obpDen > 0) s.put("obp", (hits + bb + hbp) / obpDen);
             Double obp = s.get("obp"), slg = s.get("slg");
             if (obp != null && slg != null) s.put("ops", obp + slg);
+            // v236: rolling wOBA from the same raw window inputs already summed above. Every
+            // component (uBB, HBP, 1B, 2B, 3B, HR, AB, SF) is present, so a true windowed wOBA
+            // is computable exactly like AVG/OBP/SLG — it was simply never derived here. Linear
+            // weights are the stable recent-era (FanGraphs ~2021-2024) constants; this is a
+            // results-based wOBA (unintentional-walk data isn't in the game log, so all walks are
+            // weighted as unintentional, the standard simplification for a per-window display).
+            double singles = hits - doubles - triples - hr;
+            if (singles < 0) singles = 0;
+            double wobaDen = ab + bb + sf + hbp;
+            if (wobaDen > 0) {
+                double wobaNum = 0.69 * bb + 0.72 * hbp + 0.88 * singles + 1.247 * doubles + 1.578 * triples + 2.031 * hr;
+                s.put("wOBA", wobaNum / wobaDen);
+            }
             s.put("h", hits);
             s.put("doubles", doubles);
             s.put("triples", triples);
@@ -22928,7 +22941,12 @@ private View liveGameCard(LiveGame game) {
 
             for (Metric m : metrics) {
                 // Prefer raw-derived period rates when available.
-                if (s.get(m.key) != null && (m.type.equals("standard") || m.type.equals("pitching") || m.type.equals("team") || m.key.equals("kPct") || m.key.equals("bbPct") || m.key.equals("bbMinusKPct") || m.key.equals("pitchKPct") || m.key.equals("pitchBBPct") || m.key.equals("pitchKMinusBBPct") || m.key.equals("ops"))) continue;
+                // v236: wOBA is type "expected" but is now genuinely raw-derived for the window
+                // (computed from the summed components above), so it must be preferred too —
+                // otherwise this loop overwrites it with a per-game weighted average. xwOBA and
+                // the batted-ball expected metrics are NOT raw-derived (no game-log source), so
+                // they remain averaged/absent as before.
+                if (s.get(m.key) != null && (m.type.equals("standard") || m.type.equals("pitching") || m.type.equals("team") || m.key.equals("wOBA") || m.key.equals("kPct") || m.key.equals("bbPct") || m.key.equals("bbMinusKPct") || m.key.equals("pitchKPct") || m.key.equals("pitchBBPct") || m.key.equals("pitchKMinusBBPct") || m.key.equals("ops"))) continue;
                 Double w = weights.get(m.key);
                 if (w == null || w <= 0) {
                     if (s.get(m.key) == null) s.put(m.key, null);
