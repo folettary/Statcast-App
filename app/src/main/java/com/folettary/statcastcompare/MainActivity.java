@@ -689,7 +689,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v225", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v226", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -10818,6 +10818,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             out.glowStrength = 0d;
             out.scoreStrength = 0d;
         } else {
+            // VISUAL strength drives glows/sparks. Kept punchy so a real edge looks like one.
             double span = m.isCount() ? 42d : 35d;
             double linear = Math.max(0d, Math.min(1d, (out.adjustedEdge - deadZone) / span));
             double eased = 1d - Math.pow(1d - linear, 1.55d);
@@ -10826,7 +10827,21 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             if (out.contextOnly) eased = Math.min(eased, 0.52d);
             out.visualStrength = Math.max(0d, Math.min(1d, eased));
             out.glowStrength = out.visualStrength * (0.58d + 0.42d * out.reliability);
-            out.scoreStrength = out.contextOnly ? 0d : Math.max(0d, Math.min(1d, 0.20d + 0.80d * out.visualStrength));
+
+            // v226: SCORE strength is computed on its OWN, much gentler curve and decoupled
+            // from the visual curve. The old code did scoreStrength = 0.20 + 0.80*visualStrength,
+            // which (a) gave every winning row a 0.20 floor — so even a near-tie handed the
+            // winner 60% of that row — and (b) inherited the aggressive visual easing, so a
+            // routine ~40-pt percentile gap produced a 98-2 row. With one side leading most
+            // rows the weighted aggregate then pinned at the 88% safety cap, making every card
+            // look like a blowout. The new curve has no floor, a wider span, and a gentler
+            // exponent, and a single rate row's winner share maxes at ~0.85 so no lone row can
+            // scream 95-5. Calibration: 25-pt gap ≈ 61-39 row, 40-pt ≈ 69-31, 70-pt ≈ 82-18.
+            double scoreSpan = m.isCount() ? 56d : 62d;
+            double scoreLinear = Math.max(0d, Math.min(1d, (out.adjustedEdge - deadZone) / scoreSpan));
+            double scoreEased = 1d - Math.pow(1d - scoreLinear, 1.15d);
+            double scoreCap = m.isCount() ? 0.62d : 0.70d;
+            out.scoreStrength = out.contextOnly ? 0d : Math.max(0d, Math.min(1d, scoreCap * scoreEased));
         }
 
         if (out.contextOnly) out.badge = "CTX";
