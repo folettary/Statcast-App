@@ -716,7 +716,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v234", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v235", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -2881,7 +2881,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         card.setOrientation(LinearLayout.VERTICAL);
         card.setGravity(Gravity.CENTER);
         card.setPadding(dp(12), dp(12), dp(12), dp(12));
-        card.setForeground(ripple(true));
+        card.setForeground(ripple(true, 26f));
         card.setElevation(dp(2));
 
         TextView icon = text(glyph, glyph.length() > 1 ? 17 : 24, Color.WHITE, true);
@@ -3190,7 +3190,8 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         tv.setBackground(active
                 ? roundedGradientStroke(new int[] { TEAL, TEAL_DARK }, 18, Color.argb(150, 116, 247, 238), 1)
                 : roundedStroke(Color.argb(18, 255, 255, 255), Color.argb(70, 190, 214, 236), 18, 1));
-        tv.setForeground(ripple(active));
+        tv.setForeground(ripple(active, 18f));
+        attachPremiumPress(tv, 0.95f);
         return tv;
     }
 
@@ -3289,6 +3290,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         close.setPadding(dp(12), dp(8), dp(12), dp(8));
         close.setBackground(roundedStroke(Color.argb(26, 255, 255, 255), Color.argb(70, 255, 255, 255), 14, 1));
         close.setOnClickListener(v -> dialog.dismiss());
+        makePremiumButton(close, 14f);  // v235: consistent press feedback
         header.addView(close);
 
         EditText filter = new EditText(this);
@@ -3429,6 +3431,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         close.setPadding(dp(12), dp(8), dp(12), dp(8));
         close.setBackground(roundedStroke(Color.argb(26, 255, 255, 255), Color.argb(70, 255, 255, 255), 14, 1));
         close.setOnClickListener(v -> dialog.dismiss());
+        makePremiumButton(close, 14f);  // v235: consistent press feedback
         header.addView(close);
 
         final String[] activeCategory = new String[] { "all" };
@@ -5134,7 +5137,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         tv.setBackground(primary
                 ? roundedGradientStroke(new int[] { Color.rgb(255, 245, 132), Color.rgb(244, 192, 54), Color.rgb(221, 138, 26) }, 18, Color.argb(220, 255, 245, 142), 2)
                 : roundedGradientStroke(new int[] { Color.rgb(8, 13, 22), Color.rgb(10, 18, 31) }, 18, Color.argb(72, 255, 255, 255), 1));
-        tv.setForeground(ripple(true));
+        tv.setForeground(ripple(true, 18f));
         attachPremiumPress(tv, 0.97f);
         return tv;
     }
@@ -17244,10 +17247,40 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
     /** Returns a ripple drawable suitable for use as a view foreground. */
     private RippleDrawable ripple(boolean darkBackground) {
+        return ripple(darkBackground, 0f);
+    }
+
+    // v235: a bounded ripple that respects the button's rounded corners. Passing a corner radius
+    // gives the ripple a matching round-rect mask so the press flash stays inside the button
+    // instead of bleeding into a full rectangle. radiusDp<=0 keeps the legacy unbounded ripple.
+    private RippleDrawable ripple(boolean darkBackground, float radiusDp) {
         int rippleColor = darkBackground
                 ? Color.argb(56, 255, 255, 255)   // white ripple on dark bg
                 : Color.argb(38, 10, 23, 55);      // navy ripple on light bg
-        return new RippleDrawable(ColorStateList.valueOf(rippleColor), null, null);
+        Drawable mask = null;
+        if (radiusDp > 0f) {
+            GradientDrawable g = new GradientDrawable();
+            g.setShape(GradientDrawable.RECTANGLE);
+            g.setColor(Color.WHITE);
+            g.setCornerRadius(dp(radiusDp));
+            mask = g;
+        }
+        return new RippleDrawable(ColorStateList.valueOf(rippleColor), null, mask);
+    }
+
+    // v235: one entry point so every clickable element across the app feels the same — a bounded
+    // ripple flash plus a subtle scale/alpha press. Use this for any tappable view that isn't
+    // already a styled pill/tile with its own feedback. cornerRadiusDp should match the view's
+    // background radius so the ripple stays inside the shape.
+    private void makePremiumButton(View view, float cornerRadiusDp, boolean darkBackground, float pressedScale) {
+        if (view == null) return;
+        view.setClickable(true);
+        view.setForeground(ripple(darkBackground, cornerRadiusDp));
+        attachPremiumPress(view, pressedScale);
+    }
+
+    private void makePremiumButton(View view, float cornerRadiusDp) {
+        makePremiumButton(view, cornerRadiusDp, true, 0.97f);
     }
 
     // ── Live matchups tab ──────────────────────────────────────────────────────────────────────
@@ -17660,8 +17693,9 @@ private View liveGameCard(LiveGame game) {
         tile.setMinimumHeight(0);
         tile.setPadding(dp(9), dp(7), dp(9), dp(7));
         tile.setClickable(true);
-        tile.setForeground(ripple(true));
+        tile.setForeground(ripple(true, 20f));
         tile.setOnClickListener(click);
+        attachPremiumPress(tile, 0.975f);
         tile.setBackground(roundedGradientStroke(new int[] {
                 Color.argb(230, 5, 10, 18),
                 mixColor(accent, Color.rgb(6, 10, 18), 0.76f),
@@ -20306,6 +20340,7 @@ private View liveGameCard(LiveGame game) {
         final AlertDialog dialog = new AlertDialog.Builder(this).create();
         dialog.setView(panel);
         close.setOnClickListener(v -> dialog.dismiss());
+        makePremiumButton(close, 14f);  // v235: consistent press feedback
         dialog.show();
         try {
             android.view.Window w = dialog.getWindow();
@@ -21698,6 +21733,7 @@ private View liveGameCard(LiveGame game) {
         final AlertDialog dialog = new AlertDialog.Builder(this).create();
         dialog.setView(panel);
         close.setOnClickListener(v -> dialog.dismiss());
+        makePremiumButton(close, 14f);  // v235: consistent press feedback
         dialog.show();
         try {
             android.view.Window w = dialog.getWindow();
