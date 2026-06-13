@@ -717,7 +717,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v246", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v247", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -17762,7 +17762,11 @@ private View liveGameCard(LiveGame game) {
         time.setShadowLayer(dp(1.8f), 0, dp(1), Color.argb(150, 0, 0, 0));
         top.addView(time, new LinearLayout.LayoutParams(0, -2, 1));
     } else {
-        top.addView(new View(this), new LinearLayout.LayoutParams(0, -2, 1)); // keep status left-aligned
+        // v246 fix: an empty View with WRAP_CONTENT height + weight measured to the parent's
+        // full height during the weight pass, collapsing the score/pitchers/CTA off the tile.
+        // Use a fixed zero-height spacer so the status pill stays left-aligned without it.
+        View spacer = new View(this);
+        top.addView(spacer, new LinearLayout.LayoutParams(0, dp(1), 1));
     }
     content.addView(top, matchWrap());
 
