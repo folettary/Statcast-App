@@ -703,7 +703,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v229", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v230", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -10102,28 +10102,47 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         }
 
         private int readableTeamColor(int primary, int secondary, boolean leftSide) {
-            // v110: strongly prefer the actual team identity color so neon effects stay
-            // recognizable (Rockies purple, A's green, Cubs blue, etc.) instead of drifting
-            // toward whichever palette swatch is brightest.
+            return readableTeamColor(primary, secondary, leftSide, false);
+        }
+
+        // v230: differentiate=true is used when two teams share a hue and we've already chosen
+        // this team's most-distinct color. In that case we must NOT mix back toward the
+        // secondary (the old code did, which dragged a differentiating navy back toward the
+        // shared red and the neon boost then turned it magenta — the ATL/STL bug). Instead we
+        // lift brightness on the color's OWN hue so the two sides stay genuinely different.
+        private int readableTeamColor(int primary, int secondary, boolean leftSide, boolean differentiate) {
             float[] hsvPrimary = new float[3];
             float[] hsvSecondary = new float[3];
             Color.colorToHSV(primary, hsvPrimary);
             Color.colorToHSV(secondary, hsvSecondary);
 
             int base = primary;
-            if (hsvPrimary[2] < 0.42f) {
-                base = mixColor(primary, secondary, 0.24f);
-            } else if (hsvPrimary[1] < 0.32f && hsvSecondary[1] > hsvPrimary[1] + 0.08f) {
-                base = mixColor(primary, secondary, 0.18f);
+            if (!differentiate) {
+                // v110: prefer the actual identity color; only nudge toward secondary when the
+                // primary is too dark or too desaturated to read on its own.
+                if (hsvPrimary[2] < 0.42f) {
+                    base = mixColor(primary, secondary, 0.24f);
+                } else if (hsvPrimary[1] < 0.32f && hsvSecondary[1] > hsvPrimary[1] + 0.08f) {
+                    base = mixColor(primary, secondary, 0.18f);
+                }
+            } else if (hsvPrimary[2] < 0.55f) {
+                // Dark differentiating color (e.g. a navy): brighten on its own hue instead of
+                // mixing toward the opponent, so it reads clearly as navy/green/etc.
+                base = brightenKeepingHue(primary, 0.62f);
             }
 
-            // v228: floor nudged 142/146 → 150/152. Hue-preserving (ensureReadableColor only
-            // lifts value/saturation, never shifts hue), so team identity is unchanged for any
-            // color already above the floor — it only rescues genuinely too-dark primaries
-            // (deep navies on the dark card) from low contrast. Verified Rockies purple, A's
-            // green, Cubs/Dodgers blue stay recognizably themselves.
             base = ensureReadableColor(base, leftSide ? 152 : 150);
             return boostNeonColor(base, 1.24f, leftSide ? 1.12f : 1.10f);
+        }
+
+        // v230: raise a color's brightness toward a target value while holding hue, and only
+        // gently lifting saturation, so the hue stays unmistakable (no drift toward pink).
+        private int brightenKeepingHue(int color, float targetValue) {
+            float[] hsv = new float[3];
+            Color.colorToHSV(color, hsv);
+            hsv[2] = Math.max(hsv[2], targetValue);
+            hsv[1] = Math.min(1f, hsv[1] * 0.94f); // ease saturation a touch so it doesn't glow muddy
+            return Color.HSVToColor(hsv);
         }
 
         private boolean palettesTooSimilar(TeamPalette a, TeamPalette b) {
@@ -10140,13 +10159,19 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
         private int battleTeamColor(TeamPalette own, TeamPalette other, boolean leftSide) {
             if (own == null) return Color.WHITE;
-            int primary = own.primary;
-            int secondary = own.secondary;
-            if (!leftSide && palettesTooSimilar(own, other)) {
-                primary = own.secondary;
-                secondary = own.primary;
+            // v230: when two teams read as the same color, differentiate the RIGHT side by
+            // choosing whichever of its OWN palette colors sits furthest from the opponent's
+            // displayed color, then lift it on its own hue (differentiate=true) rather than the
+            // old primary↔secondary swap that got re-mixed back into magenta. The left side
+            // always keeps its true primary so one team's identity is never compromised.
+            if (!leftSide && other != null && palettesTooSimilar(own, other)) {
+                float toPrimary = colorDistance(own.primary, other.primary);
+                float toSecondary = colorDistance(own.secondary, other.primary);
+                int chosen = toSecondary > toPrimary ? own.secondary : own.primary;
+                int alt = chosen == own.secondary ? own.primary : own.secondary;
+                return readableTeamColor(chosen, alt, false, true);
             }
-            return readableTeamColor(primary, secondary, leftSide);
+            return readableTeamColor(own.primary, own.secondary, leftSide);
         }
 
         private int colorLuminance(int color) {
