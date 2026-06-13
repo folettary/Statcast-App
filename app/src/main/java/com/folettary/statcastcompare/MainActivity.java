@@ -209,6 +209,7 @@ public class MainActivity extends Activity {
     private LinearLayout controlsCard;
     private ScrollView mainScroll;
     private LinearLayout homeBox;
+    private LinearLayout homeFavoritesBox;
     private LinearLayout homeLiveMatchupsBox;
     private FrameLayout homeMatchupPreview;
     private FrameLayout homeCircleAFrame;
@@ -716,7 +717,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v237", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v238", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -1312,6 +1313,14 @@ public class MainActivity extends Activity {
         liveHomeLp.setMargins(0, 0, 0, 0);
         home.addView(homeLiveMatchupsBox, liveHomeLp);
         loadHomeLiveMatchups();
+
+        // v237: favorites row — surfaces the player/team stars saved from headers.
+        homeFavoritesBox = new LinearLayout(this);
+        homeFavoritesBox.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams favLp = matchWrap();
+        favLp.setMargins(0, dp(10), 0, 0);
+        home.addView(homeFavoritesBox, favLp);
+        rebuildHomeFavorites();
 
         LinearLayout.LayoutParams heroLp = matchWrap();
         heroLp.setMargins(0, dp(10), 0, 0);
@@ -3058,6 +3067,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             hideKeyboard();
             matchupResultMode = false;
             if (homeBox != null) homeBox.setVisibility(View.VISIBLE);
+            rebuildHomeFavorites();
             if (matchupHubBox != null) matchupHubBox.setVisibility(View.GONE);
             if (form != null) form.setVisibility(View.GONE);
             if (resultsBox != null) resultsBox.setVisibility(View.GONE);
@@ -21718,6 +21728,107 @@ private View liveGameCard(LiveGame game) {
             ed.putString("rname_" + i, names.get(i));
         }
         ed.apply();
+    }
+
+    private void rebuildHomeFavorites() {
+        if (homeFavoritesBox == null) return;
+        homeFavoritesBox.removeAllViews();
+        ArrayList<Player> favPlayers = allPlayers.isEmpty() ? new ArrayList<>() : favoritePlayers();
+        ArrayList<Team> favTeams = favoriteTeams();
+        if (favPlayers.isEmpty() && favTeams.isEmpty()) {
+            homeFavoritesBox.setVisibility(View.GONE);
+            return;
+        }
+        homeFavoritesBox.setVisibility(View.VISIBLE);
+
+        LinearLayout card = verticalCard(22, new int[] { Color.rgb(7, 12, 22), Color.rgb(10, 16, 28) });
+        card.setPadding(dp(14), dp(12), dp(14), dp(12));
+
+        TextView eyebrow = text("FAVORITES", 10, Color.rgb(244, 192, 54), true);
+        eyebrow.setLetterSpacing(0.22f);
+        card.addView(eyebrow);
+
+        TextView sub = text("Your pinned players and teams", 12, INK_DIM, false);
+        LinearLayout.LayoutParams subLp = matchWrap();
+        subLp.setMargins(0, dp(2), 0, dp(10));
+        card.addView(sub, subLp);
+
+        if (!favPlayers.isEmpty()) {
+            card.addView(favoriteChipRow(favPlayers, true));
+        }
+        if (!favTeams.isEmpty()) {
+            LinearLayout teamRow = favoriteChipRow(favTeams, false);
+            LinearLayout.LayoutParams trLp = matchWrap();
+            trLp.setMargins(0, favPlayers.isEmpty() ? 0 : dp(8), 0, 0);
+            teamRow.setLayoutParams(trLp);
+            card.addView(teamRow);
+        }
+
+        homeFavoritesBox.addView(card, matchWrap());
+    }
+
+    // Builds a horizontally-scrolling row of favorite chips. isPlayers=true → players, else teams.
+    private LinearLayout favoriteChipRow(ArrayList<?> items, boolean isPlayers) {
+        HorizontalScrollView scroller = new HorizontalScrollView(this);
+        scroller.setHorizontalScrollBarEnabled(false);
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        for (Object item : items) {
+            String label;
+            int accent;
+            View.OnClickListener click;
+            if (isPlayers) {
+                final Player p = (Player) item;
+                label = shortName(p.fullName);
+                accent = Color.rgb(176, 119, 255);
+                click = v -> {
+                    teamMode = false;
+                    selectedPlayer = p;
+                    openCreateMatchupPath();
+                    if (searchInput != null) { searchInput.setText(""); searchInput.clearFocus(); }
+                    if (suggestionsList != null) suggestionsList.setVisibility(View.GONE);
+                    applySmartDefaultForSelection(p);
+                    renderSelectionPreview();
+                    hideKeyboard();
+                    refreshAfterPrimarySelection();
+                };
+            } else {
+                final Team t = (Team) item;
+                label = t.abbr;
+                TeamPalette pal = paletteForAbbr(t.abbr);
+                accent = pal == null ? Color.rgb(244, 192, 54) : pal.primary;
+                click = v -> openTeamFromFavorite(t);
+            }
+            TextView chip = text(label, 12, Color.WHITE, true);
+            chip.setGravity(Gravity.CENTER);
+            chip.setPadding(dp(13), dp(8), dp(13), dp(8));
+            chip.setBackground(roundedGradientStroke(new int[] {
+                    Color.argb(232, 8, 13, 22),
+                    mixColor(accent, Color.rgb(8, 12, 20), 0.74f)
+            }, 16, Color.argb(120, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
+            chip.setContentDescription((isPlayers ? "Open player " : "Open team ") + label);
+            makePremiumButton(chip, 16f);
+            chip.setOnClickListener(click);
+            LinearLayout.LayoutParams chipLp = new LinearLayout.LayoutParams(-2, -2);
+            chipLp.setMargins(0, 0, dp(8), 0);
+            row.addView(chip, chipLp);
+        }
+        scroller.addView(row);
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        wrap.addView(scroller, matchWrap());
+        return wrap;
+    }
+
+    private void openTeamFromFavorite(Team t) {
+        if (t == null) return;
+        teamMode = true;
+        selectedTeam = t;
+        constrainSelectedMetricsToPlayerRole("both", true);
+        openCreateMatchupPath();
+        try { buildTeamChips(); } catch (Exception ignored) {}
+        renderSelectionPreview();
+        refreshAfterPrimarySelection();
     }
 
     private void rebuildRecentsBox() {
