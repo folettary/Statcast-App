@@ -717,7 +717,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v245", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v246", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -17753,23 +17753,31 @@ private View liveGameCard(LiveGame game) {
     status.setPadding(dp(7), dp(3), dp(7), dp(3));
     status.setBackground(roundedStroke(Color.argb(94, 8, 13, 22), Color.argb(120, Color.red(statusColor), Color.green(statusColor), Color.blue(statusColor)), 12, 1));
     top.addView(status);
-    TextView time = text(game.timeLabel(), 9, Color.argb(232, 247, 249, 252), true);
-    time.setGravity(Gravity.RIGHT);
-    time.setSingleLine(true);
-    time.setShadowLayer(dp(1.8f), 0, dp(1), Color.argb(150, 0, 0, 0));
-    top.addView(time, new LinearLayout.LayoutParams(0, -2, 1));
+    // v246: the start time only means something before first pitch. Once a game is live or
+    // final it's noise (and ambiguous next to the score), so show it only pre-game.
+    if (game.isPregame()) {
+        TextView time = text(game.timeLabel(), 9, Color.argb(232, 247, 249, 252), true);
+        time.setGravity(Gravity.RIGHT);
+        time.setSingleLine(true);
+        time.setShadowLayer(dp(1.8f), 0, dp(1), Color.argb(150, 0, 0, 0));
+        top.addView(time, new LinearLayout.LayoutParams(0, -2, 1));
+    } else {
+        top.addView(new View(this), new LinearLayout.LayoutParams(0, -2, 1)); // keep status left-aligned
+    }
     content.addView(top, matchWrap());
 
     String awayAbbr = displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr);
     String homeAbbr = displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr);
     String scoreLine = awayAbbr + " " + game.awayScoreText() + "  @  " + homeAbbr + " " + game.homeScoreText();
-    TextView matchup = text(scoreLine, 20, Color.WHITE, true);
+    // v246: dialed back from 20sp — it was crowding the tile and two-digit scores clipped the
+    // right edge. 18sp with a lower autosize floor keeps "NYY 3 @ TOR 11" fully on one line.
+    TextView matchup = text(scoreLine, 18, Color.WHITE, true);
     matchup.setGravity(Gravity.CENTER);
     matchup.setSingleLine(true);
     matchup.setLetterSpacing(0.01f);
-    matchup.setPadding(0, dp(11), 0, 0);
+    matchup.setPadding(dp(2), dp(11), dp(2), 0);
     matchup.setShadowLayer(dp(2.2f), 0, dp(1), Color.argb(185, 0, 0, 0));
-    applyAutoSize(matchup, 15, 20);
+    applyAutoSize(matchup, 12, 18);
     content.addView(matchup, matchWrap());
 
     String pitcherLine = (safe(game.awayPitcher).isEmpty() ? "TBD" : lastNameOnly(game.awayPitcher))
@@ -17915,7 +17923,7 @@ private View liveGameCard(LiveGame game) {
         String pitchers = (safe(game.awayPitcher).isEmpty() ? "Away SP TBD" : lastNameOnly(game.awayPitcher))
                 + " vs " + (safe(game.homePitcher).isEmpty() ? "Home SP TBD" : lastNameOnly(game.homePitcher));
 
-        LinearLayout.LayoutParams heroLp = new LinearLayout.LayoutParams(-1, dp(120)); // v244: tighten the hero so the matchup menu starts higher on screen
+        LinearLayout.LayoutParams heroLp = new LinearLayout.LayoutParams(-1, dp(108)); // v246: tighter hero so the matchup menu starts higher on screen
         heroLp.setMargins(dp(12), dp(8), dp(12), dp(10));
         panel.addView(gameMatchupHeroCard(game, away, home, awayPalette, homePalette, pitchers), heroLp);
 
@@ -17939,10 +17947,12 @@ private View liveGameCard(LiveGame game) {
         LinearLayout.LayoutParams pdLp = new LinearLayout.LayoutParams(0, -1, 1);
         pdLp.setMargins(dp(7), 0, 0, 0);
         unitRow.addView(gameMenuTile("Pitching/Defense", "Staff prevention", "Run prevention and contact allowed", Color.rgb(120, 220, 207), v -> openLiveTeamPitchingDefenseMatchup(game)), pdLp);
-        LinearLayout bullpenOnlyRow = matchupHubTileRow(panel);
-        bullpenOnlyRow.addView(new View(this), new LinearLayout.LayoutParams(0, -1, 0.5f));
-        bullpenOnlyRow.addView(gameMenuTile("Bullpens", "Reliever edge", "Freshness + quality by available arms", Color.rgb(120, 220, 207), v -> openLiveBullpenMatchup(game)), new LinearLayout.LayoutParams(0, -1, 1f));
-        bullpenOnlyRow.addView(new View(this), new LinearLayout.LayoutParams(0, -1, 0.5f));
+        // v246: Bullpens was a lone half-width tile centered between two empty spacers, which
+        // broke the two-column rhythm and read as "something's missing." Full-width (like Team
+        // Overall) makes it clearly its own unit and squares up the grid.
+        LinearLayout.LayoutParams bullpenLp = new LinearLayout.LayoutParams(-1, dp(82));
+        bullpenLp.setMargins(dp(12), 0, dp(12), dp(3));
+        panel.addView(gameMenuTile("Bullpens", "Reliever edge", "Freshness + quality by available arms", Color.rgb(120, 220, 207), v -> openLiveBullpenMatchup(game)), bullpenLp);
 
         addMatchupHubSection(panel, "GAME MATCHUPS", "Today-specific");
         LinearLayout gameRow = matchupHubTileRow(panel);
@@ -17961,11 +17971,11 @@ private View liveGameCard(LiveGame game) {
 
     private View gameMatchupHeroCard(LiveGame game, Team away, Team home, TeamPalette awayPalette, TeamPalette homePalette, String pitchers) {
         FrameLayout hero = buildLiveLogoDuelShell(away, home, awayPalette, homePalette, 24, true, null);
-        hero.setMinimumHeight(dp(120));
+        hero.setMinimumHeight(dp(108));
 
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(14), dp(8), dp(14), dp(7));
+        content.setPadding(dp(14), dp(7), dp(14), dp(6));
         hero.addView(content, new FrameLayout.LayoutParams(-1, -1));
 
         LinearLayout top = new LinearLayout(this);
@@ -17975,7 +17985,12 @@ private View liveGameCard(LiveGame game) {
         label.setLetterSpacing(0.14f);
         top.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
         int sc = statusColor(game);
-        TextView status = text(game.statusLabel() + (safe(game.timeLabel()).isEmpty() ? "" : " · " + game.timeLabel()), 8, sc, true);
+        // v246: same rule as the grid — start time only shown pre-game, since it's meaningless
+        // (and confusing) once a game is live or final.
+        String statusText = game.isPregame() && !safe(game.timeLabel()).isEmpty()
+                ? game.statusLabel() + " · " + game.timeLabel()
+                : game.statusLabel();
+        TextView status = text(statusText, 8, sc, true);
         status.setGravity(Gravity.CENTER);
         status.setSingleLine(true);
         status.setEllipsize(TextUtils.TruncateAt.END);
@@ -17986,10 +18001,12 @@ private View liveGameCard(LiveGame game) {
 
         String awayAbbr = displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr);
         String homeAbbr = displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr);
-        TextView title = text(awayAbbr + "  @  " + homeAbbr, 24, Color.WHITE, true);
+        // v246: 24sp dominated the screen whose job is choosing a matchup type. 21sp keeps the
+        // title prominent without overpowering the menu below it.
+        TextView title = text(awayAbbr + "  @  " + homeAbbr, 21, Color.WHITE, true);
         title.setGravity(Gravity.CENTER);
         title.setLetterSpacing(0.04f);
-        title.setPadding(0, dp(6), 0, 0);
+        title.setPadding(0, dp(5), 0, 0);
         content.addView(title, matchWrap());
 
         TextView sp = text(pitchers, 11, INK_SOFT, true);
@@ -22815,8 +22832,25 @@ private View liveGameCard(LiveGame game) {
         String statusLabel() {
             String state = detailedState == null || detailedState.isEmpty() ? abstractState : detailedState;
             if (state == null || state.isEmpty()) return "Pregame";
+            // v246: MLB reports finished games as both "Final" and "Game Over" — collapse to one
+            // label so the grid reads consistently. Also tidy a couple of other raw states.
+            String low = state.toLowerCase(Locale.US);
+            if (low.contains("final") || low.contains("game over") || low.contains("completed")) return "Final";
+            if (low.contains("in progress") || low.contains("live")) return "In Progress";
+            if (low.contains("warmup")) return "Warmup";
+            if (low.contains("pre-game") || low.contains("pregame") || low.contains("scheduled")) return "Scheduled";
             if (state.length() > 18) state = state.substring(0, 18);
             return state;
+        }
+        // v246: true only before first pitch — used to decide whether to show the start time
+        // (a start time is meaningless once a game is live or final).
+        boolean isPregame() {
+            String s = (detailedState == null || detailedState.isEmpty() ? abstractState : detailedState);
+            if (s == null || s.isEmpty()) return true;
+            String low = s.toLowerCase(Locale.US);
+            if (low.contains("final") || low.contains("game over") || low.contains("completed")
+                    || low.contains("in progress") || low.contains("live")) return false;
+            return true;
         }
         String timeLabel() {
             if (gameDate == null || gameDate.isEmpty()) return "";
