@@ -717,7 +717,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v238", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v240", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -5225,7 +5225,14 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             loadPlayerImage(selectedPlayer.id, img);
             LinearLayout col = new LinearLayout(this);
             col.setOrientation(LinearLayout.VERTICAL);
-            col.addView(text(selectedPlayer.fullName, 14, Color.WHITE, true));
+            // v239: long names (e.g. "Fernando Tatis Jr.") were ellipsized once the favorite star
+            // took horizontal room. Auto-size the name down to fit a single line instead of cutting
+            // it off, keeping the clean one-line look without truncation.
+            TextView nameTv = text(selectedPlayer.fullName, 14, Color.WHITE, true);
+            nameTv.setSingleLine(true);
+            nameTv.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            applyAutoSize(nameTv, 9, 14);
+            col.addView(nameTv);
             col.addView(text(headToHeadMode ? "Player A · " + selectedPlayer.teamAbbr + " · " + selectedPlayer.position : selectedPlayer.teamAbbr + " · " + selectedPlayer.position, 11, INK, false));
             selectedPreviewBox.addView(col, new LinearLayout.LayoutParams(0, -2, 1));
             // v237: favorite-star toggle. Filled gold when favorited, hollow otherwise; tapping
@@ -8214,6 +8221,10 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         // v30.1: Unified dark battle card replaces old white header + separate duel card
         addBattleCard(h, paletteA, paletteB);
 
+        // v240: "Why this edge" expander — explains the score the user just saw, using the
+        // active lens's weighting, for every matchup type.
+        addWhyThisEdge(h, paletteA, paletteB);
+
         LinearLayout sectionRow = new LinearLayout(this);
         sectionRow.setOrientation(LinearLayout.HORIZONTAL);
         sectionRow.setGravity(Gravity.CENTER_VERTICAL);
@@ -8347,6 +8358,115 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         legend.addView(legendMini("MLB", Color.rgb(70, 88, 125)));
         legend.addView(legendMini(shortName(h.nameB), paletteB.primary));
         return legend;
+    }
+
+    // v240: explainability expander beneath the battle card.
+    private void addWhyThisEdge(HeadToHeadComparison h, TeamPalette paletteA, TeamPalette paletteB) {
+        if (h == null) return;
+        ArrayList<Metric> shareMetrics = collectHeadToHeadMetrics(h, isBullpenHeroComparison(h) ? 12 : 8, true);
+        StatScoreSummary summary = summarizeHeadToHeadEdges(h, shareMetrics);
+        if (summary == null || summary.contributions.isEmpty()) return;
+
+        // Rank by how much each row drove the result (toss-ups have ~0 drive and sort last).
+        ArrayList<EdgeContribution> ranked = new ArrayList<>(summary.contributions);
+        Collections.sort(ranked, (x, y) -> Double.compare(y.share, x.share));
+
+        int pctA = summary.edgePctA();
+        int winner = pctA == 50 ? 0 : (pctA > 50 ? -1 : 1);
+        String nameA = shortName(h.nameA);
+        String nameB = shortName(h.nameB);
+        String winnerName = winner == 0 ? "Even matchup" : (winner < 0 ? nameA : nameB);
+        int winnerColor = winner < 0 ? (paletteA == null ? INK : paletteA.primary)
+                : (winner > 0 ? (paletteB == null ? INK : paletteB.primary) : INK);
+
+        LinearLayout card = verticalCard(20, new int[] { Color.rgb(9, 14, 24), Color.rgb(11, 17, 30) });
+        card.setPadding(dp(14), dp(12), dp(14), dp(12));
+
+        // Header row — tappable to expand/collapse.
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout headTextCol = new LinearLayout(this);
+        headTextCol.setOrientation(LinearLayout.VERTICAL);
+        headTextCol.addView(text("WHY THIS EDGE", 10, Color.rgb(244, 192, 54), true));
+        String summaryLine = winner == 0
+                ? "The stats balance out to a near-even read."
+                : winnerName + " leads on the stats that matter most in this lens.";
+        TextView sub = text(summaryLine, 12, INK_DIM, false);
+        sub.setPadding(0, dp(2), 0, 0);
+        headTextCol.addView(sub);
+        header.addView(headTextCol, new LinearLayout.LayoutParams(0, -2, 1));
+        final TextView chevron = text("⌄", 16, INK_DIM, true);
+        chevron.setPadding(dp(8), 0, dp(2), 0);
+        header.addView(chevron);
+        card.addView(header, matchWrap());
+
+        // Body — top contributors, hidden until expanded.
+        final LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setVisibility(View.GONE);
+        LinearLayout.LayoutParams bodyLp = matchWrap();
+        bodyLp.setMargins(0, dp(10), 0, 0);
+
+        int shown = 0;
+        for (EdgeContribution c : ranked) {
+            if (shown >= 4) break;
+            if (c.winner == 0 && c.share <= 0d) continue; // skip pure toss-ups
+            body.addView(whyEdgeRow(c, nameA, nameB, paletteA, paletteB));
+            shown++;
+        }
+        if (shown == 0) {
+            body.addView(text("Every scored stat was close — no single factor decided it.", 12, INK_DIM, false));
+        }
+        // Footnote: make the lens dependency explicit, since the answer changes per lens.
+        TextView foot = text("Ranked by impact on the score under the " + presetDisplayName(activeComparisonPreset, roleForScope(h.scope)) + " lens.", 11, EYEBROW, false);
+        foot.setPadding(0, dp(8), 0, 0);
+        body.addView(foot);
+
+        card.addView(body, bodyLp);
+
+        final boolean[] expanded = { false };
+        makePremiumButton(card, 20f);
+        card.setOnClickListener(v -> {
+            expanded[0] = !expanded[0];
+            body.setVisibility(expanded[0] ? View.VISIBLE : View.GONE);
+            chevron.setText(expanded[0] ? "⌃" : "⌄");
+        });
+
+        LinearLayout.LayoutParams cardLp = matchWrap();
+        cardLp.setMargins(0, dp(8), 0, dp(2));
+        headerBox.addView(card, cardLp);
+    }
+
+    private LinearLayout whyEdgeRow(EdgeContribution c, String nameA, String nameB, TeamPalette paletteA, TeamPalette paletteB) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0, dp(5), 0, dp(5));
+
+        // Left: stat label + who won it, with the two values.
+        LinearLayout labelCol = new LinearLayout(this);
+        labelCol.setOrientation(LinearLayout.VERTICAL);
+        labelCol.addView(text(c.label, 13, INK, true));
+        String winSide = c.winner == 0 ? "Even" : (c.winner < 0 ? nameA : nameB);
+        int winColor = c.winner < 0 ? (paletteA == null ? INK : paletteA.primary)
+                : (c.winner > 0 ? (paletteB == null ? INK : paletteB.primary) : INK_DIM);
+        TextView detail = text(winSide + " · " + c.valueA + " vs " + c.valueB, 11, INK_DIM, false);
+        detail.setPadding(0, dp(1), 0, 0);
+        labelCol.addView(detail);
+        row.addView(labelCol, new LinearLayout.LayoutParams(0, -2, 1));
+
+        // Right: a small impact meter (longer = bigger driver).
+        View meter = new View(this);
+        double mag = Math.max(0.04d, Math.min(1d, c.share * 2.2d)); // scale for visibility
+        GradientDrawable mb = new GradientDrawable();
+        mb.setCornerRadius(dp(3));
+        mb.setColor(c.winner == 0 ? Color.argb(90, 190, 205, 226) : Color.argb(220, Color.red(winColor), Color.green(winColor), Color.blue(winColor)));
+        meter.setBackground(mb);
+        LinearLayout.LayoutParams meterLp = new LinearLayout.LayoutParams(dp((int)(18 + 64 * mag)), dp(6));
+        meterLp.setMargins(dp(10), 0, 0, 0);
+        row.addView(meter, meterLp);
+        return row;
     }
 
     // v43: electric-energy polish - VS arcs and winner-side stat rail sparks.
@@ -10737,13 +10857,22 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             summary.scoredRows++;
             double weight = headToHeadScoringWeight(h, m);
             if (weight <= 0d || Double.isNaN(weight)) weight = 1d;
+            Double rawA = h.statsA == null ? null : h.statsA.get(m.key);
+            Double rawB = h.statsB == null ? null : h.statsB.get(m.key);
+            String valA = rawA == null ? "—" : format(rawA, m);
+            String valB = rawB == null ? "—" : format(rawB, m);
             if (edge.winner == 0) {
                 summary.tossUpRows++;
                 summary.aPts += 0.5d * weight;
                 summary.bPts += 0.5d * weight;
+                summary.contributions.add(new EdgeContribution(m.label, 0, 0d, valA, valB));
             } else {
                 double winnerShare = 0.5d + 0.5d * Math.max(0d, Math.min(1d, edge.scoreStrength));
                 double loserShare = 1d - winnerShare;
+                // points the winner gained over a neutral 50/50 split, scaled by lens weight —
+                // the cleanest "how much did this stat drive the edge" measure.
+                double drive = weight * (winnerShare - 0.5d);
+                summary.contributions.add(new EdgeContribution(m.label, edge.winner, drive, valA, valB));
                 if (edge.winner < 0) {
                     summary.aPts += winnerShare * weight;
                     summary.bPts += loserShare * weight;
@@ -10797,12 +10926,33 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         }
         summary.aPts = pctA;
         summary.bPts = 100.0d - pctA;
+        // v240: contributions for the expander — Quality (70%) and Freshness (30%) as the two
+        // drivers, each attributed to whichever pen is better and scaled by its weight.
+        double qGap = (qa - qb) * 0.70d;
+        double fGap = (fa - fb) * 0.30d;
+        summary.contributions.add(new EdgeContribution("Bullpen Quality", qGap == 0 ? 0 : (qGap < 0 ? 1 : -1),
+                Math.abs(qGap), String.valueOf(Math.round(qa)), String.valueOf(Math.round(qb))));
+        summary.contributions.add(new EdgeContribution("Bullpen Freshness", fGap == 0 ? 0 : (fGap < 0 ? 1 : -1),
+                Math.abs(fGap), String.valueOf(Math.round(fa)), String.valueOf(Math.round(fb))));
         return summary;
+    }
+
+    static class EdgeContribution {
+        final String label; final int winner; final double share; // share = points toward winner (0..1 of this row's weight)
+        final String valueA; final String valueB;
+        EdgeContribution(String label, int winner, double share, String valueA, String valueB) {
+            this.label = label; this.winner = winner; this.share = share; this.valueA = valueA; this.valueB = valueB;
+        }
     }
 
     static class StatScoreSummary {
         double aPts = 0d, bPts = 0d;
         int scoredRows = 0, contextRows = 0, displayedRows = 0, sampleAdjustedRows = 0, sampleBadgeRows = 0, tossUpRows = 0;
+        // v240: per-row contributions, used by the "Why this edge" expander. Each entry records
+        // how much weight that stat threw toward whichever side won it (winner ±1, share is the
+        // weighted points). Captured for every matchup type so the explanation always matches
+        // the card the user is looking at, including the active lens's weighting.
+        final ArrayList<EdgeContribution> contributions = new ArrayList<>();
         int edgePctA() {
             double total = aPts + bPts;
             if (total <= 0d) return 50;
@@ -17229,6 +17379,16 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         tv.setTypeface(bold ? tfBold : tfRegular);  // v29: explicit weight ladder
         return tv;
     }
+    // v239: shrink a single-line TextView's size to fit its width instead of truncating.
+    // Uses the platform autosize API (API 26+); on older devices it harmlessly stays fixed-size.
+    private void applyAutoSize(TextView tv, int minSp, int maxSp) {
+        if (tv == null) return;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                tv.setAutoSizeTextTypeUniformWithConfiguration(minSp, maxSp, 1, android.util.TypedValue.COMPLEX_UNIT_SP);
+            } catch (Exception ignored) {}
+        }
+    }
     private LinearLayout verticalCard(int radius, int[] gradientColors) {
         LinearLayout v = new LinearLayout(this);
         v.setOrientation(LinearLayout.VERTICAL);
@@ -21784,13 +21944,9 @@ private View liveGameCard(LiveGame game) {
                 click = v -> {
                     teamMode = false;
                     selectedPlayer = p;
-                    openCreateMatchupPath();
-                    if (searchInput != null) { searchInput.setText(""); searchInput.clearFocus(); }
-                    if (suggestionsList != null) suggestionsList.setVisibility(View.GONE);
                     applySmartDefaultForSelection(p);
                     renderSelectionPreview();
-                    hideKeyboard();
-                    refreshAfterPrimarySelection();
+                    openProfileForCurrentSelection();
                 };
             } else {
                 final Team t = (Team) item;
@@ -21824,11 +21980,13 @@ private View liveGameCard(LiveGame game) {
         if (t == null) return;
         teamMode = true;
         selectedTeam = t;
+        if (teamSpinner != null) {
+            int idx = allTeams.indexOf(t);
+            if (idx >= 0) teamSpinner.setSelection(idx);
+        }
         constrainSelectedMetricsToPlayerRole("both", true);
-        openCreateMatchupPath();
-        try { buildTeamChips(); } catch (Exception ignored) {}
         renderSelectionPreview();
-        refreshAfterPrimarySelection();
+        openProfileForCurrentSelection();
     }
 
     private void rebuildRecentsBox() {
