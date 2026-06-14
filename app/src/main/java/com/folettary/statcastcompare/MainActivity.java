@@ -720,7 +720,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v255", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v256", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -8316,6 +8316,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         ArrayList<Metric> visibleMetrics = showAllResultsStats ? availableRowMetrics : rowMetrics;
         if (visibleMetrics.isEmpty() && showAllResultsStats) visibleMetrics = rowMetrics;
         visibleMetrics = contributionSortedHeadToHeadMetrics(h, visibleMetrics, 999);
+        if (!visibleMetrics.isEmpty()) metricBox.addView(matchupDriversGuide(), matchWrap());
 
         int count = 0;
         String lastSection = "";
@@ -8495,10 +8496,12 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 if (c.winner == winner) driving.add(c); else against.add(c);
             }
 
+            body.addView(lensBlueprintBlock(h, leaderColor));
+
             String caveat = edgeTrustCaveat(h, ranked, winner, winnerName);
             if (!caveat.isEmpty()) body.addView(whyEdgeCaveat(caveat, leaderColor));
 
-            TextView drivingHead = text("DRIVING THE " + winnerName.toUpperCase(Locale.US) + " EDGE", 10, INK_SOFT, true);
+            TextView drivingHead = text("THIS MATCHUP'S BIGGEST DRIVERS", 10, INK_SOFT, true);
             drivingHead.setLetterSpacing(0.12f);
             body.addView(drivingHead);
 
@@ -8516,7 +8519,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             }
 
             if (!against.isEmpty()) {
-                TextView againstHead = text("WORKING AGAINST " + winnerName.toUpperCase(Locale.US), 10, EYEBROW, true);
+                TextView againstHead = text("PUSHING BACK", 10, EYEBROW, true);
                 againstHead.setLetterSpacing(0.12f);
                 LinearLayout.LayoutParams ahLp = matchWrap();
                 ahLp.setMargins(0, dp(12), 0, 0);
@@ -8530,7 +8533,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             }
         }
         // Footnote: make the lens dependency explicit, since the answer changes per lens.
-        TextView foot = text("Shares reflect sample-adjusted weight in the " + presetDisplayName(activeComparisonPreset, roleForScope(h.scope)) + " lens — not just the size of the gap.", 11, EYEBROW, false);
+        TextView foot = text("Lens % is the base importance. Driver % is how much the stat moved this specific matchup after gap size and reliability.", 11, EYEBROW, false);
         foot.setPadding(0, dp(10), 0, 0);
         body.addView(foot);
 
@@ -8566,10 +8569,10 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             if ((label.contains("xwoba") || label.contains("barrel") || label.contains("hard-hit") || label.contains("hard hit") || label.contains("bb%") || label.contains("k%")) && c.winner == winner) underlyingDrivesWinner = true;
         }
         if (currentResultsPushBack && underlyingDrivesWinner) {
-            return loserName + " leads some current results, but those rows are treated cautiously when the sample is smaller. " + winnerName + " leads the model through expected production, contact quality, or plate discipline.";
+            return loserName + " leads some current results, but those rows are softened when the sample is small. " + winnerName + " leads because the more trusted lens drivers point his way.";
         }
         if (winnerHasSmallSample || loserHasSmallSample) {
-            return "Small-sample rows still show who leads the displayed stat, but their impact is softened in the model.";
+            return "Small-sample rows still show the true stat leader, but they carry less impact in the final edge.";
         }
         return "";
     }
@@ -8610,6 +8613,9 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         TextView detail = text(nameA + " " + c.valueA + "  ·  " + nameB + " " + c.valueB, 11, INK_DIM, false);
         detail.setPadding(0, dp(1), 0, 0);
         labelCol.addView(detail);
+        TextView lensMeta = text(lensImportanceLabelForWeight(c.weight) + " lens stat" + (sharePct >= 0 ? " · " + sharePct + "% driver" : ""), 10, Color.rgb(129, 147, 174), true);
+        lensMeta.setPadding(0, dp(2), 0, 0);
+        labelCol.addView(lensMeta);
         if (note != null && !note.isEmpty()) {
             TextView noteTv = text(note, 11, Color.rgb(244, 192, 54), false);
             noteTv.setPadding(0, dp(2), 0, 0);
@@ -8643,7 +8649,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             for (EdgeContribution g : group) if (c.family.equals(g.family)) famCount++;
             if (famCount >= 2) {
                 notedFamilies.add(c.family);
-                return "part of the " + c.family + " story — weighted as one, not " + famCount;
+                return "part of the " + c.family + " story — related stats are grouped so they do not overcount";
             }
         }
         // Glow/score disagreement: visualStrength is how big the gap looked; share is how much it
@@ -8651,8 +8657,8 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         // say so — that's exactly what the card can't show.
         double look = Math.max(0d, Math.min(1d, c.visualStrength));
         double move = Math.max(0d, Math.min(1d, c.share * 2.2d));
-        if (look >= 0.55d && move <= 0.30d) return "big gap, but counts less in this lens";
-        if (look <= 0.30d && move >= 0.45d) return "small gap, but weighted heavily here";
+        if (look >= 0.55d && move <= 0.30d) return "big gap, but lower lens weight or sample keeps it from driving the edge";
+        if (look <= 0.30d && move >= 0.45d) return "modest gap, but important to this lens";
         return "";
     }
 
@@ -10639,7 +10645,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             if (isHotBatsComparison(h)) return "HOT BATS RECENT FORM";
             if (h != null && h.isTeam && "overall".equals(teamCardMode())) return "OVERALL · OFFENSE · PITCHING STATS";
             if (h != null && h.isTeam) return presetDisplayName(activeComparisonPreset, "both").toUpperCase(Locale.US) + " STATS";
-            return matchupLensNameForUi(h).toUpperCase(Locale.US) + " LENS STATS";
+            return matchupLensNameForUi(h).toUpperCase(Locale.US) + " · TOP DRIVERS";
         }
 
         private String premiumCardScoreMetaLine() {
@@ -10649,7 +10655,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             int scored = Math.max(0, keyScore.scoredRows);
             int ctx = Math.max(0, keyScore.contextRows);
             if (ctx > 0) return scored + " SCORING STATS · " + ctx + " CONTEXT";
-            return scored + " SCORING STATS";
+            return "SORTED BY MATCHUP IMPACT";
         }
 
         private void drawPill(Canvas canvas, String label, float cx, float cy, float w, float h, int fill, int stroke, int textColor, float sp) {
@@ -11939,6 +11945,156 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         return (a > b ? "A:" + shortName(h.nameA) : "B:" + shortName(h.nameB));
     }
 
+
+    // v256: compact legend so users can separate two ideas:
+    // Lens = how much the selected lens generally cares about the stat.
+    // Driver = how much the stat moved this specific matchup after gap + reliability.
+    private View matchupDriversGuide() {
+        TextView guide = text("Sorted by Driver · Lens % = base importance · Driver % = this matchup", 10, INK_DIM, false);
+        guide.setPadding(dp(10), dp(7), dp(10), dp(7));
+        guide.setGravity(Gravity.CENTER);
+        guide.setBackground(roundedStroke(Color.argb(20, 255, 255, 255), Color.argb(42, 255, 255, 255), 999, 1));
+        LinearLayout.LayoutParams lp = matchWrap();
+        lp.setMargins(0, dp(8), 0, dp(2));
+        guide.setLayoutParams(lp);
+        return guide;
+    }
+
+    private View statRowImpactLine(HeadToHeadComparison h, Metric m, StatEdgeResult edge, int accent) {
+        LinearLayout line = new LinearLayout(this);
+        line.setOrientation(LinearLayout.HORIZONTAL);
+        line.setGravity(Gravity.CENTER_VERTICAL);
+        line.setPadding(0, dp(6), 0, 0);
+
+        boolean scoring = edge == null || edge.scoring;
+        double weight = scoring ? headToHeadScoringWeight(h, m) : 0d;
+        int lensPct = (int)Math.round(Math.max(0d, Math.min(1d, weight)) * 100d);
+        int driverPct = scoring ? matchupDriverPercentForMetric(h, m) : 0;
+
+        String lensLabel = scoring ? ("Lens " + lensPct + "%") : "Context";
+        line.addView(rowMetaChip(lensLabel, Color.rgb(129, 147, 174), false));
+
+        if (driverPct > 0) {
+            line.addView(rowMetaChip("Driver " + driverPct + "%", accent, true));
+        } else if (scoring) {
+            line.addView(rowMetaChip("Low driver", Color.rgb(129, 147, 174), false));
+        }
+
+        if (edge != null && edge.sampleFlag) {
+            line.addView(rowMetaChip("Sample softened", Color.rgb(244, 192, 54), true));
+        }
+        return line;
+    }
+
+    private TextView rowMetaChip(String label, int accent, boolean stronger) {
+        TextView tv = text(label, 9, stronger ? softColor(accent, 0.12f) : INK_DIM, true);
+        tv.setSingleLine(true);
+        tv.setGravity(Gravity.CENTER);
+        tv.setPadding(dp(7), dp(3), dp(7), dp(3));
+        tv.setBackground(roundedStroke(
+                Color.argb(stronger ? 24 : 14, Color.red(accent), Color.green(accent), Color.blue(accent)),
+                Color.argb(stronger ? 84 : 44, Color.red(accent), Color.green(accent), Color.blue(accent)),
+                999, 1));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+        lp.setMargins(0, 0, dp(6), 0);
+        tv.setLayoutParams(lp);
+        return tv;
+    }
+
+    private int matchupDriverPercentForMetric(HeadToHeadComparison h, Metric m) {
+        if (h == null || m == null) return 0;
+        ArrayList<Metric> metrics = collectHeadToHeadMetrics(h, 999, true);
+        StatScoreSummary summary = summarizeHeadToHeadEdges(h, metrics);
+        if (summary == null || summary.contributions == null || summary.contributions.isEmpty()) return 0;
+        double total = 0d;
+        for (EdgeContribution c : summary.contributions) if (c != null && c.share > 0d) total += c.share;
+        if (total <= 0d) return 0;
+        for (EdgeContribution c : summary.contributions) {
+            if (c == null) continue;
+            if (safe(c.label).equalsIgnoreCase(safe(m.label))) {
+                int pct = (int)Math.round(100d * Math.max(0d, c.share) / total);
+                return Math.max(0, Math.min(99, pct));
+            }
+        }
+        return 0;
+    }
+
+    private String lensImportanceLabelForWeight(double weight) {
+        if (weight >= 0.16d) return "Core";
+        if (weight >= 0.10d) return "High";
+        if (weight > 0d) return "Support";
+        return "Context";
+    }
+
+    private View lensBlueprintBlock(HeadToHeadComparison h, int accent) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(10), dp(8), dp(10), dp(8));
+        box.setBackground(roundedStroke(Color.argb(18, Color.red(accent), Color.green(accent), Color.blue(accent)), Color.argb(62, Color.red(accent), Color.green(accent), Color.blue(accent)), 14, 1));
+        LinearLayout.LayoutParams lp = matchWrap();
+        lp.setMargins(0, 0, 0, dp(10));
+        box.setLayoutParams(lp);
+
+        String lensName = presetDisplayName(activeComparisonPreset, roleForScope(h == null ? StatScope.BOTH : h.scope));
+        TextView title = text("LENS BLUEPRINT", 9, Color.rgb(244, 192, 54), true);
+        title.setLetterSpacing(0.12f);
+        box.addView(title);
+
+        TextView summary = text(lensBlueprintSummary(h), 11, INK_SOFT, false);
+        summary.setPadding(0, dp(3), 0, 0);
+        box.addView(summary);
+
+        TextView key = text("Core lens stats: " + topLensImportanceStats(h, 3), 11, INK_DIM, false);
+        key.setPadding(0, dp(3), 0, 0);
+        box.addView(key);
+        return box;
+    }
+
+    private String lensBlueprintSummary(HeadToHeadComparison h) {
+        String preset = normalizePresetKey(activeComparisonPreset);
+        String role = h == null ? allowedMetricRoleForCurrentContext() : (h.isTeam ? "both" : roleForScope(h.scope));
+        if (isBullpenHeroComparison(h)) return "Bullpens balance season quality with recent workload/freshness.";
+        if (isOffenseVsStarterComparison(h)) return "This card compares each offense against today's probable starter profile.";
+        if (isHotBatsComparison(h)) return "Hot Bats prioritizes recent production, then checks whether contact quality backs it up.";
+        if ("traditional".equals(preset)) return "Traditional lens leans on familiar results and classic production stats.";
+        if ("statcastAdvanced".equals(preset)) return "Statcast lens leans on expected stats and contact-quality indicators.";
+        if ("powerContact".equals(preset)) return "Power lens values damage on contact: barrels, hard contact, slugging, and power results.";
+        if ("plateDiscipline".equals(preset)) return "Plate Discipline lens values swing decisions, strikeouts, walks, whiffs, and contact control.";
+        if ("speedBaserunning".equals(preset)) return "Speed lens values stolen bases and sprint/baserunning impact.";
+        if (h != null && h.isTeam && "teamOffense".equals(preset)) return "Team Offense lens values run creation, on-base production, discipline, and contact quality.";
+        if (h != null && h.isTeam && ("teamPitchingDefense".equals(preset) || "runPrevention".equals(preset))) return "Pitching/Defense lens values run prevention, opponent quality, strikeout-walk skill, and contact allowed.";
+        if ("hit".equals(role)) return "Recommended lens balances current production, expected production, contact quality, and discipline.";
+        if ("pitch".equals(role)) return "Recommended lens balances run prevention, expected quality, strikeout-walk skill, and contact allowed.";
+        return "Recommended lens balances offense, pitching/prevention, and team results.";
+    }
+
+    private String topLensImportanceStats(HeadToHeadComparison h, int max) {
+        ArrayList<Metric> metrics = collectHeadToHeadMetrics(h, 999, true);
+        if (metrics == null || metrics.isEmpty()) return "selected stats";
+        Collections.sort(metrics, (a, b) -> Double.compare(headToHeadScoringWeight(h, b), headToHeadScoringWeight(h, a)));
+        ArrayList<String> labels = new ArrayList<>();
+        for (Metric m : metrics) {
+            if (m == null || isContextOnlyMetric(m)) continue;
+            int pct = (int)Math.round(Math.max(0d, Math.min(1d, headToHeadScoringWeight(h, m))) * 100d);
+            labels.add(m.label + " " + pct + "%");
+            if (labels.size() >= max) break;
+        }
+        if (labels.isEmpty()) return "selected stats";
+        return joinLabels(labels);
+    }
+
+    private String joinLabels(ArrayList<String> labels) {
+        if (labels == null || labels.isEmpty()) return "";
+        if (labels.size() == 1) return labels.get(0);
+        if (labels.size() == 2) return labels.get(0) + " and " + labels.get(1);
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < labels.size(); i++) {
+            if (i > 0) sb.append(i == labels.size() - 1 ? ", and " : ", ");
+            sb.append(labels.get(i));
+        }
+        return sb.toString();
+    }
+
     // v30: Face-off layout for H2H stat cards — value+tier columns flanking the bar, gap significance footer
     private void renderHeadToHeadMetricRow(HeadToHeadComparison h, Metric m, TeamPalette paletteA, TeamPalette paletteB) {
         Double valueA = h.statsA.get(m.key);
@@ -12016,6 +12172,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         }, 15, Color.argb(108, Color.red(leaderColor), Color.green(leaderColor), Color.blue(leaderColor)), 1));
         topLine.addView(leaderBadge);
         row.addView(topLine, matchWrap());
+        row.addView(statRowImpactLine(h, m, rowEdge, leaderColor), matchWrap());
 
         // ── Face-off: Player A | vs | Player B ──────────────────────────────
         LinearLayout faceOff = new LinearLayout(this);
@@ -12054,7 +12211,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         ctxA.setGravity(Gravity.CENTER);
         ctxA.setPadding(0, dp(2), 0, 0);
         sideA.addView(ctxA, matchWrap());
-        if (rowEdge != null && rowEdge.sampleA) {
+        if (rowEdge != null && rowEdge.sampleFlag && rowEdge.sampleA) {
             TextView sample = smallSamplePill(accentA);
             LinearLayout.LayoutParams sampleLp = matchWrap();
             sampleLp.setMargins(0, dp(4), 0, 0);
@@ -12096,7 +12253,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         ctxB.setGravity(Gravity.CENTER);
         ctxB.setPadding(0, dp(2), 0, 0);
         sideB.addView(ctxB, matchWrap());
-        if (rowEdge != null && rowEdge.sampleB) {
+        if (rowEdge != null && rowEdge.sampleFlag && rowEdge.sampleB) {
             TextView sample = smallSamplePill(accentB);
             LinearLayout.LayoutParams sampleLp = matchWrap();
             sampleLp.setMargins(0, dp(4), 0, 0);
