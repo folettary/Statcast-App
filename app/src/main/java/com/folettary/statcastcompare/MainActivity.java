@@ -717,7 +717,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v249", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v250", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -17842,8 +17842,11 @@ private View liveGameCard(LiveGame game) {
         split.addView(homeWp, new LinearLayout.LayoutParams(0, -2, 1));
         card.addView(split, matchWrap());
 
-        WinProbChartView chart = new WinProbChartView(this, game.wpHomeSeries, game.wpInnings, game.wpSwings, homeColor, awayColor);
-        LinearLayout.LayoutParams chartLp = new LinearLayout.LayoutParams(-1, dp(112));
+        Team awayTeam = teamForLiveGame(game.awayTeamId, game.awayName, game.awayAbbr);
+        Team homeTeam = teamForLiveGame(game.homeTeamId, game.homeName, game.homeAbbr);
+        WinProbChartView chart = new WinProbChartView(this, game.wpHomeSeries, game.wpInnings, game.wpSwings,
+                homeColor, awayColor, awayTeam, homeTeam, awayAbbr, homeAbbr);
+        LinearLayout.LayoutParams chartLp = new LinearLayout.LayoutParams(-1, dp(150));
         chartLp.topMargin = dp(2);
         chart.setLayoutParams(chartLp);
         card.addView(chart);
@@ -17858,7 +17861,7 @@ private View liveGameCard(LiveGame game) {
             card.addView(swing);
         }
 
-        TextView foot = text("Home win% over the game. Gold dots mark the biggest momentum swings; numbers along the bottom are innings.", 11, EYEBROW, false);
+        TextView foot = text("The line rises into " + awayAbbr + "'s half as their odds climb and drops into " + homeAbbr + "'s half as theirs do. Gold dots mark the biggest momentum swings; numbers along the bottom are innings.", 11, EYEBROW, false);
         foot.setPadding(0, dp(6), 0, 0);
         card.addView(foot);
         return card;
@@ -17894,61 +17897,96 @@ private View liveGameCard(LiveGame game) {
         }
     }
 
-    // v249: trendline of home win% with frame-of-reference — labeled % gridlines, inning ticks
-    // along the bottom, and dots on the biggest momentum swings. No external libs.
+    // v250: win-probability "tug of war". Center line = 50/50. The line rises into the away
+    // team's half (top) as away odds climb and drops into the home half (bottom) as home odds
+    // climb; the gap between the line and center fills with the leading team's color at low
+    // opacity. Faint team-logo watermarks anchor each half. Keeps inning ticks + swing dots.
     private class WinProbChartView extends View {
-        private final java.util.ArrayList<Float> series;
+        private final java.util.ArrayList<Float> homeSeries; // stored as HOME win% (0..100)
         private final java.util.ArrayList<Integer> innings;
         private final java.util.ArrayList<Float> swings;
         private final int homeColor, awayColor;
+        private final String awayAbbr, homeAbbr;
         private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private Bitmap awayLogo, homeLogo;
 
-        WinProbChartView(android.content.Context ctx, java.util.ArrayList<Float> series,
+        WinProbChartView(android.content.Context ctx, java.util.ArrayList<Float> homeSeries,
                          java.util.ArrayList<Integer> innings, java.util.ArrayList<Float> swings,
-                         int homeColor, int awayColor) {
+                         int homeColor, int awayColor, Team awayTeam, Team homeTeam,
+                         String awayAbbr, String homeAbbr) {
             super(ctx);
-            this.series = series == null ? new java.util.ArrayList<>() : series;
+            this.homeSeries = homeSeries == null ? new java.util.ArrayList<>() : homeSeries;
             this.innings = innings == null ? new java.util.ArrayList<>() : innings;
             this.swings = swings == null ? new java.util.ArrayList<>() : swings;
             this.homeColor = homeColor;
             this.awayColor = awayColor;
+            this.awayAbbr = awayAbbr;
+            this.homeAbbr = homeAbbr;
+            if (awayTeam != null) loadTeamLogoBitmap(awayTeam, b -> { awayLogo = b; invalidate(); });
+            if (homeTeam != null) loadTeamLogoBitmap(homeTeam, b -> { homeLogo = b; invalidate(); });
         }
 
         @Override protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
             float w = getWidth(), h = getHeight();
             if (w <= 0 || h <= 0) return;
-            // Leave a left gutter for % labels and a bottom strip for inning numbers.
             float gutterL = dp(22), padR = dp(6), padTop = dp(6), padBottom = dp(14);
             float plotL = gutterL, plotR = w - padR;
             float plotW = plotR - plotL, plotH = h - padTop - padBottom;
-            float yFor = padTop; // base for y math below
+            float midY = padTop + plotH / 2f;
 
-            // % gridlines at 0/25/50/75/100, labeled. 50 is the emphasized midline.
+            // Helper: away-advantage value (0..100, where 50=even, >50 favors away) → y.
+            // Away dominates the TOP half, home the BOTTOM half.
+            int n = homeSeries.size();
+
+            // Faint team-logo watermarks: away centered in the top half, home in the bottom half.
+            int logoSize = (int) Math.min(dp(46), plotH * 0.42f);
+            if (awayLogo != null) drawLogoWatermark(canvas, awayLogo, plotL + plotW / 2f, padTop + plotH * 0.25f, logoSize);
+            if (homeLogo != null) drawLogoWatermark(canvas, homeLogo, plotL + plotW / 2f, padTop + plotH * 0.75f, logoSize);
+
+            // Faint half labels (abbreviations) top-left and bottom-left as a fallback/anchor.
+            p.setStyle(Paint.Style.FILL);
+            p.setTextSize(dp(9f));
+            p.setColor(Color.argb(120, Color.red(awayColor), Color.green(awayColor), Color.blue(awayColor)));
+            canvas.drawText(safe(awayAbbr), plotL + dp(2), padTop + dp(10), p);
+            p.setColor(Color.argb(120, Color.red(homeColor), Color.green(homeColor), Color.blue(homeColor)));
+            canvas.drawText(safe(homeAbbr), plotL + dp(2), padTop + plotH - dp(3), p);
+
+            // % gridlines. Center = 50/50; away% reads upward, home% reads downward.
             p.setTextSize(dp(8.5f));
-            int[] marks = { 0, 25, 50, 75, 100 };
-            for (int m : marks) {
-                float y = padTop + plotH * (1f - m / 100f);
-                p.setStyle(Paint.Style.STROKE);
-                p.setStrokeWidth(m == 50 ? dp(1f) : dp(0.6f));
-                p.setColor(m == 50 ? Color.argb(95, 200, 214, 236) : Color.argb(40, 200, 214, 236));
-                canvas.drawLine(plotL, y, plotR, y, p);
-                p.setStyle(Paint.Style.FILL);
-                p.setColor(Color.argb(150, 190, 205, 226));
-                canvas.drawText(m + "%", dp(1), y + dp(3), p);
+            int[] offsets = { 0, 25, 50 }; // distance from center in each direction
+            for (int off : offsets) {
+                if (off == 50) {
+                    float y = midY;
+                    p.setStyle(Paint.Style.STROKE); p.setStrokeWidth(dp(1f));
+                    p.setColor(Color.argb(110, 210, 222, 240));
+                    canvas.drawLine(plotL, y, plotR, y, p);
+                    p.setStyle(Paint.Style.FILL); p.setColor(Color.argb(150, 200, 214, 236));
+                    canvas.drawText("50", dp(2), y + dp(3), p);
+                } else {
+                    float up = midY - plotH / 2f * (off / 50f);
+                    float down = midY + plotH / 2f * (off / 50f);
+                    p.setStyle(Paint.Style.STROKE); p.setStrokeWidth(dp(0.6f));
+                    p.setColor(Color.argb(34, 200, 214, 236));
+                    canvas.drawLine(plotL, up, plotR, up, p);
+                    canvas.drawLine(plotL, down, plotR, down, p);
+                    p.setStyle(Paint.Style.FILL); p.setColor(Color.argb(120, 180, 196, 220));
+                    int label = 50 + off; // 75 / 100 toward each team
+                    canvas.drawText(String.valueOf(label), dp(2), up + dp(3), p);
+                    canvas.drawText(String.valueOf(label), dp(2), down + dp(3), p);
+                }
             }
 
-            int n = series.size();
             if (n < 2) {
                 p.setStyle(Paint.Style.FILL);
                 p.setColor(Color.argb(150, 190, 205, 226));
                 p.setTextSize(dp(11));
-                canvas.drawText("Building win-probability trend…", plotL, padTop + plotH / 2f - dp(6), p);
+                canvas.drawText("Building win-probability trend…", plotL + dp(8), midY - dp(6), p);
                 return;
             }
             float stepX = plotW / (n - 1);
 
-            // Inning boundary ticks + labels along the bottom.
+            // Inning ticks + numbers along the bottom.
             if (innings.size() == n) {
                 p.setTextSize(dp(8.5f));
                 int prevInning = -1;
@@ -17956,71 +17994,91 @@ private View liveGameCard(LiveGame game) {
                     int inn = innings.get(i);
                     if (inn > 0 && inn != prevInning) {
                         float x = plotL + stepX * i;
-                        p.setStyle(Paint.Style.STROKE);
-                        p.setStrokeWidth(dp(0.6f));
-                        p.setColor(Color.argb(34, 200, 214, 236));
+                        p.setStyle(Paint.Style.STROKE); p.setStrokeWidth(dp(0.6f));
+                        p.setColor(Color.argb(30, 200, 214, 236));
                         canvas.drawLine(x, padTop, x, padTop + plotH, p);
-                        p.setStyle(Paint.Style.FILL);
-                        p.setColor(Color.argb(140, 180, 196, 220));
+                        p.setStyle(Paint.Style.FILL); p.setColor(Color.argb(140, 180, 196, 220));
                         canvas.drawText(String.valueOf(inn), x + dp(2), h - dp(3), p);
                         prevInning = inn;
                     }
                 }
             }
 
-            // Trendline path.
-            android.graphics.Path line = new android.graphics.Path();
+            // Map play index → y. awayAdv = 100 - homeWin%. y above center when away leads.
+            // y = midY - (awayAdv-50)/50 * (plotH/2).
+            float halfH = plotH / 2f;
+            float[] xs = new float[n], ys = new float[n];
             for (int i = 0; i < n; i++) {
-                float val = Math.max(0f, Math.min(100f, series.get(i)));
-                float x = plotL + stepX * i;
-                float y = padTop + plotH * (1f - val / 100f);
-                if (i == 0) line.moveTo(x, y); else line.lineTo(x, y);
+                float homeWin = Math.max(0f, Math.min(100f, homeSeries.get(i)));
+                float awayAdv = 100f - homeWin; // >50 favors away
+                xs[i] = plotL + stepX * i;
+                ys[i] = midY - ((awayAdv - 50f) / 50f) * halfH;
             }
 
-            float lastVal = Math.max(0f, Math.min(100f, series.get(n - 1)));
-            float midY = padTop + plotH * 0.5f;
-            int fillColor = lastVal >= 50f ? homeColor : awayColor;
-            android.graphics.Path fill = new android.graphics.Path(line);
-            fill.lineTo(plotL + plotW, midY);
-            fill.lineTo(plotL, midY);
-            fill.close();
-            p.setStyle(Paint.Style.FILL);
-            p.setColor(Color.argb(40, Color.red(fillColor), Color.green(fillColor), Color.blue(fillColor)));
-            canvas.drawPath(fill, p);
+            // Build the trend path.
+            android.graphics.Path line = new android.graphics.Path();
+            line.moveTo(xs[0], ys[0]);
+            for (int i = 1; i < n; i++) line.lineTo(xs[i], ys[i]);
 
+            // Fill between the line and the center, segment by segment, tinted by which side the
+            // segment sits on (above center = away color, below = home color), low opacity.
+            for (int i = 0; i < n - 1; i++) {
+                android.graphics.Path seg = new android.graphics.Path();
+                seg.moveTo(xs[i], midY);
+                seg.lineTo(xs[i], ys[i]);
+                seg.lineTo(xs[i + 1], ys[i + 1]);
+                seg.lineTo(xs[i + 1], midY);
+                seg.close();
+                float avgY = (ys[i] + ys[i + 1]) / 2f;
+                int c = avgY <= midY ? awayColor : homeColor; // above center → away
+                p.setStyle(Paint.Style.FILL);
+                p.setColor(Color.argb(58, Color.red(c), Color.green(c), Color.blue(c)));
+                canvas.drawPath(seg, p);
+            }
+
+            // The trendline, colored by the current leader.
+            float lastHomeWin = Math.max(0f, Math.min(100f, homeSeries.get(n - 1)));
+            int lineColor = (100f - lastHomeWin) >= 50f ? awayColor : homeColor;
             p.setStyle(Paint.Style.STROKE);
             p.setStrokeWidth(dp(2.4f));
             p.setStrokeJoin(Paint.Join.ROUND);
             p.setStrokeCap(Paint.Cap.ROUND);
-            p.setColor(Color.argb(235, Color.red(fillColor), Color.green(fillColor), Color.blue(fillColor)));
+            p.setColor(Color.argb(240, Color.red(lineColor), Color.green(lineColor), Color.blue(lineColor)));
             canvas.drawPath(line, p);
 
-            // Big-swing markers: flag the up-to-3 largest momentum plays (>= 15% swing).
+            // Big-swing markers (top 3, >= 15%).
             if (swings.size() == n) {
                 java.util.ArrayList<Integer> idx = new java.util.ArrayList<>();
                 for (int i = 0; i < n; i++) if (swings.get(i) >= 15f) idx.add(i);
-                java.util.Collections.sort(idx, (x1, x2) -> Float.compare(swings.get(x2), swings.get(x1)));
+                java.util.Collections.sort(idx, (a, b) -> Float.compare(swings.get(b), swings.get(a)));
                 int marked = 0;
                 for (int k = 0; k < idx.size() && marked < 3; k++, marked++) {
                     int i = idx.get(k);
-                    float val = Math.max(0f, Math.min(100f, series.get(i)));
-                    float x = plotL + stepX * i;
-                    float y = padTop + plotH * (1f - val / 100f);
                     p.setStyle(Paint.Style.FILL);
                     p.setColor(Color.argb(235, 255, 255, 255));
-                    canvas.drawCircle(x, y, dp(3.4f), p);
+                    canvas.drawCircle(xs[i], ys[i], dp(3.4f), p);
                     p.setColor(Color.rgb(244, 192, 54));
-                    canvas.drawCircle(x, y, dp(2f), p);
+                    canvas.drawCircle(xs[i], ys[i], dp(2f), p);
                 }
             }
 
-            // Endpoint dot (current/final).
-            float ex = plotL + plotW, ey = padTop + plotH * (1f - lastVal / 100f);
+            // Endpoint dot.
             p.setStyle(Paint.Style.FILL);
             p.setColor(Color.WHITE);
-            canvas.drawCircle(ex, ey, dp(3.2f), p);
-            p.setColor(Color.argb(255, Color.red(fillColor), Color.green(fillColor), Color.blue(fillColor)));
-            canvas.drawCircle(ex, ey, dp(2f), p);
+            canvas.drawCircle(xs[n - 1], ys[n - 1], dp(3.2f), p);
+            p.setColor(Color.argb(255, Color.red(lineColor), Color.green(lineColor), Color.blue(lineColor)));
+            canvas.drawCircle(xs[n - 1], ys[n - 1], dp(2f), p);
+        }
+
+        private void drawLogoWatermark(Canvas canvas, Bitmap logo, float cx, float cy, int size) {
+            if (logo == null || size <= 0) return;
+            android.graphics.Rect src = new android.graphics.Rect(0, 0, logo.getWidth(), logo.getHeight());
+            android.graphics.RectF dst = new android.graphics.RectF(cx - size / 2f, cy - size / 2f, cx + size / 2f, cy + size / 2f);
+            int saved = p.getAlpha();
+            p.setStyle(Paint.Style.FILL);
+            p.setAlpha(34); // faint watermark
+            canvas.drawBitmap(logo, src, dst, p);
+            p.setAlpha(saved);
         }
     }
 
