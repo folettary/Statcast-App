@@ -717,7 +717,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v248", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v249", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -17842,28 +17842,74 @@ private View liveGameCard(LiveGame game) {
         split.addView(homeWp, new LinearLayout.LayoutParams(0, -2, 1));
         card.addView(split, matchWrap());
 
-        WinProbChartView chart = new WinProbChartView(this, game.wpHomeSeries, homeColor, awayColor);
-        LinearLayout.LayoutParams chartLp = new LinearLayout.LayoutParams(-1, dp(96));
+        WinProbChartView chart = new WinProbChartView(this, game.wpHomeSeries, game.wpInnings, game.wpSwings, homeColor, awayColor);
+        LinearLayout.LayoutParams chartLp = new LinearLayout.LayoutParams(-1, dp(112));
         chartLp.topMargin = dp(2);
         chart.setLayoutParams(chartLp);
         card.addView(chart);
 
-        TextView foot = text("Home win% over the course of the game. Above the midline favors " + homeAbbr + ", below favors " + awayAbbr + ".", 11, EYEBROW, false);
-        foot.setPadding(0, dp(8), 0, 0);
+        // Call out the single biggest momentum play, if one stands out.
+        String bigPlay = biggestSwingDescription(game);
+        if (bigPlay != null && !bigPlay.isEmpty()) {
+            TextView swing = text("● " + bigPlay, 11, Color.rgb(244, 192, 54), false);
+            swing.setPadding(0, dp(8), 0, 0);
+            swing.setMaxLines(2);
+            swing.setEllipsize(TextUtils.TruncateAt.END);
+            card.addView(swing);
+        }
+
+        TextView foot = text("Home win% over the game. Gold dots mark the biggest momentum swings; numbers along the bottom are innings.", 11, EYEBROW, false);
+        foot.setPadding(0, dp(6), 0, 0);
         card.addView(foot);
         return card;
     }
 
-    // v248: a compact trendline of home win% (0..100). Fills toward the home color above the
-    // 50% midline and the away color below it, so momentum reads at a glance. No external libs.
+    // Returns a short label for the single largest win-probability swing, e.g.
+    // "Biggest swing (3rd): Tatis homers" — or null if nothing notable.
+    private String biggestSwingDescription(LiveGame game) {
+        if (game == null || game.wpSwings == null || game.wpSwings.isEmpty()) return null;
+        int best = -1; float bestVal = 14.9f; // require >= ~15% to be "big"
+        for (int i = 0; i < game.wpSwings.size(); i++) {
+            if (game.wpSwings.get(i) > bestVal) { bestVal = game.wpSwings.get(i); best = i; }
+        }
+        if (best < 0) return null;
+        String desc = best < game.wpDescriptions.size() ? game.wpDescriptions.get(best) : "";
+        if (desc == null || desc.isEmpty()) return null;
+        int inning = best < game.wpInnings.size() ? game.wpInnings.get(best) : -1;
+        String inningStr = inning > 0 ? ordinal(inning) + " · " : "";
+        // Trim very long descriptions.
+        if (desc.length() > 80) desc = desc.substring(0, 79).trim() + "…";
+        return "Biggest swing (" + inningStr + "+" + Math.round(bestVal) + "%): " + desc;
+    }
+
+    private String ordinal(int n) {
+        if (n <= 0) return String.valueOf(n);
+        int m = n % 100;
+        if (m >= 11 && m <= 13) return n + "th";
+        switch (n % 10) {
+            case 1: return n + "st";
+            case 2: return n + "nd";
+            case 3: return n + "rd";
+            default: return n + "th";
+        }
+    }
+
+    // v249: trendline of home win% with frame-of-reference — labeled % gridlines, inning ticks
+    // along the bottom, and dots on the biggest momentum swings. No external libs.
     private class WinProbChartView extends View {
         private final java.util.ArrayList<Float> series;
+        private final java.util.ArrayList<Integer> innings;
+        private final java.util.ArrayList<Float> swings;
         private final int homeColor, awayColor;
         private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
 
-        WinProbChartView(android.content.Context ctx, java.util.ArrayList<Float> series, int homeColor, int awayColor) {
+        WinProbChartView(android.content.Context ctx, java.util.ArrayList<Float> series,
+                         java.util.ArrayList<Integer> innings, java.util.ArrayList<Float> swings,
+                         int homeColor, int awayColor) {
             super(ctx);
             this.series = series == null ? new java.util.ArrayList<>() : series;
+            this.innings = innings == null ? new java.util.ArrayList<>() : innings;
+            this.swings = swings == null ? new java.util.ArrayList<>() : swings;
             this.homeColor = homeColor;
             this.awayColor = awayColor;
         }
@@ -17872,41 +17918,74 @@ private View liveGameCard(LiveGame game) {
             super.onDraw(canvas);
             float w = getWidth(), h = getHeight();
             if (w <= 0 || h <= 0) return;
-            float padL = dp(2), padR = dp(2), padV = dp(6);
-            float plotW = w - padL - padR, plotH = h - padV * 2;
-            float midY = padV + plotH / 2f;
+            // Leave a left gutter for % labels and a bottom strip for inning numbers.
+            float gutterL = dp(22), padR = dp(6), padTop = dp(6), padBottom = dp(14);
+            float plotL = gutterL, plotR = w - padR;
+            float plotW = plotR - plotL, plotH = h - padTop - padBottom;
+            float yFor = padTop; // base for y math below
 
-            p.setStyle(Paint.Style.STROKE);
-            p.setStrokeWidth(dp(1));
-            p.setColor(Color.argb(70, 200, 214, 236));
-            canvas.drawLine(padL, midY, w - padR, midY, p);
+            // % gridlines at 0/25/50/75/100, labeled. 50 is the emphasized midline.
+            p.setTextSize(dp(8.5f));
+            int[] marks = { 0, 25, 50, 75, 100 };
+            for (int m : marks) {
+                float y = padTop + plotH * (1f - m / 100f);
+                p.setStyle(Paint.Style.STROKE);
+                p.setStrokeWidth(m == 50 ? dp(1f) : dp(0.6f));
+                p.setColor(m == 50 ? Color.argb(95, 200, 214, 236) : Color.argb(40, 200, 214, 236));
+                canvas.drawLine(plotL, y, plotR, y, p);
+                p.setStyle(Paint.Style.FILL);
+                p.setColor(Color.argb(150, 190, 205, 226));
+                canvas.drawText(m + "%", dp(1), y + dp(3), p);
+            }
 
             int n = series.size();
             if (n < 2) {
                 p.setStyle(Paint.Style.FILL);
                 p.setColor(Color.argb(150, 190, 205, 226));
                 p.setTextSize(dp(11));
-                canvas.drawText("Building win-probability trend…", padL, midY - dp(6), p);
+                canvas.drawText("Building win-probability trend…", plotL, padTop + plotH / 2f - dp(6), p);
                 return;
             }
-
-            android.graphics.Path line = new android.graphics.Path();
             float stepX = plotW / (n - 1);
+
+            // Inning boundary ticks + labels along the bottom.
+            if (innings.size() == n) {
+                p.setTextSize(dp(8.5f));
+                int prevInning = -1;
+                for (int i = 0; i < n; i++) {
+                    int inn = innings.get(i);
+                    if (inn > 0 && inn != prevInning) {
+                        float x = plotL + stepX * i;
+                        p.setStyle(Paint.Style.STROKE);
+                        p.setStrokeWidth(dp(0.6f));
+                        p.setColor(Color.argb(34, 200, 214, 236));
+                        canvas.drawLine(x, padTop, x, padTop + plotH, p);
+                        p.setStyle(Paint.Style.FILL);
+                        p.setColor(Color.argb(140, 180, 196, 220));
+                        canvas.drawText(String.valueOf(inn), x + dp(2), h - dp(3), p);
+                        prevInning = inn;
+                    }
+                }
+            }
+
+            // Trendline path.
+            android.graphics.Path line = new android.graphics.Path();
             for (int i = 0; i < n; i++) {
                 float val = Math.max(0f, Math.min(100f, series.get(i)));
-                float x = padL + stepX * i;
-                float y = padV + plotH * (1f - val / 100f);
+                float x = plotL + stepX * i;
+                float y = padTop + plotH * (1f - val / 100f);
                 if (i == 0) line.moveTo(x, y); else line.lineTo(x, y);
             }
 
             float lastVal = Math.max(0f, Math.min(100f, series.get(n - 1)));
+            float midY = padTop + plotH * 0.5f;
             int fillColor = lastVal >= 50f ? homeColor : awayColor;
             android.graphics.Path fill = new android.graphics.Path(line);
-            fill.lineTo(padL + plotW, midY);
-            fill.lineTo(padL, midY);
+            fill.lineTo(plotL + plotW, midY);
+            fill.lineTo(plotL, midY);
             fill.close();
             p.setStyle(Paint.Style.FILL);
-            p.setColor(Color.argb(46, Color.red(fillColor), Color.green(fillColor), Color.blue(fillColor)));
+            p.setColor(Color.argb(40, Color.red(fillColor), Color.green(fillColor), Color.blue(fillColor)));
             canvas.drawPath(fill, p);
 
             p.setStyle(Paint.Style.STROKE);
@@ -17916,7 +17995,27 @@ private View liveGameCard(LiveGame game) {
             p.setColor(Color.argb(235, Color.red(fillColor), Color.green(fillColor), Color.blue(fillColor)));
             canvas.drawPath(line, p);
 
-            float ex = padL + plotW, ey = padV + plotH * (1f - lastVal / 100f);
+            // Big-swing markers: flag the up-to-3 largest momentum plays (>= 15% swing).
+            if (swings.size() == n) {
+                java.util.ArrayList<Integer> idx = new java.util.ArrayList<>();
+                for (int i = 0; i < n; i++) if (swings.get(i) >= 15f) idx.add(i);
+                java.util.Collections.sort(idx, (x1, x2) -> Float.compare(swings.get(x2), swings.get(x1)));
+                int marked = 0;
+                for (int k = 0; k < idx.size() && marked < 3; k++, marked++) {
+                    int i = idx.get(k);
+                    float val = Math.max(0f, Math.min(100f, series.get(i)));
+                    float x = plotL + stepX * i;
+                    float y = padTop + plotH * (1f - val / 100f);
+                    p.setStyle(Paint.Style.FILL);
+                    p.setColor(Color.argb(235, 255, 255, 255));
+                    canvas.drawCircle(x, y, dp(3.4f), p);
+                    p.setColor(Color.rgb(244, 192, 54));
+                    canvas.drawCircle(x, y, dp(2f), p);
+                }
+            }
+
+            // Endpoint dot (current/final).
+            float ex = plotL + plotW, ey = padTop + plotH * (1f - lastVal / 100f);
             p.setStyle(Paint.Style.FILL);
             p.setColor(Color.WHITE);
             canvas.drawCircle(ex, ey, dp(3.2f), p);
@@ -22055,10 +22154,11 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
             String body = httpGet(url);
             if (body == null || body.isEmpty()) return;
             ArrayList<Float> homeSeries = new ArrayList<>();
+            ArrayList<Integer> innings = new ArrayList<>();
+            ArrayList<String> descriptions = new ArrayList<>();
+            ArrayList<Float> swings = new ArrayList<>();
             float lastHome = -1f, lastAway = -1f;
 
-            // The response is typically a top-level JSON array of play objects; some shapes wrap
-            // it under a key. Handle both.
             JSONArray plays = null;
             String trimmed = body.trim();
             if (trimmed.startsWith("[")) {
@@ -22070,10 +22170,10 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
             }
             if (plays == null) return;
 
+            float prevHome = -1f;
             for (int i = 0; i < plays.length(); i++) {
                 JSONObject p = plays.optJSONObject(i);
                 if (p == null) continue;
-                // Value can live at the top of the play or under "homeTeamWinProbability".
                 double h = readWinProb(p, true);
                 double a = readWinProb(p, false);
                 if (h < 0 && a < 0) continue;
@@ -22082,10 +22182,31 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
                 lastHome = (float) h;
                 lastAway = (float) a;
                 homeSeries.add((float) h);
+
+                // Inning + description live in the play's "about" / "result" blocks (confirmed
+                // against the MLB feed schema). Default gracefully if absent.
+                JSONObject about = p.optJSONObject("about");
+                int inning = about != null ? about.optInt("inning", -1) : -1;
+                innings.add(inning);
+                JSONObject result = p.optJSONObject("result");
+                String desc = result != null ? result.optString("description", "") : "";
+                if (desc.isEmpty() && result != null) desc = result.optString("event", "");
+                descriptions.add(desc);
+
+                // Swing: prefer the feed's own homeTeamWinProbabilityAdded; otherwise derive it
+                // from the change vs the previous play.
+                double added = p.has("homeTeamWinProbabilityAdded")
+                        ? Math.abs(p.optDouble("homeTeamWinProbabilityAdded", 0d))
+                        : (prevHome < 0 ? 0d : Math.abs(h - prevHome));
+                swings.add((float) added);
+                prevHome = (float) h;
             }
 
             if (!homeSeries.isEmpty()) {
                 game.wpHomeSeries = homeSeries;
+                game.wpInnings = innings;
+                game.wpDescriptions = descriptions;
+                game.wpSwings = swings;
                 game.wpHome = lastHome;
                 game.wpAway = lastAway >= 0 ? lastAway : (100f - lastHome);
                 game.wpLoaded = true;
@@ -23059,10 +23180,13 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         String homePitcher = "";
         int awayScore = -1;
         int homeScore = -1;
-        // v248: win probability. wpHomeSeries holds home-team win% (0..100) at each completed
-        // play, in order, for the trendline; wpHome/wpAway are the latest values. Populated by a
-        // separate per-game fetch (MLB winProbability feed), only for live/final games.
+        // v249: win probability with frame-of-reference data. Each play keeps home win% plus
+        // its inning, a short description, and the win-prob swing it caused — enough to draw
+        // inning ticks and flag the biggest momentum plays. wpHome/wpAway are the latest values.
         java.util.ArrayList<Float> wpHomeSeries = new java.util.ArrayList<>();
+        java.util.ArrayList<Integer> wpInnings = new java.util.ArrayList<>();
+        java.util.ArrayList<String> wpDescriptions = new java.util.ArrayList<>();
+        java.util.ArrayList<Float> wpSwings = new java.util.ArrayList<>(); // abs win% change at each play
         float wpHome = -1f;
         float wpAway = -1f;
         boolean wpLoaded = false;
