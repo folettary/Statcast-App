@@ -736,7 +736,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v263", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v264", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -9701,7 +9701,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             paint.clearShadowLayer();
 
             if (sideHasSmallSampleForCard(h, left, shareMetrics)) {
-                drawSampleChip(canvas, "SMALL SAMPLE", cx, y + dp(67), readableTeamColor(palette.primary, palette.secondary, left));
+                drawSampleChip(canvas, "SMALL SAMPLE", cx, y + dp(73), readableTeamColor(palette.primary, palette.secondary, left));
             }
         }
 
@@ -10146,17 +10146,18 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 paint.setTypeface(tfBold);
                 float labelW = paint.measureText(m.label);
                 boolean sampleBadge = edge.badge.toUpperCase(Locale.US).contains("SAMPLE");
-                String badgeLabel = sampleBadge ? "SMALL SAMPLE" : edge.badge;
+                String badgeLabel = sampleBadge ? "SAMPLE" : edge.badge;
                 float badgeW = shareMiniBadgeWidth(badgeLabel);
                 int badgeColor = edge.contextOnly ? INK_DIM : (edge.volumeSensitive ? INK_SOFT : INK_SOFT);
 
                 if (sampleBadge && (edge.sampleA || edge.sampleB)) {
-                    // v262: keep sample badges in one stable side lane. They sit below the
-                    // low-sample side's value and above the rail, instead of drifting beside
-                    // each value and colliding with decimals.
-                    float badgeCenterY = top + rowH * 0.625f;
-                    float leftBadgeXAligned = panel.left + dp(30);
-                    float rightBadgeXAligned = panel.right - dp(30) - badgeW;
+                    // v264: fixed, aligned side lane after the value slot. This keeps the cue
+                    // on the low-sample side without drifting row-to-row or colliding with decimals.
+                    float badgeCenterY = valueCenterY;
+                    float leftBadgeXAligned = Math.min(cX - badgeW - dp(10), leftValueX + valueSlotWidth + dp(8));
+                    leftBadgeXAligned = Math.max(panel.left + dp(8), leftBadgeXAligned);
+                    float rightBadgeXAligned = Math.max(cX + dp(10), rightValueX - valueSlotWidth - badgeW - dp(8));
+                    rightBadgeXAligned = Math.min(panel.right - badgeW - dp(8), rightBadgeXAligned);
                     if (edge.sampleA) {
                         drawShareMiniBadge(canvas, badgeLabel, leftBadgeXAligned, badgeCenterY, badgeColor);
                     }
@@ -18294,6 +18295,152 @@ private View liveGameCard(LiveGame game) {
 // v248: trimmed per-side column for the live tile — abbreviation + score on one line, a
 // team-color underline, then the pitcher. (Dropped the full team name, which the user noted
 // was redundant with the abbreviation and the watermark logo.)
+
+    private void loadCompactLineScore(LiveGame game, LinearLayout host, TeamPalette awayPalette, TeamPalette homePalette) {
+        if (game == null || host == null) return;
+        io.execute(() -> {
+            fetchCompactLineScoreInto(game);
+            main.post(() -> {
+                if (host.getParent() == null) return;
+                if (!game.lineScoreLoaded || game.lineInnings.isEmpty()) {
+                    host.setVisibility(View.GONE);
+                    return;
+                }
+                host.removeAllViews();
+                host.addView(compactLineScoreCard(game, awayPalette, homePalette), matchWrap());
+                host.setVisibility(View.VISIBLE);
+            });
+        });
+    }
+
+    private void fetchCompactLineScoreInto(LiveGame game) {
+        if (game == null || game.gamePk <= 0) return;
+        try {
+            String body = httpGet("https://statsapi.mlb.com/api/v1/game/" + game.gamePk + "/linescore");
+            if (body == null || body.trim().isEmpty()) return;
+            JSONObject root = new JSONObject(body);
+            JSONArray innings = root.optJSONArray("innings");
+            ArrayList<Integer> nums = new ArrayList<>();
+            ArrayList<Integer> awayRuns = new ArrayList<>();
+            ArrayList<Integer> homeRuns = new ArrayList<>();
+            if (innings != null) {
+                for (int i = 0; i < innings.length(); i++) {
+                    JSONObject inn = innings.optJSONObject(i);
+                    if (inn == null) continue;
+                    nums.add(inn.optInt("num", i + 1));
+                    JSONObject away = inn.optJSONObject("away");
+                    JSONObject home = inn.optJSONObject("home");
+                    awayRuns.add(readNullableInt(away, "runs"));
+                    homeRuns.add(readNullableInt(home, "runs"));
+                }
+            }
+            JSONObject teams = root.optJSONObject("teams");
+            JSONObject awayTeam = teams == null ? null : teams.optJSONObject("away");
+            JSONObject homeTeam = teams == null ? null : teams.optJSONObject("home");
+            game.lineInnings = nums;
+            game.awayLineRuns = awayRuns;
+            game.homeLineRuns = homeRuns;
+            game.awayLineRunsTotal = readNullableInt(awayTeam, "runs");
+            game.homeLineRunsTotal = readNullableInt(homeTeam, "runs");
+            game.awayHits = readNullableInt(awayTeam, "hits");
+            game.homeHits = readNullableInt(homeTeam, "hits");
+            game.awayErrors = readNullableInt(awayTeam, "errors");
+            game.homeErrors = readNullableInt(homeTeam, "errors");
+            game.lineScoreLoaded = !nums.isEmpty();
+        } catch (Exception ignored) {
+            // Compact score is optional; leave hidden if MLB does not return a linescore.
+        }
+    }
+
+    private int readNullableInt(JSONObject obj, String key) {
+        if (obj == null || key == null || !obj.has(key) || obj.isNull(key)) return -1;
+        return obj.optInt(key, -1);
+    }
+
+    private View compactLineScoreCard(LiveGame game, TeamPalette awayPalette, TeamPalette homePalette) {
+        int awayColor = ensureReadableColor(awayPalette.primary, 150);
+        int homeColor = ensureReadableColor(homePalette.primary, 150);
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(11), dp(8), dp(11), dp(8));
+        card.setBackground(roundedGradientStroke(new int[] {
+                Color.rgb(8, 13, 22),
+                mixColor(awayPalette.primary, homePalette.primary, 0.50f),
+                Color.rgb(8, 13, 22)
+        }, 16, Color.argb(58, 255, 255, 255), 1));
+
+        LinearLayout title = new LinearLayout(this);
+        title.setOrientation(LinearLayout.HORIZONTAL);
+        title.setGravity(Gravity.CENTER_VERTICAL);
+        TextView label = text("BOX SCORE", 9, Color.rgb(244, 207, 100), true);
+        label.setLetterSpacing(0.14f);
+        title.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView state = text(game.statusLabel(), 8, statusColor(game), true);
+        state.setGravity(Gravity.RIGHT);
+        state.setSingleLine(true);
+        title.addView(state);
+        card.addView(title, matchWrap());
+
+        int totalInnings = game.lineInnings == null ? 0 : game.lineInnings.size();
+        int shown = Math.min(9, Math.max(1, totalInnings));
+        int start = Math.max(0, totalInnings - shown);
+
+        LinearLayout header = lineScoreRowShell();
+        addLineScoreCell(header, "", 9, INK_DIM, true, dp(34), Gravity.LEFT);
+        for (int i = start; i < totalInnings; i++) {
+            addLineScoreCell(header, String.valueOf(game.lineInnings.get(i)), 8, INK_DIM, true, 1f, Gravity.CENTER);
+        }
+        addLineScoreCell(header, "R", 8, INK_SOFT, true, 1.05f, Gravity.CENTER);
+        addLineScoreCell(header, "H", 8, INK_DIM, true, 1.05f, Gravity.CENTER);
+        addLineScoreCell(header, "E", 8, INK_DIM, true, 1.05f, Gravity.CENTER);
+        LinearLayout.LayoutParams headerLp = matchWrap();
+        headerLp.setMargins(0, dp(5), 0, 0);
+        card.addView(header, headerLp);
+
+        card.addView(lineScoreTeamRow(displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr), game.awayLineRuns, start, totalInnings, game.awayLineRunsTotal >= 0 ? game.awayLineRunsTotal : game.awayScore, game.awayHits, game.awayErrors, awayColor), matchWrap());
+        card.addView(lineScoreTeamRow(displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr), game.homeLineRuns, start, totalInnings, game.homeLineRunsTotal >= 0 ? game.homeLineRunsTotal : game.homeScore, game.homeHits, game.homeErrors, homeColor), matchWrap());
+
+        return card;
+    }
+
+    private LinearLayout lineScoreRowShell() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0, dp(1), 0, dp(1));
+        return row;
+    }
+
+    private LinearLayout lineScoreTeamRow(String team, ArrayList<Integer> runs, int start, int total, int r, int h, int e, int color) {
+        LinearLayout row = lineScoreRowShell();
+        addLineScoreCell(row, team, 10, color, true, dp(34), Gravity.LEFT);
+        for (int i = start; i < total; i++) {
+            int val = (runs != null && i >= 0 && i < runs.size()) ? runs.get(i) : -1;
+            addLineScoreCell(row, val < 0 ? "–" : String.valueOf(val), 9, INK_SOFT, true, 1f, Gravity.CENTER);
+        }
+        addLineScoreCell(row, r < 0 ? "–" : String.valueOf(r), 10, color, true, 1.05f, Gravity.CENTER);
+        addLineScoreCell(row, h < 0 ? "–" : String.valueOf(h), 9, INK_SOFT, true, 1.05f, Gravity.CENTER);
+        addLineScoreCell(row, e < 0 ? "–" : String.valueOf(e), 9, INK_DIM, true, 1.05f, Gravity.CENTER);
+        return row;
+    }
+
+    private void addLineScoreCell(LinearLayout row, String value, int sp, int color, boolean bold, float weight, int gravity) {
+        TextView tv = text(value, sp, color, bold);
+        tv.setGravity(gravity | Gravity.CENTER_VERTICAL);
+        tv.setSingleLine(true);
+        tv.setFontFeatureSettings("'tnum' 1");
+        row.addView(tv, new LinearLayout.LayoutParams(0, -2, weight));
+    }
+
+    private void addLineScoreCell(LinearLayout row, String value, int sp, int color, boolean bold, int widthDp, int gravity) {
+        TextView tv = text(value, sp, color, bold);
+        tv.setGravity(gravity | Gravity.CENTER_VERTICAL);
+        tv.setSingleLine(true);
+        tv.setFontFeatureSettings("'tnum' 1");
+        row.addView(tv, new LinearLayout.LayoutParams(widthDp, -2));
+    }
+
+
     private void loadWinProbability(LiveGame game, LinearLayout host, TeamPalette awayPalette, TeamPalette homePalette) {
         if (game == null || host == null) return;
         io.execute(() -> {
@@ -18744,6 +18891,17 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         LinearLayout.LayoutParams heroLp = new LinearLayout.LayoutParams(-1, dp(108)); // v246: tighter hero so the matchup menu starts higher on screen
         heroLp.setMargins(dp(12), dp(8), dp(12), dp(10));
         panel.addView(gameMatchupHeroCard(game, away, home, awayPalette, homePalette, pitchers), heroLp);
+
+        // v264: compact line score — quick box-score context without a tall vertical table.
+        if (!game.isPregame()) {
+            LinearLayout boxScoreHost = new LinearLayout(this);
+            boxScoreHost.setOrientation(LinearLayout.VERTICAL);
+            boxScoreHost.setVisibility(View.GONE);
+            LinearLayout.LayoutParams boxScoreLp = matchWrap();
+            boxScoreLp.setMargins(dp(12), 0, dp(12), dp(6));
+            panel.addView(boxScoreHost, boxScoreLp);
+            loadCompactLineScore(game, boxScoreHost, awayPalette, homePalette);
+        }
 
         // v248: win-probability section — only meaningful once a game is underway or final.
         // Fetched on a background thread and filled in when it returns; hidden until then.
@@ -23771,6 +23929,16 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         String homePitcher = "";
         int awayScore = -1;
         int homeScore = -1;
+        ArrayList<Integer> lineInnings = new ArrayList<>();
+        ArrayList<Integer> awayLineRuns = new ArrayList<>();
+        ArrayList<Integer> homeLineRuns = new ArrayList<>();
+        int awayLineRunsTotal = -1;
+        int homeLineRunsTotal = -1;
+        int awayHits = -1;
+        int homeHits = -1;
+        int awayErrors = -1;
+        int homeErrors = -1;
+        boolean lineScoreLoaded = false;
         // v249: win probability with frame-of-reference data. Each play keeps home win% plus
         // its inning, a short description, and the win-prob swing it caused — enough to draw
         // inning ticks and flag the biggest momentum plays. wpHome/wpAway are the latest values.
