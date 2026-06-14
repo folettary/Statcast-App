@@ -720,7 +720,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v256", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v257", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -8508,7 +8508,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             HashSet<String> notedFamilies = new HashSet<>();
             int shown = 0;
             for (EdgeContribution c : driving) {
-                if (shown >= 4) break;
+                if (shown >= 3) break;
                 int sharePct = totalToward > 0d ? (int) Math.round(100d * c.share / totalToward) : 0;
                 String note = whyEdgeNote(c, driving, notedFamilies);
                 body.addView(whyEdgeRow(c, nameA, nameB, sharePct, true, leaderColor, note));
@@ -8518,22 +8518,20 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 body.addView(text("No single stat stands out — the edge comes from small advantages across the board.", 12, INK_DIM, false));
             }
 
-            if (!against.isEmpty()) {
+            ArrayList<EdgeContribution> pushback = displayedPushbackContributions(h, shareMetrics, winner, 3);
+            if (!pushback.isEmpty()) {
                 TextView againstHead = text("PUSHING BACK", 10, EYEBROW, true);
                 againstHead.setLetterSpacing(0.12f);
                 LinearLayout.LayoutParams ahLp = matchWrap();
                 ahLp.setMargins(0, dp(12), 0, 0);
                 body.addView(againstHead, ahLp);
-                int shownAgainst = 0;
-                for (EdgeContribution c : against) {
-                    if (shownAgainst >= 3) break;
-                    body.addView(whyEdgeRow(c, nameA, nameB, -1, false, leaderColor, whyEdgeNote(c, against, notedFamilies)));
-                    shownAgainst++;
+                for (EdgeContribution c : pushback) {
+                    body.addView(whyEdgeRow(c, nameA, nameB, -1, false, leaderColor, whyPushbackNote(c)));
                 }
             }
         }
         // Footnote: make the lens dependency explicit, since the answer changes per lens.
-        TextView foot = text("Lens % is the base importance. Driver % is how much the stat moved this specific matchup after gap size and reliability.", 11, EYEBROW, false);
+        TextView foot = text("Rows are sorted by matchup impact. Lens labels show what the selected lens generally values.", 11, EYEBROW, false);
         foot.setPadding(0, dp(10), 0, 0);
         body.addView(foot);
 
@@ -8569,10 +8567,10 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             if ((label.contains("xwoba") || label.contains("barrel") || label.contains("hard-hit") || label.contains("hard hit") || label.contains("bb%") || label.contains("k%")) && c.winner == winner) underlyingDrivesWinner = true;
         }
         if (currentResultsPushBack && underlyingDrivesWinner) {
-            return loserName + " leads some current results, but those rows are softened when the sample is small. " + winnerName + " leads because the more trusted lens drivers point his way.";
+            return loserName + " leads some current-result stats. " + winnerName + " still leads because the bigger trusted drivers point his way.";
         }
         if (winnerHasSmallSample || loserHasSmallSample) {
-            return "Small-sample rows still show the true stat leader, but they carry less impact in the final edge.";
+            return "Small sample is already baked in: rows still show the real stat leader, but the model softens the impact.";
         }
         return "";
     }
@@ -8643,23 +8641,53 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     //  • glow/score disagreement: a big visible gap that the lens discounts (or vice-versa), and
     //  • correlated families: several stats telling one story, weighted as one (emitted once).
     private String whyEdgeNote(EdgeContribution c, ArrayList<EdgeContribution> group, HashSet<String> notedFamilies) {
-        // Correlated-family note takes priority and is emitted once per family.
+        if (c == null) return "";
+        // Emit correlated-family note once, but keep the language compact and user-facing.
         if (c.family != null && !c.family.isEmpty() && !notedFamilies.contains(c.family)) {
             int famCount = 0;
             for (EdgeContribution g : group) if (c.family.equals(g.family)) famCount++;
             if (famCount >= 2) {
                 notedFamilies.add(c.family);
-                return "part of the " + c.family + " story — related stats are grouped so they do not overcount";
+                return "Part of the " + c.family + " group; related stats are grouped.";
             }
         }
-        // Glow/score disagreement: visualStrength is how big the gap looked; share is how much it
-        // actually moved the score. When a big gap barely counts (or a modest gap counts a lot),
-        // say so — that's exactly what the card can't show.
         double look = Math.max(0d, Math.min(1d, c.visualStrength));
-        double move = Math.max(0d, Math.min(1d, c.share * 2.2d));
-        if (look >= 0.55d && move <= 0.30d) return "big gap, but lower lens weight or sample keeps it from driving the edge";
-        if (look <= 0.30d && move >= 0.45d) return "modest gap, but important to this lens";
+        if (c.weight >= 0.16d && look <= 0.34d) return "Core lens stat; even a modest gap matters.";
+        if (c.weight < 0.10d && look >= 0.60d) return "Big visible gap, but a supporting lens stat.";
         return "";
+    }
+
+    private String whyPushbackNote(EdgeContribution c) {
+        if (c == null) return "";
+        if (isCurrentResultLabel(c.label)) return "Current result pushes back, but small sample softens its impact.";
+        return "Pushes back against the edge.";
+    }
+
+    // v257: for the expanded explanation, pushback should follow the displayed stat winner,
+    // not only the model-adjusted scoring winner. That keeps OPS/wOBA visible when a low-sample
+    // player truly leads the row but the overall edge goes the other way.
+    private ArrayList<EdgeContribution> displayedPushbackContributions(HeadToHeadComparison h, ArrayList<Metric> metrics, int winner, int max) {
+        ArrayList<EdgeContribution> out = new ArrayList<>();
+        if (h == null || metrics == null || winner == 0) return out;
+        for (Metric m : metrics) {
+            StatEdgeResult edge = statEdgeForMetric(h, m);
+            if (edge == null || !edge.valid || edge.visualWinner == 0 || edge.visualWinner == winner) continue;
+            Double rawA = h.statsA == null ? null : h.statsA.get(m.key);
+            Double rawB = h.statsB == null ? null : h.statsB.get(m.key);
+            String valA = rawA == null ? "—" : format(rawA, m);
+            String valB = rawB == null ? "—" : format(rawB, m);
+            double weight = Math.max(0d, headToHeadScoringWeight(h, m));
+            EdgeContribution ec = new EdgeContribution(m.label, edge.visualWinner, contributionSortScore(h, m), valA, valB, weight, edge.visualStrength);
+            ec.family = edgeFamilyForKey(m.key);
+            out.add(ec);
+        }
+        Collections.sort(out, (a, b) -> {
+            boolean ar = isCurrentResultLabel(a.label), br = isCurrentResultLabel(b.label);
+            if (ar != br) return ar ? -1 : 1;
+            return Double.compare(b.share, a.share);
+        });
+        if (max > 0 && out.size() > max) return new ArrayList<>(out.subList(0, max));
+        return out;
     }
 
     // v43: electric-energy polish - VS arcs and winner-side stat rail sparks.
@@ -10068,7 +10096,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 float labelW = paint.measureText(m.label);
                 float badgeX = Math.min(railRight - dp(21), cX + labelW / 2f + dp(18));
                 int badgeColor = edge.contextOnly ? INK_DIM : (edge.volumeSensitive ? INK_SOFT : INK_SOFT);
-                drawShareMiniBadge(canvas, edge.badge, badgeX, labelCenterY, badgeColor);
+                drawShareMiniBadge(canvas, edge.badge.replace("SAMPLE", "SMALL"), badgeX, labelCenterY, badgeColor);
             }
 
             float half = Math.max(dp(40), (railRight - railLeft) / 2f);
@@ -11330,7 +11358,11 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         out.sampleB = !h.isTeam && sideLowSampleForEdge(h.statsB, m);
         boolean anyLowSample = out.sampleA || out.sampleB;
         out.sampleFlag = !h.isTeam && anyLowSample && (out.reliability < 0.86d || opportunityBalance < 0.70d);
-        boolean showSampleBadge = !h.isTeam && anyLowSample && (out.reliability < 0.82d || opportunityBalance < 0.58d);
+        boolean showSampleBadge = false;
+        if (!h.isTeam && anyLowSample && (out.reliability < 0.82d || opportunityBalance < 0.58d) && isCurrentResultMetric(m)) {
+            // Only badge the compact premium rows when the low-sample side is the displayed stat leader.
+            showSampleBadge = (out.visualWinner < 0 && out.sampleA) || (out.visualWinner > 0 && out.sampleB);
+        }
         out.adjustedEdge = out.rawEdge * out.reliability;
 
         double deadZone = m.isCount() ? 5.0d : (out.targetRange ? 4.0d : 3.0d);
@@ -11950,7 +11982,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     // Lens = how much the selected lens generally cares about the stat.
     // Driver = how much the stat moved this specific matchup after gap + reliability.
     private View matchupDriversGuide() {
-        TextView guide = text("Sorted by Driver · Lens % = base importance · Driver % = this matchup", 10, INK_DIM, false);
+        TextView guide = text("Sorted by matchup impact · labels show lens role", 10, INK_DIM, false);
         guide.setPadding(dp(10), dp(7), dp(10), dp(7));
         guide.setGravity(Gravity.CENTER);
         guide.setBackground(roundedStroke(Color.argb(20, 255, 255, 255), Color.argb(42, 255, 255, 255), 999, 1));
@@ -11968,22 +12000,41 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
         boolean scoring = edge == null || edge.scoring;
         double weight = scoring ? headToHeadScoringWeight(h, m) : 0d;
-        int lensPct = (int)Math.round(Math.max(0d, Math.min(1d, weight)) * 100d);
         int driverPct = scoring ? matchupDriverPercentForMetric(h, m) : 0;
+        String lensRole = scoring ? lensImportanceLabelForWeight(weight) : "Context";
+        String label = lensRole;
+        if (driverPct > 0) label += " · " + driverPct + "% driver";
+        else if (scoring) label += " · low driver";
+        line.addView(rowMetaChip(label, accent, driverPct > 0));
 
-        String lensLabel = scoring ? ("Lens " + lensPct + "%") : "Context";
-        line.addView(rowMetaChip(lensLabel, Color.rgb(129, 147, 174), false));
-
-        if (driverPct > 0) {
-            line.addView(rowMetaChip("Driver " + driverPct + "%", accent, true));
-        } else if (scoring) {
-            line.addView(rowMetaChip("Low driver", Color.rgb(129, 147, 174), false));
-        }
-
-        if (edge != null && edge.sampleFlag) {
+        if (shouldShowRowSampleCue(h, m, edge)) {
             line.addView(rowMetaChip("Sample softened", Color.rgb(244, 192, 54), true));
         }
         return line;
+    }
+
+    // v257: sample warnings should be meaningful, not wallpaper. Keep the player-level badge
+    // for overall caution, and only show row-level sample cues when the low-sample side is also
+    // the displayed leader on a familiar current-result row (the exact Samad OPS/wOBA problem).
+    private boolean shouldShowRowSampleCue(HeadToHeadComparison h, Metric m, StatEdgeResult edge) {
+        if (h == null || m == null || edge == null || h.isTeam || !edge.sampleFlag) return false;
+        if (!isCurrentResultMetric(m)) return false;
+        if (edge.visualWinner < 0 && edge.sampleA) return true;
+        if (edge.visualWinner > 0 && edge.sampleB) return true;
+        return false;
+    }
+
+    private boolean isCurrentResultMetric(Metric m) {
+        if (m == null) return false;
+        String k = safe(m.key).toLowerCase(Locale.US);
+        String l = safe(m.label).toLowerCase(Locale.US).replace(" ", "");
+        return k.equals("ops") || k.equals("woba") || k.equals("avg") || k.equals("slg") || k.equals("obp")
+                || l.equals("ops") || l.equals("woba") || l.equals("avg") || l.equals("slg") || l.equals("obp");
+    }
+
+    private boolean isCurrentResultLabel(String label) {
+        String l = safe(label).toLowerCase(Locale.US).replace(" ", "");
+        return l.equals("ops") || l.equals("woba") || l.equals("avg") || l.equals("slg") || l.equals("obp");
     }
 
     private TextView rowMetaChip(String label, int accent, boolean stronger) {
@@ -12044,7 +12095,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         summary.setPadding(0, dp(3), 0, 0);
         box.addView(summary);
 
-        TextView key = text("Core lens stats: " + topLensImportanceStats(h, 3), 11, INK_DIM, false);
+        TextView key = text("Core: " + topLensImportanceStats(h, 3), 11, INK_DIM, false);
         key.setPadding(0, dp(3), 0, 0);
         box.addView(key);
         return box;
@@ -12076,7 +12127,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         for (Metric m : metrics) {
             if (m == null || isContextOnlyMetric(m)) continue;
             int pct = (int)Math.round(Math.max(0d, Math.min(1d, headToHeadScoringWeight(h, m))) * 100d);
-            labels.add(m.label + " " + pct + "%");
+            labels.add(m.label);
             if (labels.size() >= max) break;
         }
         if (labels.isEmpty()) return "selected stats";
