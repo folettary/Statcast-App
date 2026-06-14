@@ -313,6 +313,7 @@ public class MainActivity extends Activity {
     private TextView liveFeedStatusText = null;
     private TextView liveFeedRefreshButton = null;
     private ProgressBar liveFeedRefreshSpinner = null;
+    private String liveFeedPanelMode = "line"; // line | prob
     // v167: Matchups tab is now a two-path hub: compact live games or manual create.
     private static final int MATCHUP_PATH_LIVE = 0;
     private static final int MATCHUP_PATH_CREATE = 1;
@@ -747,7 +748,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v267", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v268", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -18386,7 +18387,7 @@ private View liveGameCard(LiveGame game) {
         TextView label = text("BOX SCORE", 9, Color.rgb(244, 207, 100), true);
         label.setLetterSpacing(0.14f);
         title.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
-        TextView full = text("Full Box  ›", 8, INK, true);
+        TextView full = text("Open  ›", 8, INK, true);
         full.setGravity(Gravity.CENTER);
         full.setSingleLine(true);
         full.setPadding(dp(8), dp(3), dp(8), dp(3));
@@ -19475,27 +19476,28 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         heroLp.setMargins(dp(12), dp(8), dp(12), dp(10));
         panel.addView(gameMatchupHeroCard(game, away, home, awayPalette, homePalette, pitchers), heroLp);
 
-        // v264: compact line score — quick box-score context without a tall vertical table.
+        // v268: Live game feed is now a premium module selector so the hub does not become a
+        // long stacked feed before users reach matchup cards. Key plays stay with win probability.
         if (!game.isPregame()) {
-            LinearLayout boxScoreHost = new LinearLayout(this);
-            boxScoreHost.setOrientation(LinearLayout.VERTICAL);
-            boxScoreHost.setVisibility(View.GONE);
-            LinearLayout.LayoutParams boxScoreLp = matchWrap();
-            boxScoreLp.setMargins(dp(12), 0, dp(12), dp(6));
-            panel.addView(boxScoreHost, boxScoreLp);
-            loadCompactLineScore(game, boxScoreHost, awayPalette, homePalette);
-        }
-
-        // v248: win-probability section — only meaningful once a game is underway or final.
-        // Fetched on a background thread and filled in when it returns; hidden until then.
-        if (!game.isPregame()) {
-            LinearLayout wpHost = new LinearLayout(this);
-            wpHost.setOrientation(LinearLayout.VERTICAL);
-            wpHost.setVisibility(View.GONE);
-            LinearLayout.LayoutParams wpLp = matchWrap();
-            wpLp.setMargins(dp(12), 0, dp(12), dp(6));
-            panel.addView(wpHost, wpLp);
-            loadWinProbability(game, wpHost, awayPalette, homePalette);
+            panel.addView(liveFeedModuleSelector(game, awayPalette, homePalette), matchWrap());
+            if ("prob".equals(liveFeedPanelMode)) {
+                LinearLayout wpHost = new LinearLayout(this);
+                wpHost.setOrientation(LinearLayout.VERTICAL);
+                wpHost.setVisibility(View.GONE);
+                LinearLayout.LayoutParams wpLp = matchWrap();
+                wpLp.setMargins(dp(12), 0, dp(12), dp(6));
+                panel.addView(wpHost, wpLp);
+                loadWinProbability(game, wpHost, awayPalette, homePalette);
+            } else {
+                liveFeedPanelMode = "line";
+                LinearLayout boxScoreHost = new LinearLayout(this);
+                boxScoreHost.setOrientation(LinearLayout.VERTICAL);
+                boxScoreHost.setVisibility(View.GONE);
+                LinearLayout.LayoutParams boxScoreLp = matchWrap();
+                boxScoreLp.setMargins(dp(12), 0, dp(12), dp(6));
+                panel.addView(boxScoreHost, boxScoreLp);
+                loadCompactLineScore(game, boxScoreHost, awayPalette, homePalette);
+            }
         }
 
         panel.addView(matchupCardsCue(accent), matchWrap());
@@ -19608,6 +19610,101 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         return chip;
     }
 
+    private View liveFeedModuleSelector(LiveGame game, TeamPalette awayPalette, TeamPalette homePalette) {
+        int accent = mixColor(awayPalette.primary, homePalette.primary, 0.50f);
+
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        wrap.setPadding(dp(12), dp(10), dp(12), dp(10));
+        wrap.setBackground(roundedGradientStroke(new int[] {
+                Color.argb(226, 5, 10, 18),
+                mixColor(accent, Color.rgb(6, 10, 18), 0.78f),
+                Color.argb(226, 5, 10, 18)
+        }, 20, Color.argb(92, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
+        LinearLayout.LayoutParams wrapLp = matchWrap();
+        wrapLp.setMargins(dp(12), 0, dp(12), dp(8));
+        wrap.setLayoutParams(wrapLp);
+
+        LinearLayout titleRow = new LinearLayout(this);
+        titleRow.setOrientation(LinearLayout.HORIZONTAL);
+        titleRow.setGravity(Gravity.CENTER_VERTICAL);
+        TextView title = text("GAME FEED", 10, Color.rgb(244, 207, 100), true);
+        title.setLetterSpacing(0.16f);
+        titleRow.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+
+        TextView hint = text("One live view at a time", 8, INK_DIM, true);
+        hint.setGravity(Gravity.RIGHT);
+        hint.setSingleLine(true);
+        titleRow.addView(hint);
+        wrap.addView(titleRow, matchWrap());
+
+        LinearLayout tabs = new LinearLayout(this);
+        tabs.setOrientation(LinearLayout.HORIZONTAL);
+        tabs.setGravity(Gravity.CENTER_VERTICAL);
+        tabs.setPadding(0, dp(8), 0, 0);
+
+        tabs.addView(liveFeedModePill("Line", "line", game, awayPalette, homePalette), new LinearLayout.LayoutParams(0, dp(38), 1));
+        LinearLayout.LayoutParams probLp = new LinearLayout.LayoutParams(0, dp(38), 1.25f);
+        probLp.setMargins(dp(7), 0, 0, 0);
+        tabs.addView(liveFeedModePill("Win Prob + Plays", "prob", game, awayPalette, homePalette), probLp);
+        LinearLayout.LayoutParams fullLp = new LinearLayout.LayoutParams(0, dp(38), 0.95f);
+        fullLp.setMargins(dp(7), 0, 0, 0);
+        tabs.addView(liveFeedFullBoxPill(game, awayPalette, homePalette), fullLp);
+        wrap.addView(tabs, matchWrap());
+
+        TextView sub = text("Key plays are paired with the win-probability chart so the dots and descriptions tell the same story.",
+                9, INK_DIM, false);
+        sub.setPadding(0, dp(7), 0, 0);
+        sub.setSingleLine(false);
+        sub.setMaxLines(2);
+        wrap.addView(sub, matchWrap());
+
+        return wrap;
+    }
+
+    private TextView liveFeedModePill(String label, String mode, LiveGame game, TeamPalette awayPalette, TeamPalette homePalette) {
+        boolean selected = mode.equals(liveFeedPanelMode);
+        int accent = mixColor(awayPalette.primary, homePalette.primary, 0.50f);
+        TextView pill = text(label, 9, selected ? Color.WHITE : INK_SOFT, true);
+        pill.setGravity(Gravity.CENTER);
+        pill.setSingleLine(true);
+        pill.setEllipsize(TextUtils.TruncateAt.END);
+        pill.setLetterSpacing(0.03f);
+        pill.setPadding(dp(5), 0, dp(5), 0);
+        pill.setBackground(selected
+                ? roundedGradientStroke(new int[] {
+                    Color.argb(120, Color.red(accent), Color.green(accent), Color.blue(accent)),
+                    Color.argb(62, 255, 255, 255)
+                }, 999, Color.argb(126, Color.red(accent), Color.green(accent), Color.blue(accent)), 1)
+                : roundedStroke(Color.argb(42, 255, 255, 255), Color.argb(56, 255, 255, 255), 999, 1));
+        pill.setForeground(ripple(true));
+        pill.setClickable(true);
+        pill.setOnClickListener(v -> setLiveFeedPanelMode(mode, game));
+        return pill;
+    }
+
+    private TextView liveFeedFullBoxPill(LiveGame game, TeamPalette awayPalette, TeamPalette homePalette) {
+        TextView pill = text("Full Box", 9, INK_SOFT, true);
+        pill.setGravity(Gravity.CENTER);
+        pill.setSingleLine(true);
+        pill.setLetterSpacing(0.03f);
+        pill.setPadding(dp(5), 0, dp(5), 0);
+        pill.setBackground(roundedStroke(Color.argb(42, 255, 255, 255), Color.argb(70, 255, 255, 255), 999, 1));
+        pill.setForeground(ripple(true));
+        pill.setClickable(true);
+        pill.setOnClickListener(v -> showFullBoxScoreSheet(game, awayPalette, homePalette));
+        return pill;
+    }
+
+    private void setLiveFeedPanelMode(String mode, LiveGame game) {
+        if (game == null || mode == null || mode.equals(liveFeedPanelMode)) return;
+        liveFeedPanelMode = mode;
+        final int keepY = mainScroll == null ? 0 : mainScroll.getScrollY();
+        renderLiveGameMenu(game);
+        if (mainScroll != null) mainScroll.post(() -> mainScroll.scrollTo(0, keepY));
+    }
+
+
     private View matchupCardsCue(int accent) {
         LinearLayout cue = new LinearLayout(this);
         cue.setOrientation(LinearLayout.HORIZONTAL);
@@ -19620,15 +19717,15 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
 
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
-        TextView title = text("MATCHUP CARDS BELOW", 9, Color.rgb(244, 207, 100), true);
+        TextView title = text("MATCHUP CARDS", 10, Color.rgb(244, 207, 100), true);
         title.setLetterSpacing(0.14f);
         copy.addView(title, matchWrap());
-        TextView sub = text("Team edges, starters, bullpens, and key hitters are next.", 10, INK_DIM, false);
+        TextView sub = text("Choose a card to compare team edges, starters, bullpens, or hitters.", 10, INK_DIM, false);
         sub.setPadding(0, dp(2), 0, 0);
         copy.addView(sub, matchWrap());
         cue.addView(copy, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView arrow = text("↓", 18, INK, true);
+        TextView arrow = text("START", 9, INK, true);
         arrow.setGravity(Gravity.CENTER);
         cue.addView(arrow, new LinearLayout.LayoutParams(dp(26), -2));
         return cue;
