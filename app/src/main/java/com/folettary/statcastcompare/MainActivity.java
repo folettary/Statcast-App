@@ -507,6 +507,13 @@ public class MainActivity extends Activity {
         // back to Home while browsing a profile or matchup.
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
         getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        // v258: targetSdk 35 can draw behind system bars on some Android builds. Keep content
+        // below the status bar so scrolled cards never sit under the phone icons.
+        getWindow().setStatusBarColor(Color.rgb(4, 8, 15));
+        getWindow().setNavigationBarColor(Color.rgb(4, 8, 15));
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            getWindow().setDecorFitsSystemWindows(true);
+        }
         isDark = false; // v28 uses one polished light theme.
         initColors();
         long maxKb = Runtime.getRuntime().maxMemory() / 1024;
@@ -671,6 +678,14 @@ public class MainActivity extends Activity {
         LinearLayout screen = new LinearLayout(this);
         screen.setOrientation(LinearLayout.VERTICAL);
         screen.setBackgroundColor(Color.rgb(4, 8, 15));
+        // v258: apply top inset to the whole screen, not just the initial root padding. This
+        // prevents mid-scroll sections like Why This Edge from sliding under the status bar.
+        screen.setOnApplyWindowInsetsListener((v, insets) -> {
+            int top = Math.max(0, insets.getSystemWindowInsetTop());
+            v.setPadding(0, top, 0, 0);
+            return insets;
+        });
+        screen.requestApplyInsets();
 
         ScrollView scroll = new ScrollView(this);
         mainScroll = scroll;
@@ -682,6 +697,7 @@ public class MainActivity extends Activity {
         scroll.addView(root, new ScrollView.LayoutParams(-1, -2));
         screen.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
         setContentView(screen);
+        screen.post(() -> screen.requestApplyInsets());
 
         LinearLayout appBar = new LinearLayout(this);
         appBar.setOrientation(LinearLayout.HORIZONTAL);
@@ -720,7 +736,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v257", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v258", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -8525,8 +8541,11 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 LinearLayout.LayoutParams ahLp = matchWrap();
                 ahLp.setMargins(0, dp(12), 0, 0);
                 body.addView(againstHead, ahLp);
+                boolean currentResultPushbackNoteShown = false;
                 for (EdgeContribution c : pushback) {
-                    body.addView(whyEdgeRow(c, nameA, nameB, -1, false, leaderColor, whyPushbackNote(c)));
+                    String note = whyPushbackNote(c, currentResultPushbackNoteShown);
+                    if (isCurrentResultLabel(c.label) && note != null && !note.isEmpty()) currentResultPushbackNoteShown = true;
+                    body.addView(whyEdgeRow(c, nameA, nameB, -1, false, leaderColor, note));
                 }
             }
         }
@@ -8657,9 +8676,12 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         return "";
     }
 
-    private String whyPushbackNote(EdgeContribution c) {
+    private String whyPushbackNote(EdgeContribution c, boolean currentResultNoteAlreadyShown) {
         if (c == null) return "";
-        if (isCurrentResultLabel(c.label)) return "Current result pushes back, but small sample softens its impact.";
+        if (isCurrentResultLabel(c.label)) {
+            if (currentResultNoteAlreadyShown) return "";
+            return "Current results push back; sample softens their impact.";
+        }
         return "Pushes back against the edge.";
     }
 
@@ -10094,9 +10116,13 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 paint.setTextSize(labelSize);
                 paint.setTypeface(tfBold);
                 float labelW = paint.measureText(m.label);
-                float badgeX = Math.min(railRight - dp(21), cX + labelW / 2f + dp(18));
+                String badgeLabel = edge.badge.toUpperCase(Locale.US).contains("SAMPLE") ? "SMALL SAMPLE" : edge.badge;
+                paint.setTextSize(dp(6.4f));
+                paint.setTypeface(tfBold);
+                float badgeW = Math.max(dp(16), paint.measureText(badgeLabel) + dp(8));
+                float badgeX = Math.min(railRight - badgeW - dp(2), cX + labelW / 2f + dp(18));
                 int badgeColor = edge.contextOnly ? INK_DIM : (edge.volumeSensitive ? INK_SOFT : INK_SOFT);
-                drawShareMiniBadge(canvas, edge.badge.replace("SAMPLE", "SMALL"), badgeX, labelCenterY, badgeColor);
+                drawShareMiniBadge(canvas, badgeLabel, Math.max(railLeft + dp(4), badgeX), labelCenterY, badgeColor);
             }
 
             float half = Math.max(dp(40), (railRight - railLeft) / 2f);
@@ -12013,7 +12039,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         return line;
     }
 
-    // v257: sample warnings should be meaningful, not wallpaper. Keep the player-level badge
+    // v257/v258: sample warnings should be meaningful, not wallpaper. Keep the player-level badge
     // for overall caution, and only show row-level sample cues when the low-sample side is also
     // the displayed leader on a familiar current-result row (the exact Samad OPS/wOBA problem).
     private boolean shouldShowRowSampleCue(HeadToHeadComparison h, Metric m, StatEdgeResult edge) {
