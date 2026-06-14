@@ -211,6 +211,9 @@ public class MainActivity extends Activity {
     private LinearLayout homeBox;
     private LinearLayout homeFavoritesBox;
     private LinearLayout homeLiveMatchupsBox;
+    // v251: which day the live-matchups slate is showing. 0 = today, -1 = yesterday, etc.
+    // Lets the user step back to previous days' games (and forward again up to today).
+    private int liveDayOffset = 0;
     private FrameLayout homeMatchupPreview;
     private FrameLayout homeCircleAFrame;
     private FrameLayout homeCircleBFrame;
@@ -717,7 +720,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v250", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v252", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -1442,6 +1445,55 @@ public class MainActivity extends Activity {
                 main.post(() -> renderHomeLiveMatchupsError(e.getMessage()));
             }
         });
+    }
+
+    // v251: prev/next day stepper for the live slate. "‹" always steps back; "›" returns toward
+    // today and is dimmed/disabled once we're on today (we don't browse future dates here).
+    private LinearLayout buildLiveDayNav() {
+        LinearLayout nav = new LinearLayout(this);
+        nav.setOrientation(LinearLayout.HORIZONTAL);
+        nav.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams navLp = matchWrap();
+        navLp.setMargins(0, 0, 0, dp(8));
+
+        TextView prev = dayNavButton("‹  Prev");
+        prev.setOnClickListener(v -> shiftLiveDay(-1));
+        nav.addView(prev);
+
+        TextView label = text(liveDayLabel(), 11, INK, true);
+        label.setGravity(Gravity.CENTER);
+        label.setLetterSpacing(0.04f);
+        nav.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
+
+        TextView next = dayNavButton("Next  ›");
+        next.setOnClickListener(v -> shiftLiveDay(1));
+        nav.addView(next);
+        return nav;
+    }
+
+    private TextView dayNavButton(String labelText) {
+        TextView b = text(labelText, 10, Color.WHITE, true);
+        b.setGravity(Gravity.CENTER);
+        b.setPadding(dp(12), dp(6), dp(12), dp(6));
+        b.setBackground(roundedStroke(Color.argb(96, 8, 13, 22), Color.argb(82, 255, 255, 255), 999, 1));
+        makePremiumButton(b, 999, true, 0.94f);
+        return b;
+    }
+
+    // v252: a human label for the currently-shown live day (past, today, or future).
+    private String liveDayLabel() {
+        if (liveDayOffset == 0) return "Today";
+        if (liveDayOffset == -1) return "Yesterday";
+        if (liveDayOffset == 1) return "Tomorrow";
+        Calendar cal = Calendar.getInstance();
+        cal.add(Calendar.DAY_OF_YEAR, liveDayOffset);
+        return new SimpleDateFormat("EEE, MMM d", Locale.US).format(cal.getTime());
+    }
+
+    // v252: change the shown day (past or future) and reload the slate.
+    private void shiftLiveDay(int deltaDays) {
+        liveDayOffset += deltaDays;
+        renderLiveMatchupsPanel(); // reloads the Matchup-tab slate into standingsBox
     }
 
     private void renderHomeLiveMatchupsGames(ArrayList<LiveGame> games) {
@@ -17616,7 +17668,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         LinearLayout titleRow = new LinearLayout(this);
         titleRow.setOrientation(LinearLayout.HORIZONTAL);
         titleRow.setGravity(Gravity.CENTER_VERTICAL);
-        TextView title = text("TODAY'S LIVE MATCHUPS", 11, INK, true);
+        TextView title = text(liveDayOffset == 0 ? "TODAY'S LIVE MATCHUPS" : "LIVE MATCHUPS", 11, INK, true);
         title.setLetterSpacing(0.08f);
         titleRow.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
         TextView slateChip = text("MLB slate", 9, Color.rgb(120, 220, 207), true);
@@ -17634,7 +17686,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         loadingRow.setOrientation(LinearLayout.VERTICAL);
         loadingRow.setPadding(dp(10), dp(10), dp(10), dp(10));
         loadingRow.setBackground(roundedStroke(Color.argb(76, 8, 13, 22), Color.argb(52, 255, 255, 255), 14, 1));
-        TextView loadingText = text("Loading today's games…", 12, INK_SOFT, true);
+        TextView loadingText = text("Loading " + (liveDayOffset == 0 ? "today's" : liveDayLabel() + "'s") + " games…", 12, INK_SOFT, true);
         loadingText.setGravity(Gravity.CENTER);
         loadingRow.addView(loadingText, matchWrap());
         panel.addView(loadingRow, matchWrap());
@@ -17665,7 +17717,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         LinearLayout titleRow = new LinearLayout(this);
         titleRow.setOrientation(LinearLayout.HORIZONTAL);
         titleRow.setGravity(Gravity.CENTER_VERTICAL);
-        TextView title = text("TODAY'S LIVE MATCHUPS", 11, INK, true);
+        TextView title = text(liveDayOffset == 0 ? "TODAY'S LIVE MATCHUPS" : "LIVE MATCHUPS", 11, INK, true);
         title.setLetterSpacing(0.08f);
         titleRow.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
         TextView count = text((games == null || games.isEmpty()) ? "Off day" : games.size() + " games", 9, Color.rgb(120, 220, 207), true);
@@ -17679,8 +17731,10 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         sub.setPadding(0, dp(5), 0, dp(7));
         panel.addView(sub, matchWrap());
 
+        panel.addView(buildLiveDayNav(), matchWrap());
+
         if (games == null || games.isEmpty()) {
-            TextView empty = text("No MLB games found for today.", 12, INK_SOFT, true);
+            TextView empty = text("No MLB games found for " + (liveDayOffset == 0 ? "today" : liveDayLabel()) + ".", 12, INK_SOFT, true);
             empty.setGravity(Gravity.CENTER);
             empty.setPadding(dp(10), dp(12), dp(10), dp(12));
             empty.setBackground(roundedStroke(Color.argb(76, 8, 13, 22), Color.argb(52, 255, 255, 255), 14, 1));
@@ -17722,10 +17776,11 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(dp(12), dp(11), dp(12), dp(12));
         panel.setBackground(roundedGradientStroke(new int[] { Color.rgb(5, 9, 17), Color.rgb(10, 18, 32) }, 20, Color.argb(82, 255, 255, 255), 1));
-        TextView title = text("TODAY'S LIVE MATCHUPS", 11, INK, true);
+        TextView title = text(liveDayOffset == 0 ? "TODAY'S LIVE MATCHUPS" : "LIVE MATCHUPS", 11, INK, true);
         title.setLetterSpacing(0.08f);
         panel.addView(title, matchWrap());
-        TextView body = text("Could not load today's MLB slate. " + safe(message), 11, INK_SOFT, false);
+        panel.addView(buildLiveDayNav(), matchWrap());
+        TextView body = text("Could not load " + (liveDayOffset == 0 ? "today's" : liveDayLabel() + "'s") + " MLB slate. " + safe(message), 11, INK_SOFT, false);
         body.setPadding(0, dp(7), 0, 0);
         panel.addView(body, matchWrap());
         standingsBox.addView(panel, matchWrap());
@@ -18282,11 +18337,15 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         panel.addView(gameMenuTile("Bullpens", "Reliever edge", "Freshness + quality by available arms", Color.rgb(120, 220, 207), v -> openLiveBullpenMatchup(game)), bullpenLp);
 
         addMatchupHubSection(panel, "GAME MATCHUPS", "Today-specific");
+        // v252: the two pitcher-dependent matchups need both probable starters. Until they're
+        // posted (typically future games), dim them and mark "Pitchers TBD" rather than opening
+        // an empty comparison. The season-based tiles above work for any date.
+        boolean probablesKnown = !safe(game.awayPitcher).isEmpty() && !safe(game.homePitcher).isEmpty();
         LinearLayout gameRow = matchupHubTileRow(panel);
-        gameRow.addView(gameMenuTile("Starting Pitchers", pitchers, "Probable starter duel", Color.rgb(247, 197, 77), v -> openLivePitcherMatchup(game)), new LinearLayout.LayoutParams(0, -1, 1));
+        gameRow.addView(gameMenuTile("Starting Pitchers", probablesKnown ? pitchers : "Pitchers TBD", "Probable starter duel", Color.rgb(247, 197, 77), v -> openLivePitcherMatchup(game), probablesKnown, "Probable starters not posted yet"), new LinearLayout.LayoutParams(0, -1, 1));
         LinearLayout.LayoutParams ovsLp = new LinearLayout.LayoutParams(0, -1, 1);
         ovsLp.setMargins(dp(7), 0, 0, 0);
-        gameRow.addView(gameMenuTile("Offense vs SP", "Lineups vs probable starters", "Fixed model built for this game", Color.rgb(255, 155, 92), v -> openLiveOffenseVsStarterMatchup(game)), ovsLp);
+        gameRow.addView(gameMenuTile("Offense vs SP", probablesKnown ? "Lineups vs probable starters" : "Pitchers TBD", "Fixed model built for this game", Color.rgb(255, 155, 92), v -> openLiveOffenseVsStarterMatchup(game), probablesKnown, "Probable starters not posted yet"), ovsLp);
 
         addMatchupHubSection(panel, "PLAYER SPOTLIGHTS", "Top bats · recent form");
         LinearLayout hitterRow = matchupHubTileRow(panel);
@@ -18387,15 +18446,26 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
     }
 
     private LinearLayout gameMenuTile(String title, String value, String caption, int accent, View.OnClickListener click) {
+        return gameMenuTile(title, value, caption, accent, click, true, null);
+    }
+
+    // v252: enabled-aware variant. When enabled is false (e.g. probable starters not yet posted),
+    // the tile is dimmed, non-tappable, and shows disabledNote in place of the caption so it's
+    // clear the matchup isn't available yet rather than broken.
+    private LinearLayout gameMenuTile(String title, String value, String caption, int accent, View.OnClickListener click, boolean enabled, String disabledNote) {
         LinearLayout tile = new LinearLayout(this);
         tile.setOrientation(LinearLayout.VERTICAL);
         tile.setGravity(Gravity.CENTER_VERTICAL);
         tile.setMinimumHeight(0);
         tile.setPadding(dp(9), dp(7), dp(9), dp(7));
-        tile.setClickable(true);
-        tile.setForeground(ripple(true, 20f));
-        tile.setOnClickListener(click);
-        attachPremiumPress(tile, 0.975f);
+        if (enabled) {
+            tile.setClickable(true);
+            tile.setForeground(ripple(true, 20f));
+            tile.setOnClickListener(click);
+            attachPremiumPress(tile, 0.975f);
+        } else {
+            tile.setClickable(false);
+        }
         tile.setBackground(roundedGradientStroke(new int[] {
                 Color.argb(230, 5, 10, 18),
                 mixColor(accent, Color.rgb(6, 10, 18), 0.76f),
@@ -18409,9 +18479,18 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         t.setSingleLine(true);
         top.addView(t, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView arrow = text("›", 16, softColor(accent, 0.08f), true);
-        arrow.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
-        top.addView(arrow, new LinearLayout.LayoutParams(dp(18), -2));
+        if (enabled) {
+            TextView arrow = text("›", 16, softColor(accent, 0.08f), true);
+            arrow.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+            top.addView(arrow, new LinearLayout.LayoutParams(dp(18), -2));
+        } else {
+            // A small "TBD" pill in place of the chevron signals the locked state at a glance.
+            TextView lock = text("TBD", 8, Color.rgb(176, 190, 212), true);
+            lock.setGravity(Gravity.CENTER);
+            lock.setPadding(dp(6), dp(2), dp(6), dp(2));
+            lock.setBackground(roundedStroke(Color.argb(60, 8, 13, 22), Color.argb(80, 200, 214, 236), 999, 1));
+            top.addView(lock);
+        }
         tile.addView(top, matchWrap());
 
         TextView v = text(value, 9, INK, true);
@@ -18420,7 +18499,8 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         v.setPadding(0, dp(5), 0, 0);
         tile.addView(v, matchWrap());
 
-        TextView c = text(caption, 8, Color.rgb(146, 164, 188), false);
+        TextView c = text(enabled || disabledNote == null ? caption : disabledNote, 8,
+                enabled ? Color.rgb(146, 164, 188) : Color.rgb(244, 192, 54), false);
         c.setSingleLine(true);
         c.setEllipsize(TextUtils.TruncateAt.END);
         c.setPadding(0, dp(3), 0, 0);
@@ -18435,6 +18515,8 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         LinearLayout.LayoutParams railLp = new LinearLayout.LayoutParams(-1, dp(2));
         railLp.setMargins(0, dp(8), 0, 0);
         tile.addView(rail, railLp);
+
+        if (!enabled) tile.setAlpha(0.5f); // dim the whole tile so "locked" reads immediately
         return tile;
     }
 
@@ -22285,8 +22367,11 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
     }
 
     private ArrayList<LiveGame> fetchTodayLiveGames() throws Exception {
-        String today = new SimpleDateFormat("MM/dd/yyyy", Locale.US).format(new Date());
-        String url = "https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=" + URLEncoder.encode(today, "UTF-8") + "&hydrate=probablePitcher";
+        // v252: fetch the slate for the selected day (today + liveDayOffset), past or future.
+        Calendar cal = Calendar.getInstance();
+        cal.add(Calendar.DAY_OF_YEAR, liveDayOffset);
+        String dateStr = new SimpleDateFormat("MM/dd/yyyy", Locale.US).format(cal.getTime());
+        String url = "https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=" + URLEncoder.encode(dateStr, "UTF-8") + "&hydrate=probablePitcher";
         JSONObject root = new JSONObject(httpGet(url));
         ArrayList<LiveGame> out = new ArrayList<>();
         JSONArray dates = root.optJSONArray("dates");
