@@ -736,7 +736,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v261", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v263", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -1612,6 +1612,35 @@ public class MainActivity extends Activity {
         return abbr;
     }
 
+
+    // v263: On the Home page, a start time is only useful before first pitch.
+    // Once a game is live/final, show the actual score in the matchup headline and keep
+    // the status pill focused on state ("In Progress" / "Final").
+    private boolean homeLiveGameShouldShowScore(LiveGame game) {
+        return game != null && !game.isPregame() && game.awayScore >= 0 && game.homeScore >= 0;
+    }
+
+    private String homeLiveGameStatusText(LiveGame game) {
+        if (game == null) return "MLB";
+        String status = game.statusLabel();
+        if (game.isPregame()) {
+            String time = safe(game.timeLabel());
+            return status + (time.isEmpty() ? "" : " · " + time);
+        }
+        return status;
+    }
+
+    private String homeLiveGameHeadline(LiveGame game) {
+        if (game == null) return "Live Matchups";
+        String away = displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr);
+        String home = displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr);
+        if (homeLiveGameShouldShowScore(game)) {
+            return away + " " + game.awayScoreText() + " @ " + home + " " + game.homeScoreText();
+        }
+        return away + " @ " + home;
+    }
+
+
 private View homeFeaturedLiveGameCard(LiveGame game) {
     Team away = game == null ? null : teamForLiveGame(game.awayTeamId, game.awayName, game.awayAbbr);
     Team home = game == null ? null : teamForLiveGame(game.homeTeamId, game.homeName, game.homeAbbr);
@@ -1631,7 +1660,7 @@ private View homeFeaturedLiveGameCard(LiveGame game) {
     TextView label = text("FEATURED GAME", 9, INK, true);
     label.setLetterSpacing(0.11f);
     top.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
-    String statusText = game == null ? "MLB" : game.statusLabel() + (safe(game.timeLabel()).isEmpty() ? "" : " · " + game.timeLabel());
+    String statusText = homeLiveGameStatusText(game);
     TextView status = text(statusText, 9, game == null ? Color.rgb(120, 220, 207) : statusColor(game), true);
     status.setGravity(Gravity.CENTER);
     status.setSingleLine(true);
@@ -1642,7 +1671,7 @@ private View homeFeaturedLiveGameCard(LiveGame game) {
     top.addView(status);
     content.addView(top, matchWrap());
 
-    String title = game == null ? "Live Matchups" : displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr) + " @ " + displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr);
+    String title = homeLiveGameHeadline(game);
     TextView gameTitle = text(title, 27, Color.WHITE, true);
     gameTitle.setGravity(Gravity.CENTER);
     gameTitle.setLetterSpacing(0.02f);
@@ -1684,12 +1713,12 @@ private View homeMiniLiveGameTile(LiveGame game) {
     content.setPadding(dp(9), dp(8), dp(9), dp(8));
     tile.addView(content, new FrameLayout.LayoutParams(-1, -1));
 
-    TextView matchup = text(displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr) + " @ " + displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr), 14, Color.WHITE, true);
+    TextView matchup = text(homeLiveGameHeadline(game), homeLiveGameShouldShowScore(game) ? 13 : 14, Color.WHITE, true);
     matchup.setGravity(Gravity.CENTER);
     matchup.setSingleLine(true);
     content.addView(matchup, matchWrap());
 
-    TextView status = text(game.statusLabel() + (safe(game.timeLabel()).isEmpty() ? "" : " · " + game.timeLabel()), 8, statusColor(game), true);
+    TextView status = text(homeLiveGameStatusText(game), 8, statusColor(game), true);
     status.setGravity(Gravity.CENTER);
     status.setSingleLine(true);
     status.setEllipsize(TextUtils.TruncateAt.END);
@@ -8680,7 +8709,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         if (c == null) return "";
         if (isCurrentResultLabel(c.label)) {
             if (currentResultNoteAlreadyShown) return "";
-            return "Current result pushes back, but small sample counts it less.";
+            return "Current result pushes back, but small sample gives it less weight.";
         }
         return "Pushes back against the edge.";
     }
@@ -9672,7 +9701,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             paint.clearShadowLayer();
 
             if (sideHasSmallSampleForCard(h, left, shareMetrics)) {
-                drawSampleChip(canvas, "SMALL SAMPLE", cx, y + dp(71), readableTeamColor(palette.primary, palette.secondary, left));
+                drawSampleChip(canvas, "SMALL SAMPLE", cx, y + dp(67), readableTeamColor(palette.primary, palette.secondary, left));
             }
         }
 
@@ -10122,9 +10151,12 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 int badgeColor = edge.contextOnly ? INK_DIM : (edge.volumeSensitive ? INK_SOFT : INK_SOFT);
 
                 if (sampleBadge && (edge.sampleA || edge.sampleB)) {
-                    float badgeCenterY = valueCenterY;
-                    float leftBadgeXAligned = Math.max(panel.left + dp(8), Math.min(railLeft - badgeW - dp(6), leftValueX + valueSlotWidth + dp(4)));
-                    float rightBadgeXAligned = Math.min(panel.right - badgeW - dp(8), Math.max(railRight + dp(6), rightValueX - valueSlotWidth - badgeW - dp(4)));
+                    // v262: keep sample badges in one stable side lane. They sit below the
+                    // low-sample side's value and above the rail, instead of drifting beside
+                    // each value and colliding with decimals.
+                    float badgeCenterY = top + rowH * 0.625f;
+                    float leftBadgeXAligned = panel.left + dp(30);
+                    float rightBadgeXAligned = panel.right - dp(30) - badgeW;
                     if (edge.sampleA) {
                         drawShareMiniBadge(canvas, badgeLabel, leftBadgeXAligned, badgeCenterY, badgeColor);
                     }
@@ -10295,19 +10327,19 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
         private float shareMiniBadgeWidth(String label) {
             if (label == null || label.isEmpty()) return dp(16);
-            paint.setTextSize(dp(6.4f));
+            paint.setTextSize(dp(5.8f));
             paint.setTypeface(tfBold);
-            return Math.max(dp(16), paint.measureText(label) + dp(8));
+            return Math.max(dp(16), paint.measureText(label) + dp(7));
         }
 
         private void drawShareMiniBadge(Canvas canvas, String label, float x, float centerY, int color) {
             if (label == null || label.isEmpty()) return;
-            paint.setTextSize(dp(6.4f));
+            paint.setTextSize(dp(5.8f));
             paint.setTypeface(tfBold);
             paint.setTextAlign(Paint.Align.CENTER);
             float textW = paint.measureText(label);
-            float w = Math.max(dp(16), textW + dp(8));
-            float h = dp(10);
+            float w = Math.max(dp(16), textW + dp(7));
+            float h = dp(9);
             RectF r = new RectF(x, centerY - h / 2f, x + w, centerY + h / 2f);
             paint.setStyle(Paint.Style.FILL);
             paint.setShader(null);
@@ -10317,7 +10349,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             strokePaint.setStrokeWidth(dp(0.7f));
             strokePaint.setColor(Color.argb(96, Color.red(color), Color.green(color), Color.blue(color)));
             canvas.drawRoundRect(r, h / 2f, h / 2f, strokePaint);
-            drawText(canvas, label, r.centerX(), centeredTextBaseline(r.centerY(), dp(6.4f), true), dp(6.4f), color, true, Paint.Align.CENTER, 0.06f);
+            drawText(canvas, label, r.centerX(), centeredTextBaseline(r.centerY(), dp(5.8f), true), dp(5.8f), color, true, Paint.Align.CENTER, 0.06f);
         }
 
         private boolean isPadresPalette(TeamPalette palette) {
