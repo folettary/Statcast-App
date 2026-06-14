@@ -310,6 +310,9 @@ public class MainActivity extends Activity {
     private boolean liveRefreshInFlight = false;
     private float livePullRefreshStartY = 0f;
     private long lastLivePullRefreshMs = 0L;
+    private TextView liveFeedStatusText = null;
+    private TextView liveFeedRefreshButton = null;
+    private ProgressBar liveFeedRefreshSpinner = null;
     // v167: Matchups tab is now a two-path hub: compact live games or manual create.
     private static final int MATCHUP_PATH_LIVE = 0;
     private static final int MATCHUP_PATH_CREATE = 1;
@@ -744,7 +747,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v266", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v267", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -18479,16 +18482,16 @@ private View liveGameCard(LiveGame game) {
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.HORIZONTAL);
         top.setGravity(Gravity.CENTER_VERTICAL);
-        TextView title = text("FULL BOX SCORE", 11, Color.rgb(244, 207, 100), true);
+        TextView title = text("FULL BOX SCORE", 13, Color.rgb(244, 207, 100), true);
         title.setLetterSpacing(0.12f);
         top.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
-        TextView score = text(homeLiveGameHeadline(game), 11, INK, true);
+        TextView score = text(homeLiveGameHeadline(game), 12, INK, true);
         score.setGravity(Gravity.RIGHT);
         score.setSingleLine(true);
         top.addView(score);
         sheet.addView(top, matchWrap());
 
-        TextView hint = text("Scroll within this panel. The game hub stays behind it.", 9, INK_DIM, false);
+        TextView hint = text("Scroll for batting, pitching, and traditional box-score notes.", 10, INK_DIM, false);
         hint.setPadding(0, dp(4), 0, dp(8));
         sheet.addView(hint, matchWrap());
 
@@ -18513,8 +18516,8 @@ private View liveGameCard(LiveGame game) {
             android.view.Window w = dialog.getWindow();
             if (w != null) {
                 w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
-                w.setLayout((int)(getResources().getDisplayMetrics().widthPixels * 0.94f),
-                        (int)(getResources().getDisplayMetrics().heightPixels * 0.82f));
+                w.setLayout((int)(getResources().getDisplayMetrics().widthPixels * 0.96f),
+                        (int)(getResources().getDisplayMetrics().heightPixels * 0.88f));
             }
         });
         dialog.show();
@@ -18526,20 +18529,20 @@ private View liveGameCard(LiveGame game) {
         section.setPadding(dp(10), dp(9), dp(10), dp(9));
         section.setBackground(roundedStroke(Color.argb(34, Color.red(accent), Color.green(accent), Color.blue(accent)), Color.argb(82, Color.red(accent), Color.green(accent), Color.blue(accent)), 15, 1));
 
-        TextView team = text(abbr, 13, accent, true);
+        TextView team = text(abbr, 16, accent, true);
         team.setLetterSpacing(0.08f);
         section.addView(team, matchWrap());
 
         ArrayList<JSONObject> batters = boxScorePlayers(teamBox, "batting");
         if (!batters.isEmpty()) {
-            TextView bh = text("BATTING", 9, INK_SOFT, true);
+            TextView bh = text("BATTING", 10, INK_SOFT, true);
             bh.setLetterSpacing(0.12f);
             bh.setPadding(0, dp(7), 0, dp(2));
             section.addView(bh, matchWrap());
             section.addView(fullBoxHeader(new String[]{"Player", "AB", "R", "H", "RBI", "BB", "K"}, accent), matchWrap());
             int shown = 0;
             for (JSONObject player : batters) {
-                if (shown >= 11) break; // keep the sheet compact
+                if (shown >= 12) break; // readable but still contained
                 section.addView(fullBoxBattingRow(player, accent), matchWrap());
                 shown++;
             }
@@ -18547,7 +18550,7 @@ private View liveGameCard(LiveGame game) {
 
         ArrayList<JSONObject> pitchers = boxScorePlayers(teamBox, "pitching");
         if (!pitchers.isEmpty()) {
-            TextView ph = text("PITCHING", 9, INK_SOFT, true);
+            TextView ph = text("PITCHING", 10, INK_SOFT, true);
             ph.setLetterSpacing(0.12f);
             ph.setPadding(0, dp(8), 0, dp(2));
             section.addView(ph, matchWrap());
@@ -18559,8 +18562,108 @@ private View liveGameCard(LiveGame game) {
                 shown++;
             }
         }
+
+        View notes = fullBoxNotablesSection(teamBox, accent);
+        if (notes != null) {
+            LinearLayout.LayoutParams notesLp = matchWrap();
+            notesLp.setMargins(0, dp(8), 0, 0);
+            section.addView(notes, notesLp);
+        }
         return section;
     }
+
+
+    private View fullBoxNotablesSection(JSONObject teamBox, int accent) {
+        ArrayList<String> notes = fullBoxNotableLines(teamBox);
+        if (notes.isEmpty()) return null;
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(8), dp(7), dp(8), dp(7));
+        box.setBackground(roundedStroke(Color.argb(28, 255, 255, 255), Color.argb(42, 255, 255, 255), 12, 1));
+
+        TextView title = text("NOTES", 9, Color.rgb(244, 207, 100), true);
+        title.setLetterSpacing(0.12f);
+        box.addView(title, matchWrap());
+
+        for (String line : notes) {
+            TextView tv = text(line, 10, INK_SOFT, false);
+            tv.setPadding(0, dp(3), 0, 0);
+            box.addView(tv, matchWrap());
+        }
+        return box;
+    }
+
+    private ArrayList<String> fullBoxNotableLines(JSONObject teamBox) {
+        ArrayList<String> lines = new ArrayList<>();
+        if (teamBox == null) return lines;
+        ArrayList<JSONObject> batters = boxScorePlayers(teamBox, "batting");
+        ArrayList<JSONObject> pitchers = boxScorePlayers(teamBox, "pitching");
+
+        addIfNotEmpty(lines, "HR", playerStatList(batters, "batting", "homeRuns", 6));
+        addIfNotEmpty(lines, "2B", playerStatList(batters, "batting", "doubles", 6));
+        addIfNotEmpty(lines, "3B", playerStatList(batters, "batting", "triples", 4));
+        addIfNotEmpty(lines, "SB", playerStatList(batters, "batting", "stolenBases", 5));
+        addIfNotEmpty(lines, "CS", playerStatList(batters, "batting", "caughtStealing", 4));
+
+        String pitchCounts = pitchCountList(pitchers, 6);
+        if (!pitchCounts.isEmpty()) lines.add("Pitches-strikes: " + pitchCounts);
+
+        JSONObject teamStats = teamBox.optJSONObject("teamStats");
+        JSONObject batting = teamStats == null ? null : teamStats.optJSONObject("batting");
+        if (batting != null) {
+            int lob = readNullableInt(batting, "leftOnBase");
+            if (lob >= 0) lines.add("LOB: " + lob);
+        }
+        return lines;
+    }
+
+    private void addIfNotEmpty(ArrayList<String> lines, String label, String value) {
+        if (value != null && !value.isEmpty()) lines.add(label + ": " + value);
+    }
+
+    private String playerStatList(ArrayList<JSONObject> players, String type, String key, int max) {
+        if (players == null || players.isEmpty()) return "";
+        ArrayList<String> parts = new ArrayList<>();
+        for (JSONObject player : players) {
+            JSONObject person = player.optJSONObject("person");
+            JSONObject stats = player.optJSONObject("stats");
+            JSONObject stat = stats == null ? null : stats.optJSONObject(type);
+            int val = readNullableInt(stat, key);
+            if (val <= 0) continue;
+            String name = boxScoreShortName(person == null ? "" : person.optString("fullName", ""));
+            parts.add(name + (val > 1 ? " " + val : ""));
+            if (parts.size() >= max) break;
+        }
+        return joinShort(parts, "; ");
+    }
+
+    private String pitchCountList(ArrayList<JSONObject> pitchers, int max) {
+        if (pitchers == null || pitchers.isEmpty()) return "";
+        ArrayList<String> parts = new ArrayList<>();
+        for (JSONObject player : pitchers) {
+            JSONObject person = player.optJSONObject("person");
+            JSONObject stats = player.optJSONObject("stats");
+            JSONObject p = stats == null ? null : stats.optJSONObject("pitching");
+            int pitches = readNullableInt(p, "numberOfPitches");
+            int strikes = readNullableInt(p, "strikes");
+            if (pitches <= 0) continue;
+            String name = boxScoreShortName(person == null ? "" : person.optString("fullName", ""));
+            parts.add(name + " " + pitches + (strikes >= 0 ? "-" + strikes : ""));
+            if (parts.size() >= max) break;
+        }
+        return joinShort(parts, "; ");
+    }
+
+    private String joinShort(ArrayList<String> parts, String sep) {
+        if (parts == null || parts.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < parts.size(); i++) {
+            if (i > 0) sb.append(sep);
+            sb.append(parts.get(i));
+        }
+        return sb.toString();
+    }
+
 
     private ArrayList<JSONObject> boxScorePlayers(JSONObject teamBox, String statType) {
         ArrayList<JSONObject> out = new ArrayList<>();
@@ -18588,7 +18691,7 @@ private View liveGameCard(LiveGame game) {
     }
 
     private View fullBoxHeader(String[] cols, int accent) {
-        return fullBoxRow(cols, 8, INK_DIM, true, accent, true);
+        return fullBoxRow(cols, 9, INK_DIM, true, accent, true);
     }
 
     private View fullBoxBattingRow(JSONObject player, int accent) {
@@ -18604,7 +18707,7 @@ private View liveGameCard(LiveGame game) {
                 statInt(b, "rbi"),
                 statInt(b, "baseOnBalls"),
                 statInt(b, "strikeOuts")
-        }, 9, INK_SOFT, false, accent, false);
+        }, 10, INK_SOFT, false, accent, false);
     }
 
     private View fullBoxPitchingRow(JSONObject player, int accent) {
@@ -18620,15 +18723,15 @@ private View liveGameCard(LiveGame game) {
                 statInt(p, "earnedRuns"),
                 statInt(p, "baseOnBalls"),
                 statInt(p, "strikeOuts")
-        }, 9, INK_SOFT, false, accent, false);
+        }, 10, INK_SOFT, false, accent, false);
     }
 
     private View fullBoxRow(String[] values, int sp, int color, boolean bold, int accent, boolean header) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(0, dp(2), 0, dp(2));
-        int[] widths = new int[]{0, 26, 24, 24, 32, 28, 24};
+        row.setPadding(0, dp(3), 0, dp(3));
+        int[] widths = new int[]{0, 30, 27, 27, 34, 30, 27};
         for (int i = 0; i < values.length; i++) {
             TextView tv = text(values[i], sp, i == 0 ? (header ? INK_DIM : INK) : color, bold || i == 0);
             tv.setSingleLine(true);
@@ -19136,13 +19239,24 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         lp.setMargins(dp(12), dp(8), dp(12), dp(8));
         bar.setLayoutParams(lp);
 
-        TextView copy = text(game != null && game.isPregame()
-                ? "Game feed will update once first pitch starts."
-                : "Pull down from the top to refresh scores, box score, win probability, and key plays.",
-                10, INK_DIM, false);
+        TextView copy = text(liveRefreshInFlight
+                ? "Refreshing live feed…"
+                : (game != null && game.isPregame()
+                    ? "Game feed will update once first pitch starts."
+                    : "Pull down from the top to refresh scores, box score, win probability, and key plays."),
+                10, liveRefreshInFlight ? Color.rgb(82, 226, 176) : INK_DIM, false);
         copy.setSingleLine(false);
         copy.setMaxLines(2);
+        liveFeedStatusText = copy;
         bar.addView(copy, new LinearLayout.LayoutParams(0, -2, 1));
+
+        ProgressBar spinner = new ProgressBar(this, null, android.R.attr.progressBarStyleSmall);
+        spinner.setIndeterminate(true);
+        spinner.setVisibility(liveRefreshInFlight ? View.VISIBLE : View.GONE);
+        liveFeedRefreshSpinner = spinner;
+        LinearLayout.LayoutParams spinLp = new LinearLayout.LayoutParams(dp(30), dp(30));
+        spinLp.setMargins(dp(8), 0, dp(2), 0);
+        bar.addView(spinner, spinLp);
 
         TextView refresh = text("↻", 15, INK, true);
         refresh.setGravity(Gravity.CENTER);
@@ -19150,16 +19264,33 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         refresh.setBackground(roundedStroke(Color.argb(38, 255, 255, 255), Color.argb(70, 255, 255, 255), 999, 1));
         refresh.setForeground(ripple(true));
         refresh.setClickable(true);
+        refresh.setEnabled(!liveRefreshInFlight);
+        refresh.setAlpha(liveRefreshInFlight ? 0.42f : 1f);
         refresh.setOnClickListener(v -> refreshLiveGameMenu(game));
+        liveFeedRefreshButton = refresh;
         bar.addView(refresh);
         return bar;
+    }
+
+    private void setLiveRefreshUiState(boolean refreshing) {
+        if (liveFeedStatusText != null) {
+            liveFeedStatusText.setText(refreshing ? "Refreshing live feed…" : "Pull down from the top to refresh scores, box score, win probability, and key plays.");
+            liveFeedStatusText.setTextColor(refreshing ? Color.rgb(82, 226, 176) : INK_DIM);
+        }
+        if (liveFeedRefreshSpinner != null) liveFeedRefreshSpinner.setVisibility(refreshing ? View.VISIBLE : View.GONE);
+        if (liveFeedRefreshButton != null) {
+            liveFeedRefreshButton.setEnabled(!refreshing);
+            liveFeedRefreshButton.animate().alpha(refreshing ? 0.42f : 1f).setDuration(120).start();
+        }
     }
 
 
     private void refreshLiveGameMenu(LiveGame game) {
         if (game == null || liveRefreshInFlight) return;
         liveRefreshInFlight = true;
-        Toast.makeText(this, "Refreshing live feed…", Toast.LENGTH_SHORT).show();
+        final int keepY = mainScroll == null ? 0 : mainScroll.getScrollY();
+        setLiveRefreshUiState(true);
+        if (standingsBox != null) standingsBox.animate().alpha(0.86f).setDuration(120).start();
         io.execute(() -> {
             try {
                 LiveGame fresh = fetchUpdatedLiveGame(game);
@@ -19177,10 +19308,18 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
                 main.post(() -> {
                     liveRefreshInFlight = false;
                     renderLiveGameMenu(game);
+                    if (mainScroll != null) mainScroll.post(() -> mainScroll.scrollTo(0, keepY));
+                    if (standingsBox != null) {
+                        standingsBox.setAlpha(0.88f);
+                        standingsBox.animate().alpha(1f).setDuration(180).start();
+                    }
+                    setLiveRefreshUiState(false);
                 });
             } catch (Exception e) {
                 main.post(() -> {
                     liveRefreshInFlight = false;
+                    if (standingsBox != null) standingsBox.animate().alpha(1f).setDuration(120).start();
+                    setLiveRefreshUiState(false);
                     Toast.makeText(this, "Could not refresh live feed", Toast.LENGTH_SHORT).show();
                 });
             }
@@ -19359,6 +19498,8 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
             loadWinProbability(game, wpHost, awayPalette, homePalette);
         }
 
+        panel.addView(matchupCardsCue(accent), matchWrap());
+
         LinearLayout lensHeader = new LinearLayout(this);
         lensHeader.setOrientation(LinearLayout.HORIZONTAL);
         lensHeader.setGravity(Gravity.CENTER_VERTICAL);
@@ -19466,6 +19607,33 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         }, 999, Color.argb(86, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
         return chip;
     }
+
+    private View matchupCardsCue(int accent) {
+        LinearLayout cue = new LinearLayout(this);
+        cue.setOrientation(LinearLayout.HORIZONTAL);
+        cue.setGravity(Gravity.CENTER_VERTICAL);
+        cue.setPadding(dp(12), dp(9), dp(12), dp(9));
+        cue.setBackground(roundedStroke(Color.argb(30, Color.red(accent), Color.green(accent), Color.blue(accent)), Color.argb(80, Color.red(accent), Color.green(accent), Color.blue(accent)), 18, 1));
+        LinearLayout.LayoutParams cueLp = matchWrap();
+        cueLp.setMargins(dp(12), dp(4), dp(12), dp(8));
+        cue.setLayoutParams(cueLp);
+
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
+        TextView title = text("MATCHUP CARDS BELOW", 9, Color.rgb(244, 207, 100), true);
+        title.setLetterSpacing(0.14f);
+        copy.addView(title, matchWrap());
+        TextView sub = text("Team edges, starters, bullpens, and key hitters are next.", 10, INK_DIM, false);
+        sub.setPadding(0, dp(2), 0, 0);
+        copy.addView(sub, matchWrap());
+        cue.addView(copy, new LinearLayout.LayoutParams(0, -2, 1));
+
+        TextView arrow = text("↓", 18, INK, true);
+        arrow.setGravity(Gravity.CENTER);
+        cue.addView(arrow, new LinearLayout.LayoutParams(dp(26), -2));
+        return cue;
+    }
+
 
     private void addMatchupHubSection(LinearLayout panel, String title, String subtitle) {
         LinearLayout row = new LinearLayout(this);
