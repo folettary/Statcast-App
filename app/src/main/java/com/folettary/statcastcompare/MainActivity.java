@@ -540,7 +540,6 @@ public class MainActivity extends Activity {
     }
 
     @Override
-    @Override
     protected void onPause() {
         super.onPause();
         stopLiveTrackerPolling(); // v273: don't poll the live feed while backgrounded
@@ -770,7 +769,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v273", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v274", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
