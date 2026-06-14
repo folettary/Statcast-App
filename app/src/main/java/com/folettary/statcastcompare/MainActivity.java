@@ -736,7 +736,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v260", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v261", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -8551,7 +8551,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         }
         // Footnote: make the lens dependency explicit, since the answer changes per lens.
         TextView foot = text("Rows are sorted by matchup impact. Lens labels show what the selected lens generally values.", 11, EYEBROW, false);
-        foot.setPadding(0, dp(10), 0, 0);
+        foot.setPadding(0, dp(10), 0, dp(18));
         body.addView(foot);
 
         card.addView(body, bodyLp);
@@ -8589,7 +8589,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             return loserName + " leads some current-result stats. " + winnerName + " still leads because the bigger trusted drivers point his way.";
         }
         if (winnerHasSmallSample || loserHasSmallSample) {
-            return "Small sample is already baked in: rows still show the real stat leader, but the model softens the impact.";
+            return "Small sample is already accounted for. Rows still show who leads the stat, but those rows count less in the final edge.";
         }
         return "";
     }
@@ -8667,7 +8667,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             for (EdgeContribution g : group) if (c.family.equals(g.family)) famCount++;
             if (famCount >= 2) {
                 notedFamilies.add(c.family);
-                return "This overlaps with similar lens stats, so they do not all stack fully.";
+                return "This overlaps with similar lens stats, so they are capped to avoid double-counting.";
             }
         }
         double look = Math.max(0d, Math.min(1d, c.visualStrength));
@@ -8680,7 +8680,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         if (c == null) return "";
         if (isCurrentResultLabel(c.label)) {
             if (currentResultNoteAlreadyShown) return "";
-            return "Current result pushes back, but small sample softens it.";
+            return "Current result pushes back, but small sample counts it less.";
         }
         return "Pushes back against the edge.";
     }
@@ -9672,7 +9672,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             paint.clearShadowLayer();
 
             if (sideHasSmallSampleForCard(h, left, shareMetrics)) {
-                drawSampleChip(canvas, "SMALL SAMPLE", cx, y + dp(78), readableTeamColor(palette.primary, palette.secondary, left));
+                drawSampleChip(canvas, "SMALL SAMPLE", cx, y + dp(71), readableTeamColor(palette.primary, palette.secondary, left));
             }
         }
 
@@ -10117,26 +10117,19 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 paint.setTypeface(tfBold);
                 float labelW = paint.measureText(m.label);
                 boolean sampleBadge = edge.badge.toUpperCase(Locale.US).contains("SAMPLE");
-                String badgeLabel = sampleBadge ? "SAMPLE" : edge.badge;
+                String badgeLabel = sampleBadge ? "SMALL SAMPLE" : edge.badge;
                 float badgeW = shareMiniBadgeWidth(badgeLabel);
                 int badgeColor = edge.contextOnly ? INK_DIM : (edge.volumeSensitive ? INK_SOFT : INK_SOFT);
 
                 if (sampleBadge && (edge.sampleA || edge.sampleB)) {
-                    paint.setTextSize(valueSize);
-                    paint.setTypeface(tfBold);
-                    float leftTextW = paint.measureText(leftText);
-                    float rightTextW = paint.measureText(rightText);
+                    float badgeCenterY = valueCenterY;
+                    float leftBadgeXAligned = Math.max(panel.left + dp(8), Math.min(railLeft - badgeW - dp(6), leftValueX + valueSlotWidth + dp(4)));
+                    float rightBadgeXAligned = Math.min(panel.right - badgeW - dp(8), Math.max(railRight + dp(6), rightValueX - valueSlotWidth - badgeW - dp(4)));
                     if (edge.sampleA) {
-                        float leftBadgeX = leftValueX + leftTextW + dp(6);
-                        leftBadgeX = Math.min(leftBadgeX, cX - badgeW - dp(8));
-                        leftBadgeX = Math.max(panel.left + dp(8), leftBadgeX);
-                        drawShareMiniBadge(canvas, badgeLabel, leftBadgeX, labelCenterY, badgeColor);
+                        drawShareMiniBadge(canvas, badgeLabel, leftBadgeXAligned, badgeCenterY, badgeColor);
                     }
                     if (edge.sampleB) {
-                        float rightBadgeX = rightValueX - rightTextW - badgeW - dp(6);
-                        rightBadgeX = Math.max(rightBadgeX, cX + dp(8));
-                        rightBadgeX = Math.min(panel.right - badgeW - dp(8), rightBadgeX);
-                        drawShareMiniBadge(canvas, badgeLabel, rightBadgeX, labelCenterY, badgeColor);
+                        drawShareMiniBadge(canvas, badgeLabel, rightBadgeXAligned, badgeCenterY, badgeColor);
                     }
                 } else {
                     float badgeX = Math.min(railRight - badgeW - dp(2), cX + labelW / 2f + dp(18));
