@@ -720,7 +720,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v252", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v253", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -17911,14 +17911,9 @@ private View liveGameCard(LiveGame game) {
         if (bigPlay != null && !bigPlay.isEmpty()) {
             TextView swing = text("● " + bigPlay, 11, Color.rgb(244, 192, 54), false);
             swing.setPadding(0, dp(8), 0, 0);
-            swing.setMaxLines(2);
-            swing.setEllipsize(TextUtils.TruncateAt.END);
+            // v253: no line cap / ellipsis — let the play description wrap so it isn't cut off.
             card.addView(swing);
         }
-
-        TextView foot = text("The line rises into " + awayAbbr + "'s half as their odds climb and drops into " + homeAbbr + "'s half as theirs do. Gold dots mark the biggest momentum swings; numbers along the bottom are innings.", 11, EYEBROW, false);
-        foot.setPadding(0, dp(6), 0, 0);
-        card.addView(foot);
         return card;
     }
 
@@ -18070,11 +18065,6 @@ private View liveGameCard(LiveGame game) {
                 ys[i] = midY - ((awayAdv - 50f) / 50f) * halfH;
             }
 
-            // Build the trend path.
-            android.graphics.Path line = new android.graphics.Path();
-            line.moveTo(xs[0], ys[0]);
-            for (int i = 1; i < n; i++) line.lineTo(xs[i], ys[i]);
-
             // Fill between the line and the center, segment by segment, tinted by which side the
             // segment sits on (above center = away color, below = home color), low opacity.
             for (int i = 0; i < n - 1; i++) {
@@ -18091,15 +18081,32 @@ private View liveGameCard(LiveGame game) {
                 canvas.drawPath(seg, p);
             }
 
-            // The trendline, colored by the current leader.
-            float lastHomeWin = Math.max(0f, Math.min(100f, homeSeries.get(n - 1)));
-            int lineColor = (100f - lastHomeWin) >= 50f ? awayColor : homeColor;
+            // v253: the line itself is colored by who's ahead at each point — away color above
+            // the midline, home color below — so the color swaps as the advantage changes. Any
+            // segment that crosses the midline is split at the crossing so each side is correct.
             p.setStyle(Paint.Style.STROKE);
             p.setStrokeWidth(dp(2.4f));
             p.setStrokeJoin(Paint.Join.ROUND);
             p.setStrokeCap(Paint.Cap.ROUND);
-            p.setColor(Color.argb(240, Color.red(lineColor), Color.green(lineColor), Color.blue(lineColor)));
-            canvas.drawPath(line, p);
+            for (int i = 0; i < n - 1; i++) {
+                float x1 = xs[i], y1 = ys[i], x2 = xs[i + 1], y2 = ys[i + 1];
+                boolean above1 = y1 <= midY, above2 = y2 <= midY;
+                if (above1 == above2) {
+                    int c = above1 ? awayColor : homeColor;
+                    p.setColor(Color.argb(240, Color.red(c), Color.green(c), Color.blue(c)));
+                    canvas.drawLine(x1, y1, x2, y2, p);
+                } else {
+                    // Crosses the midline — find the crossing x and draw two correctly-colored halves.
+                    float t = (midY - y1) / (y2 - y1); // 0..1 along the segment
+                    float xc = x1 + (x2 - x1) * t;
+                    int c1 = above1 ? awayColor : homeColor;
+                    int c2 = above2 ? awayColor : homeColor;
+                    p.setColor(Color.argb(240, Color.red(c1), Color.green(c1), Color.blue(c1)));
+                    canvas.drawLine(x1, y1, xc, midY, p);
+                    p.setColor(Color.argb(240, Color.red(c2), Color.green(c2), Color.blue(c2)));
+                    canvas.drawLine(xc, midY, x2, y2, p);
+                }
+            }
 
             // Big-swing markers (top 3, >= 15%).
             if (swings.size() == n) {
@@ -18117,11 +18124,12 @@ private View liveGameCard(LiveGame game) {
                 }
             }
 
-            // Endpoint dot.
+            // Endpoint dot — colored by whoever leads at the final point.
+            int endColor = ys[n - 1] <= midY ? awayColor : homeColor;
             p.setStyle(Paint.Style.FILL);
             p.setColor(Color.WHITE);
             canvas.drawCircle(xs[n - 1], ys[n - 1], dp(3.2f), p);
-            p.setColor(Color.argb(255, Color.red(lineColor), Color.green(lineColor), Color.blue(lineColor)));
+            p.setColor(Color.argb(255, Color.red(endColor), Color.green(endColor), Color.blue(endColor)));
             canvas.drawCircle(xs[n - 1], ys[n - 1], dp(2f), p);
         }
 
