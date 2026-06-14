@@ -717,7 +717,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v247", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v248", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -15162,6 +15162,8 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         // pulls a team's full season schedule this way — so they get 6h instead of re-downloading
         // a ~season-long JSON on every open. Only the live slate (date=today) stays at 60s.
         if (urlString.contains("/schedule")) return urlString.contains("startDate=") ? 6L * 60L * 60L * 1000L : 60L * 1000L;
+        // v248: live win-probability changes every play — keep it fresh like the live slate.
+        if (urlString.contains("/winProbability")) return 60L * 1000L;
         if (urlString.contains("/roster/") || urlString.contains("/sports/1/players") || urlString.contains("/teams?")) return 12L * 60L * 60L * 1000L;
         // v175: the current-season check only matched "year=" (Savant's param), but every
         // statsapi URL uses "season=" — so current-season standard leaderboards, team stats,
@@ -17741,9 +17743,10 @@ private View liveGameCard(LiveGame game) {
 
     LinearLayout content = new LinearLayout(this);
     content.setOrientation(LinearLayout.VERTICAL);
-    content.setPadding(dp(10), dp(8), dp(10), dp(8));
+    content.setPadding(dp(12), dp(9), dp(12), dp(10));
     card.addView(content, new FrameLayout.LayoutParams(-1, -1));
 
+    // Top row: status pill (left) + start time (right, pre-game only).
     LinearLayout top = new LinearLayout(this);
     top.setOrientation(LinearLayout.HORIZONTAL);
     top.setGravity(Gravity.CENTER_VERTICAL);
@@ -17753,52 +17756,38 @@ private View liveGameCard(LiveGame game) {
     status.setPadding(dp(7), dp(3), dp(7), dp(3));
     status.setBackground(roundedStroke(Color.argb(94, 8, 13, 22), Color.argb(120, Color.red(statusColor), Color.green(statusColor), Color.blue(statusColor)), 12, 1));
     top.addView(status);
-    // v246: the start time only means something before first pitch. Once a game is live or
-    // final it's noise (and ambiguous next to the score), so show it only pre-game.
-    if (game.isPregame()) {
-        TextView time = text(game.timeLabel(), 9, Color.argb(232, 247, 249, 252), true);
-        time.setGravity(Gravity.RIGHT);
-        time.setSingleLine(true);
-        time.setShadowLayer(dp(1.8f), 0, dp(1), Color.argb(150, 0, 0, 0));
-        top.addView(time, new LinearLayout.LayoutParams(0, -2, 1));
-    } else {
-        // v246 fix: an empty View with WRAP_CONTENT height + weight measured to the parent's
-        // full height during the weight pass, collapsing the score/pitchers/CTA off the tile.
-        // Use a fixed zero-height spacer so the status pill stays left-aligned without it.
-        View spacer = new View(this);
-        top.addView(spacer, new LinearLayout.LayoutParams(0, dp(1), 1));
-    }
+    TextView time = text(game.isPregame() ? game.timeLabel() : "", 9, Color.argb(232, 247, 249, 252), true);
+    time.setGravity(Gravity.RIGHT);
+    time.setSingleLine(true);
+    time.setShadowLayer(dp(1.8f), 0, dp(1), Color.argb(150, 0, 0, 0));
+    top.addView(time, new LinearLayout.LayoutParams(0, -2, 1));
     content.addView(top, matchWrap());
 
+    // Two-column score row: away (left) · @ · home (right), each with team-color underline.
+    LinearLayout scoreRow = new LinearLayout(this);
+    scoreRow.setOrientation(LinearLayout.HORIZONTAL);
+    scoreRow.setGravity(Gravity.CENTER_VERTICAL);
+    scoreRow.setPadding(0, dp(8), 0, 0);
     String awayAbbr = displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr);
     String homeAbbr = displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr);
-    String scoreLine = awayAbbr + " " + game.awayScoreText() + "  @  " + homeAbbr + " " + game.homeScoreText();
-    // v246: dialed back from 20sp — it was crowding the tile and two-digit scores clipped the
-    // right edge. 18sp with a lower autosize floor keeps "NYY 3 @ TOR 11" fully on one line.
-    TextView matchup = text(scoreLine, 18, Color.WHITE, true);
-    matchup.setGravity(Gravity.CENTER);
-    matchup.setSingleLine(true);
-    matchup.setLetterSpacing(0.01f);
-    matchup.setPadding(dp(2), dp(11), dp(2), 0);
-    matchup.setShadowLayer(dp(2.2f), 0, dp(1), Color.argb(185, 0, 0, 0));
-    applyAutoSize(matchup, 12, 18);
-    content.addView(matchup, matchWrap());
+    int awayColor = ensureReadableColor(awayPalette.primary, 150);
+    int homeColor = ensureReadableColor(homePalette.primary, 150);
+    scoreRow.addView(liveScoreColumn(awayAbbr, game.awayPitcher, game.awayScoreText(), awayColor, Gravity.LEFT),
+            new LinearLayout.LayoutParams(0, -2, 1));
+    TextView at = text("@", 12, Color.argb(150, 236, 242, 248), true);
+    at.setGravity(Gravity.CENTER);
+    at.setPadding(dp(6), 0, dp(6), 0);
+    scoreRow.addView(at);
+    scoreRow.addView(liveScoreColumn(homeAbbr, game.homePitcher, game.homeScoreText(), homeColor, Gravity.RIGHT),
+            new LinearLayout.LayoutParams(0, -2, 1));
+    content.addView(scoreRow, matchWrap());
 
-    String pitcherLine = (safe(game.awayPitcher).isEmpty() ? "TBD" : lastNameOnly(game.awayPitcher))
-            + " / " + (safe(game.homePitcher).isEmpty() ? "TBD" : lastNameOnly(game.homePitcher));
-    TextView pitchers = text(pitcherLine, 10, Color.argb(226, 236, 242, 248), true);
-    pitchers.setGravity(Gravity.CENTER);
-    pitchers.setSingleLine(true);
-    pitchers.setEllipsize(TextUtils.TruncateAt.END);
-    pitchers.setPadding(0, dp(4), 0, 0);
-    pitchers.setShadowLayer(dp(1.5f), 0, dp(1), Color.argb(145, 0, 0, 0));
-    content.addView(pitchers, matchWrap());
-
+    // CTA
     LinearLayout ctaRow = new LinearLayout(this);
     ctaRow.setOrientation(LinearLayout.HORIZONTAL);
     ctaRow.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
     ctaRow.setPadding(0, dp(8), 0, 0);
-    TextView hint = text("Matchups  ›", 9, Color.WHITE, true);
+    TextView hint = text("Choose matchups  ›", 9, Color.WHITE, true);
     hint.setGravity(Gravity.CENTER);
     hint.setLetterSpacing(0.03f);
     hint.setPadding(dp(9), dp(4), dp(9), dp(4));
@@ -17807,6 +17796,171 @@ private View liveGameCard(LiveGame game) {
     ctaRow.addView(hint);
     content.addView(ctaRow, matchWrap());
     return card;
+}
+
+// v248: trimmed per-side column for the live tile — abbreviation + score on one line, a
+// team-color underline, then the pitcher. (Dropped the full team name, which the user noted
+// was redundant with the abbreviation and the watermark logo.)
+    private void loadWinProbability(LiveGame game, LinearLayout host, TeamPalette awayPalette, TeamPalette homePalette) {
+        if (game == null || host == null) return;
+        io.execute(() -> {
+            fetchWinProbabilityInto(game);
+            main.post(() -> {
+                if (host.getParent() == null) return; // navigated away
+                if (!game.wpLoaded || game.wpHome < 0f) { host.setVisibility(View.GONE); return; }
+                host.removeAllViews();
+                host.addView(winProbabilityCard(game, awayPalette, homePalette), matchWrap());
+                host.setVisibility(View.VISIBLE);
+            });
+        });
+    }
+
+    private View winProbabilityCard(LiveGame game, TeamPalette awayPalette, TeamPalette homePalette) {
+        int awayColor = ensureReadableColor(awayPalette.primary, 150);
+        int homeColor = ensureReadableColor(homePalette.primary, 150);
+        String awayAbbr = displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr);
+        String homeAbbr = displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr);
+        boolean isFinal = "Final".equals(game.statusLabel());
+
+        LinearLayout card = verticalCard(18, new int[] { Color.rgb(9, 14, 24), Color.rgb(11, 17, 30) });
+        card.setPadding(dp(14), dp(12), dp(14), dp(12));
+
+        TextView eyebrow = text(isFinal ? "WIN PROBABILITY · FINAL" : "WIN PROBABILITY · LIVE", 10, Color.rgb(244, 192, 54), true);
+        eyebrow.setLetterSpacing(0.12f);
+        card.addView(eyebrow);
+
+        int homePct = Math.round(game.wpHome);
+        int awayPct = Math.max(0, 100 - homePct);
+        LinearLayout split = new LinearLayout(this);
+        split.setOrientation(LinearLayout.HORIZONTAL);
+        split.setGravity(Gravity.CENTER_VERTICAL);
+        split.setPadding(0, dp(8), 0, dp(8));
+        TextView awayWp = text(awayAbbr + "  " + awayPct + "%", 17, awayColor, true);
+        split.addView(awayWp, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView homeWp = text(homePct + "%  " + homeAbbr, 17, homeColor, true);
+        homeWp.setGravity(Gravity.RIGHT);
+        split.addView(homeWp, new LinearLayout.LayoutParams(0, -2, 1));
+        card.addView(split, matchWrap());
+
+        WinProbChartView chart = new WinProbChartView(this, game.wpHomeSeries, homeColor, awayColor);
+        LinearLayout.LayoutParams chartLp = new LinearLayout.LayoutParams(-1, dp(96));
+        chartLp.topMargin = dp(2);
+        chart.setLayoutParams(chartLp);
+        card.addView(chart);
+
+        TextView foot = text("Home win% over the course of the game. Above the midline favors " + homeAbbr + ", below favors " + awayAbbr + ".", 11, EYEBROW, false);
+        foot.setPadding(0, dp(8), 0, 0);
+        card.addView(foot);
+        return card;
+    }
+
+    // v248: a compact trendline of home win% (0..100). Fills toward the home color above the
+    // 50% midline and the away color below it, so momentum reads at a glance. No external libs.
+    private class WinProbChartView extends View {
+        private final java.util.ArrayList<Float> series;
+        private final int homeColor, awayColor;
+        private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        WinProbChartView(android.content.Context ctx, java.util.ArrayList<Float> series, int homeColor, int awayColor) {
+            super(ctx);
+            this.series = series == null ? new java.util.ArrayList<>() : series;
+            this.homeColor = homeColor;
+            this.awayColor = awayColor;
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            float w = getWidth(), h = getHeight();
+            if (w <= 0 || h <= 0) return;
+            float padL = dp(2), padR = dp(2), padV = dp(6);
+            float plotW = w - padL - padR, plotH = h - padV * 2;
+            float midY = padV + plotH / 2f;
+
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeWidth(dp(1));
+            p.setColor(Color.argb(70, 200, 214, 236));
+            canvas.drawLine(padL, midY, w - padR, midY, p);
+
+            int n = series.size();
+            if (n < 2) {
+                p.setStyle(Paint.Style.FILL);
+                p.setColor(Color.argb(150, 190, 205, 226));
+                p.setTextSize(dp(11));
+                canvas.drawText("Building win-probability trend…", padL, midY - dp(6), p);
+                return;
+            }
+
+            android.graphics.Path line = new android.graphics.Path();
+            float stepX = plotW / (n - 1);
+            for (int i = 0; i < n; i++) {
+                float val = Math.max(0f, Math.min(100f, series.get(i)));
+                float x = padL + stepX * i;
+                float y = padV + plotH * (1f - val / 100f);
+                if (i == 0) line.moveTo(x, y); else line.lineTo(x, y);
+            }
+
+            float lastVal = Math.max(0f, Math.min(100f, series.get(n - 1)));
+            int fillColor = lastVal >= 50f ? homeColor : awayColor;
+            android.graphics.Path fill = new android.graphics.Path(line);
+            fill.lineTo(padL + plotW, midY);
+            fill.lineTo(padL, midY);
+            fill.close();
+            p.setStyle(Paint.Style.FILL);
+            p.setColor(Color.argb(46, Color.red(fillColor), Color.green(fillColor), Color.blue(fillColor)));
+            canvas.drawPath(fill, p);
+
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeWidth(dp(2.4f));
+            p.setStrokeJoin(Paint.Join.ROUND);
+            p.setStrokeCap(Paint.Cap.ROUND);
+            p.setColor(Color.argb(235, Color.red(fillColor), Color.green(fillColor), Color.blue(fillColor)));
+            canvas.drawPath(line, p);
+
+            float ex = padL + plotW, ey = padV + plotH * (1f - lastVal / 100f);
+            p.setStyle(Paint.Style.FILL);
+            p.setColor(Color.WHITE);
+            canvas.drawCircle(ex, ey, dp(3.2f), p);
+            p.setColor(Color.argb(255, Color.red(fillColor), Color.green(fillColor), Color.blue(fillColor)));
+            canvas.drawCircle(ex, ey, dp(2f), p);
+        }
+    }
+
+private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, int color, int gravity) {
+    LinearLayout col = new LinearLayout(this);
+    col.setOrientation(LinearLayout.VERTICAL);
+    col.setGravity(gravity == Gravity.RIGHT ? Gravity.RIGHT : Gravity.LEFT);
+
+    LinearLayout line = new LinearLayout(this);
+    line.setOrientation(LinearLayout.HORIZONTAL);
+    line.setGravity(Gravity.CENTER_VERTICAL | (gravity == Gravity.RIGHT ? Gravity.RIGHT : Gravity.LEFT));
+    TextView ab = text(safe(abbr).toUpperCase(Locale.US), 18, Color.WHITE, true);
+    ab.setShadowLayer(dp(2), 0, dp(1), Color.argb(180, 0, 0, 0));
+    TextView sc = text(safe(score), 18, Color.WHITE, true);
+    sc.setFontFeatureSettings("'tnum' 1");
+    sc.setPadding(dp(8), 0, dp(8), 0);
+    sc.setShadowLayer(dp(2), 0, dp(1), Color.argb(180, 0, 0, 0));
+    if (gravity == Gravity.RIGHT) { line.addView(sc); line.addView(ab); }
+    else { line.addView(ab); line.addView(sc); }
+    col.addView(line, matchWrap());
+
+    View accent = new View(this);
+    GradientDrawable accentBg = new GradientDrawable();
+    accentBg.setColor(Color.argb(220, Color.red(color), Color.green(color), Color.blue(color)));
+    accentBg.setCornerRadius(dp(999));
+    accent.setBackground(accentBg);
+    LinearLayout.LayoutParams accentLp = new LinearLayout.LayoutParams(dp(26), dp(2));
+    accentLp.topMargin = dp(3);
+    if (gravity == Gravity.RIGHT) accentLp.gravity = Gravity.RIGHT;
+    col.addView(accent, accentLp);
+
+    TextView pit = text(safe(pitcher).isEmpty() ? "TBD" : lastNameOnly(pitcher), 9, Color.argb(212, 236, 242, 248), true);
+    pit.setGravity(gravity);
+    pit.setSingleLine(true);
+    pit.setEllipsize(TextUtils.TruncateAt.END);
+    pit.setPadding(0, dp(5), 0, 0);
+    pit.setShadowLayer(dp(1.5f), 0, dp(1), Color.argb(145, 0, 0, 0));
+    col.addView(pit, matchWrap());
+    return col;
 }
 
 
@@ -17930,6 +18084,18 @@ private View liveGameCard(LiveGame game) {
         LinearLayout.LayoutParams heroLp = new LinearLayout.LayoutParams(-1, dp(108)); // v246: tighter hero so the matchup menu starts higher on screen
         heroLp.setMargins(dp(12), dp(8), dp(12), dp(10));
         panel.addView(gameMatchupHeroCard(game, away, home, awayPalette, homePalette, pitchers), heroLp);
+
+        // v248: win-probability section — only meaningful once a game is underway or final.
+        // Fetched on a background thread and filled in when it returns; hidden until then.
+        if (!game.isPregame()) {
+            LinearLayout wpHost = new LinearLayout(this);
+            wpHost.setOrientation(LinearLayout.VERTICAL);
+            wpHost.setVisibility(View.GONE);
+            LinearLayout.LayoutParams wpLp = matchWrap();
+            wpLp.setMargins(dp(12), 0, dp(12), dp(6));
+            panel.addView(wpHost, wpLp);
+            loadWinProbability(game, wpHost, awayPalette, homePalette);
+        }
 
         LinearLayout lensHeader = new LinearLayout(this);
         lensHeader.setOrientation(LinearLayout.HORIZONTAL);
@@ -21877,6 +22043,68 @@ private View liveGameCard(LiveGame game) {
         return new Player(e.playerId, e.name, e.teamName, e.teamAbbr, "Hitter");
     }
 
+    // v248: fetch and parse MLB's per-game win-probability feed into the LiveGame. The endpoint
+    // returns an array of play entries, each carrying homeTeamWinProbability /
+    // awayTeamWinProbability (0..100). We keep the home series for the trendline and the latest
+    // values for the headline split. Defensive throughout — field names/shape are confirmed
+    // on-device, and any parse failure simply leaves wpLoaded false so the UI hides the section.
+    private void fetchWinProbabilityInto(LiveGame game) {
+        if (game == null || game.gamePk <= 0) return;
+        try {
+            String url = "https://statsapi.mlb.com/api/v1/game/" + game.gamePk + "/winProbability";
+            String body = httpGet(url);
+            if (body == null || body.isEmpty()) return;
+            ArrayList<Float> homeSeries = new ArrayList<>();
+            float lastHome = -1f, lastAway = -1f;
+
+            // The response is typically a top-level JSON array of play objects; some shapes wrap
+            // it under a key. Handle both.
+            JSONArray plays = null;
+            String trimmed = body.trim();
+            if (trimmed.startsWith("[")) {
+                plays = new JSONArray(trimmed);
+            } else {
+                JSONObject root = new JSONObject(trimmed);
+                if (root.has("winProbability")) plays = root.optJSONArray("winProbability");
+                else if (root.has("plays")) plays = root.optJSONArray("plays");
+            }
+            if (plays == null) return;
+
+            for (int i = 0; i < plays.length(); i++) {
+                JSONObject p = plays.optJSONObject(i);
+                if (p == null) continue;
+                // Value can live at the top of the play or under "homeTeamWinProbability".
+                double h = readWinProb(p, true);
+                double a = readWinProb(p, false);
+                if (h < 0 && a < 0) continue;
+                if (h < 0 && a >= 0) h = 100d - a;
+                if (a < 0 && h >= 0) a = 100d - h;
+                lastHome = (float) h;
+                lastAway = (float) a;
+                homeSeries.add((float) h);
+            }
+
+            if (!homeSeries.isEmpty()) {
+                game.wpHomeSeries = homeSeries;
+                game.wpHome = lastHome;
+                game.wpAway = lastAway >= 0 ? lastAway : (100f - lastHome);
+                game.wpLoaded = true;
+            }
+        } catch (Exception ignored) {
+            // leave wpLoaded false; the WP section is simply not shown
+        }
+    }
+
+    // Pulls a win-probability value (0..100) for home or away from a play object, tolerating the
+    // two field layouts MLB has used. Returns -1 if absent.
+    private double readWinProb(JSONObject play, boolean home) {
+        String key = home ? "homeTeamWinProbability" : "awayTeamWinProbability";
+        if (play.has(key)) return play.optDouble(key, -1d);
+        JSONObject wp = play.optJSONObject("winProbability");
+        if (wp != null && wp.has(key)) return wp.optDouble(key, -1d);
+        return -1d;
+    }
+
     private ArrayList<LiveGame> fetchTodayLiveGames() throws Exception {
         String today = new SimpleDateFormat("MM/dd/yyyy", Locale.US).format(new Date());
         String url = "https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=" + URLEncoder.encode(today, "UTF-8") + "&hydrate=probablePitcher";
@@ -22831,6 +23059,13 @@ private View liveGameCard(LiveGame game) {
         String homePitcher = "";
         int awayScore = -1;
         int homeScore = -1;
+        // v248: win probability. wpHomeSeries holds home-team win% (0..100) at each completed
+        // play, in order, for the trendline; wpHome/wpAway are the latest values. Populated by a
+        // separate per-game fetch (MLB winProbability feed), only for live/final games.
+        java.util.ArrayList<Float> wpHomeSeries = new java.util.ArrayList<>();
+        float wpHome = -1f;
+        float wpAway = -1f;
+        boolean wpLoaded = false;
         String abstractState = "";
         String detailedState = "";
         String statusLabel() {
