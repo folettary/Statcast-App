@@ -315,6 +315,7 @@ public class MainActivity extends Activity {
     private TeamPalette activeLiveTrackerAwayPal = null, activeLiveTrackerHomePal = null;
     private LiveGame activeLiveTrackerGame = null;
     private boolean liveTrackerPolling = false;
+    private boolean liveFeedPlaysExpanded = false; // v275: play feed compact by default
     private String liveFeedPanelMode = "line"; // line | prob
     private boolean liveFeedExpanded = false; // v269: feed collapsed by default; tap to open Line/WinProb/Box
     // v167: Matchups tab is now a two-path hub: compact live games or manual create.
@@ -769,7 +770,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v274", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v275", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -18871,11 +18872,11 @@ private View liveGameCard(LiveGame game) {
             zoneRow.setOrientation(LinearLayout.HORIZONTAL);
             LinearLayout.LayoutParams zrLp = matchWrap(); zrLp.setMargins(0, dp(8), 0, 0);
             StrikeZoneView zone = new StrikeZoneView(this, ab.pitches);
-            zoneRow.addView(zone, new LinearLayout.LayoutParams(dp(150), dp(180)));
+            zoneRow.addView(zone, new LinearLayout.LayoutParams(dp(132), dp(168)));
             // pitch legend
             LinearLayout legend = new LinearLayout(this);
             legend.setOrientation(LinearLayout.VERTICAL);
-            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(0, -2, 1); lgLp.setMargins(dp(12), 0, 0, 0);
+            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(0, -2, 1); lgLp.setMargins(dp(10), 0, 0, 0);
             if (ab.pitches.isEmpty()) {
                 legend.addView(text("Waiting for the first pitch…", 11, INK_DIM, false), matchWrap());
             } else {
@@ -18883,21 +18884,108 @@ private View liveGameCard(LiveGame game) {
             }
             zoneRow.addView(legend, lgLp);
             card.addView(zoneRow, zrLp);
+
+            // ---- PA RESULT BANNER — big and unmistakable once the at-bat is complete ----
+            if (ab.complete && !safe(ab.result).isEmpty()) {
+                card.addView(paResultBanner(ab, batColor), bannerLp());
+            }
         }
 
-        // ---- Play feed (most recent first) ----
+        // ---- Play feed (most recent first), compact by default ----
         if (feed != null && feed.loaded && !feed.feed.isEmpty()) {
+            LinearLayout feedHeadRow = new LinearLayout(this);
+            feedHeadRow.setOrientation(LinearLayout.HORIZONTAL);
+            feedHeadRow.setGravity(Gravity.CENTER_VERTICAL);
+            LinearLayout.LayoutParams fhLp = matchWrap(); fhLp.setMargins(0, dp(16), 0, dp(6));
             TextView feedHead = text("PLAY FEED", 10, Color.rgb(244, 207, 100), true);
             feedHead.setLetterSpacing(0.16f);
-            LinearLayout.LayoutParams fhLp = matchWrap(); fhLp.setMargins(0, dp(16), 0, dp(6));
-            card.addView(feedHead, fhLp);
+            feedHeadRow.addView(feedHead, new LinearLayout.LayoutParams(0, -2, 1));
+            int total = feed.feed.size();
+            int limit = liveFeedPlaysExpanded ? total : 4;
+            if (total > 4) {
+                TextView more = text(liveFeedPlaysExpanded ? "Show less" : "Show all " + total, 9, INK_SOFT, true);
+                more.setPadding(dp(8), dp(3), dp(8), dp(3));
+                more.setBackground(roundedStroke(Color.argb(24, 255, 255, 255), Color.argb(60, 255, 255, 255), 999, 1));
+                more.setForeground(ripple(true)); more.setClickable(true);
+                more.setOnClickListener(v -> { liveFeedPlaysExpanded = !liveFeedPlaysExpanded; rerenderTracker(game); });
+                feedHeadRow.addView(more);
+            }
+            card.addView(feedHeadRow, fhLp);
             int shown = 0;
-            for (int i = feed.feed.size() - 1; i >= 0 && shown < 12; i--, shown++) {
-                card.addView(playFeedRow(feed.feed.get(i), awayPalette, homePalette), matchWrap());
+            for (int i = total - 1; i >= 0 && shown < limit; i--, shown++) {
+                final LiveFeedEntry fe = feed.feed.get(i);
+                View rowView = playFeedRow(fe, awayPalette, homePalette);
+                // tapping a play jumps the strike-zone to that at-bat
+                final int abIndex = atBatIndexForFeedEntry(feed, fe);
+                if (abIndex >= 0) {
+                    rowView.setForeground(ripple(false));
+                    rowView.setClickable(true);
+                    rowView.setOnClickListener(v -> { game.viewAtBatIndex = abIndex; rerenderTracker(game);
+                        if (mainScroll != null) mainScroll.post(() -> { /* keep position */ }); });
+                }
+                card.addView(rowView, matchWrap());
             }
         }
 
         return card;
+    }
+
+    // Find the at-bat a feed entry belongs to (match by inning/half + headline batter when possible).
+    private int atBatIndexForFeedEntry(LiveFeed feed, LiveFeedEntry fe) {
+        if (feed == null || fe == null) return -1;
+        for (int i = feed.atBats.size() - 1; i >= 0; i--) {
+            LiveAtBat ab = feed.atBats.get(i);
+            if (ab.inning == fe.inning && ab.topHalf == fe.topHalf
+                    && (fe.headline == null || fe.headline.isEmpty() || fe.headline.startsWith(ab.batter))) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private LinearLayout.LayoutParams bannerLp() {
+        LinearLayout.LayoutParams lp = matchWrap();
+        lp.setMargins(0, dp(12), 0, dp(2));
+        return lp;
+    }
+
+    // Big, unmistakable result banner for a completed plate appearance.
+    private View paResultBanner(LiveAtBat ab, int batColor) {
+        String ev = safe(ab.result);
+        String low = ev.toLowerCase(Locale.US);
+        boolean bigHit = low.contains("home run") || low.contains("triple") || low.contains("double");
+        boolean onBase = bigHit || low.contains("single") || low.contains("walk") || low.contains("hit by pitch");
+        boolean out = low.contains("out") || low.contains("strikeout") || low.contains("flyout")
+                || low.contains("groundout") || low.contains("lineout") || low.contains("pop");
+        int accent = low.contains("home run") ? Color.rgb(255, 196, 60)
+                : onBase ? Color.rgb(82, 226, 176)
+                : out ? Color.rgb(255, 110, 110) : batColor;
+
+        LinearLayout banner = new LinearLayout(this);
+        banner.setOrientation(LinearLayout.VERTICAL);
+        banner.setGravity(Gravity.CENTER);
+        banner.setPadding(dp(12), dp(12), dp(12), dp(12));
+        banner.setBackground(roundedGradientStroke(new int[] {
+                Color.argb(48, Color.red(accent), Color.green(accent), Color.blue(accent)),
+                Color.argb(20, Color.red(accent), Color.green(accent), Color.blue(accent)),
+                Color.argb(48, Color.red(accent), Color.green(accent), Color.blue(accent))
+        }, 16, Color.argb(150, Color.red(accent), Color.green(accent), Color.blue(accent)), 2));
+        TextView label = text("RESULT", 8, accent, true);
+        label.setLetterSpacing(0.22f);
+        label.setGravity(Gravity.CENTER);
+        banner.addView(label, matchWrap());
+        TextView big = text(ev.toUpperCase(Locale.US), 20, INK, true);
+        big.setGravity(Gravity.CENTER);
+        big.setLetterSpacing(0.02f);
+        banner.addView(big, matchWrap());
+        if (!safe(ab.description).isEmpty()) {
+            TextView desc = text(ab.description, 10, INK_DIM, false);
+            desc.setGravity(Gravity.CENTER);
+            desc.setMaxLines(2);
+            desc.setPadding(0, dp(4), 0, 0);
+            banner.addView(desc, matchWrap());
+        }
+        return banner;
     }
 
     private String topHalfLabel(LiveAtBat ab) {
@@ -18956,29 +19044,57 @@ private View liveGameCard(LiveGame game) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(0, dp(2), 0, dp(2));
+        row.setPadding(0, dp(3), 0, dp(3));
+        // numbered colored dot
+        FrameLayout dotWrap = new FrameLayout(this);
         View dot = new View(this);
         GradientDrawable gd = new GradientDrawable(); gd.setShape(GradientDrawable.OVAL); gd.setColor(pitchTypeColor(lp.typeCode));
         dot.setBackground(gd);
-        LinearLayout.LayoutParams dl = new LinearLayout.LayoutParams(dp(14), dp(14));
-        row.addView(dot, dl);
-        TextView num = text(String.valueOf(lp.number), 9, INK_DIM, true);
+        FrameLayout.LayoutParams dl = new FrameLayout.LayoutParams(dp(18), dp(18));
+        dotWrap.addView(dot, dl);
+        TextView num = text(String.valueOf(lp.number), 9, Color.argb(235, 8, 13, 22), true);
         num.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams nl = new LinearLayout.LayoutParams(dp(16), -2); nl.setMargins(dp(4), 0, dp(2), 0);
-        row.addView(num, nl);
-        String typeShort = safe(lp.typeName).isEmpty() ? safe(lp.typeCode) : lp.typeName;
+        dotWrap.addView(num, new FrameLayout.LayoutParams(dp(18), dp(18)));
+        LinearLayout.LayoutParams dwl = new LinearLayout.LayoutParams(-2, -2); dwl.setMargins(0, 0, dp(8), 0);
+        row.addView(dotWrap, dwl);
+        // stacked: "Slider · 87"  then  result/exit-velo beneath
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        String typeShort = pitchTypeShort(lp.typeCode, lp.typeName);
         String speed = lp.speed > 0 ? String.format(Locale.US, "%.0f", lp.speed) : "";
-        String main = typeShort + (speed.isEmpty() ? "" : "  " + speed);
-        TextView t = text(main, 10, INK, false);
+        TextView t = text(typeShort + (speed.isEmpty() ? "" : "  ·  " + speed + " mph"), 11, INK, true);
         t.setSingleLine(true);
-        row.addView(t, new LinearLayout.LayoutParams(0, -2, 1));
-        // result, with exit velo when in play
+        col.addView(t, matchWrap());
         String res = safe(lp.result);
-        if (lp.isInPlay && !Double.isNaN(lp.exitVelo)) res = String.format(Locale.US, "%.0f mph / %.0f°", lp.exitVelo, lp.launchAngle);
-        TextView r = text(res, 9, lp.isInPlay ? Color.rgb(82, 226, 176) : INK_DIM, true);
-        r.setGravity(Gravity.RIGHT); r.setSingleLine(true);
-        row.addView(r, new LinearLayout.LayoutParams(0, -2, 0.9f));
+        if (lp.isInPlay && !Double.isNaN(lp.exitVelo)) {
+            String la = Double.isNaN(lp.launchAngle) ? "" : String.format(Locale.US, " · %.0f°", lp.launchAngle);
+            res = String.format(Locale.US, "In play · %.0f mph EV", lp.exitVelo) + la;
+        }
+        TextView r = text(res, 9, lp.isInPlay ? Color.rgb(82, 226, 176) : INK_DIM, false);
+        r.setSingleLine(true);
+        col.addView(r, matchWrap());
+        row.addView(col, new LinearLayout.LayoutParams(0, -2, 1));
         return row;
+    }
+
+    // Compact pitch-type names that read fast and never overflow the legend.
+    private String pitchTypeShort(String code, String name) {
+        if (code != null) {
+            switch (code) {
+                case "FF": return "4-Seam";
+                case "SI": case "FT": return "Sinker";
+                case "FC": return "Cutter";
+                case "SL": return "Slider";
+                case "ST": return "Sweeper";
+                case "CU": case "KC": return "Curve";
+                case "CH": return "Change";
+                case "FS": return "Splitter";
+                case "SV": return "Slurve";
+                case "KN": return "Knuckle";
+                case "EP": return "Eephus";
+            }
+        }
+        return safe(name).isEmpty() ? safe(code) : name;
     }
 
     private View playFeedRow(LiveFeedEntry fe, TeamPalette awayPalette, TeamPalette homePalette) {
@@ -20143,7 +20259,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         // to the top instead of behind a tall feed.
         if (!game.isPregame()) {
             panel.addView(liveFeedModuleSelector(game, awayPalette, homePalette), matchWrap());
-            if (liveFeedExpanded) {
+            if (!game.isLive() && liveFeedExpanded) {
                 if ("prob".equals(liveFeedPanelMode)) {
                     LinearLayout wpHost = new LinearLayout(this);
                     wpHost.setOrientation(LinearLayout.VERTICAL);
@@ -20287,26 +20403,35 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         LinearLayout.LayoutParams wrapLp = matchWrap();
         wrapLp.setMargins(dp(12), 0, dp(12), dp(8));
         wrap.setLayoutParams(wrapLp);
-
-        // Header row doubles as the collapse/expand toggle.
+        boolean liveGame = game.isLive();
+        // Header row. For a live game the tracker is always-on content, so the header is just a
+        // label (no collapse gate — that was what made it feel like it "auto-expanded"). For
+        // final/pregame games it stays a collapse toggle for the Line/WinProb/Box views.
         LinearLayout titleRow = new LinearLayout(this);
         titleRow.setOrientation(LinearLayout.HORIZONTAL);
         titleRow.setGravity(Gravity.CENTER_VERTICAL);
-        titleRow.setForeground(ripple(false));
-        titleRow.setClickable(true);
-        titleRow.setOnClickListener(v -> {
-            liveFeedExpanded = !liveFeedExpanded;
-            final int keepY = mainScroll == null ? 0 : mainScroll.getScrollY();
-            renderLiveGameMenu(game);
-            if (mainScroll != null) mainScroll.post(() -> mainScroll.scrollTo(0, keepY));
-        });
+        if (!liveGame) {
+            titleRow.setForeground(ripple(false));
+            titleRow.setClickable(true);
+            titleRow.setOnClickListener(v -> {
+                liveFeedExpanded = !liveFeedExpanded;
+                final int keepY = mainScroll == null ? 0 : mainScroll.getScrollY();
+                renderLiveGameMenu(game);
+                if (mainScroll != null) mainScroll.post(() -> mainScroll.scrollTo(0, keepY));
+            });
+        }
 
-        TextView title = text("GAME FEED", 10, Color.rgb(244, 207, 100), true);
+        TextView title = text(liveGame ? "LIVE GAME" : "GAME FEED", 10, Color.rgb(244, 207, 100), true);
         title.setLetterSpacing(0.16f);
         titleRow.addView(title, new LinearLayout.LayoutParams(-2, -2));
 
-        // Collapsed: show the current score inline so the strip is informative on its own.
-        if (!liveFeedExpanded) {
+        if (liveGame) {
+            // live dot + "updating" hint on the right
+            TextView updating = text("● auto-updating", 8, Color.rgb(82, 226, 176), true);
+            updating.setGravity(Gravity.RIGHT);
+            titleRow.addView(updating, new LinearLayout.LayoutParams(0, -2, 1));
+            wrap.addView(titleRow, matchWrap());
+        } else if (!liveFeedExpanded) {
             String awayAb = displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr);
             String homeAb = displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr);
             String aRuns = game.awayScore < 0 ? "–" : String.valueOf(game.awayScore);
@@ -20317,23 +20442,24 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
             score.setSingleLine(true);
             score.setPadding(dp(8), 0, dp(8), 0);
             titleRow.addView(score, new LinearLayout.LayoutParams(0, -2, 1));
+            TextView chevron = text("›", 14, INK_DIM, true);
+            chevron.setGravity(Gravity.CENTER);
+            chevron.setPadding(dp(4), 0, dp(2), 0);
+            titleRow.addView(chevron, new LinearLayout.LayoutParams(-2, -2));
+            wrap.addView(titleRow, matchWrap());
         } else {
             Space sp = new Space(this);
             titleRow.addView(sp, new LinearLayout.LayoutParams(0, dp(1), 1));
+            TextView chevron = text("⌄", 14, INK_DIM, true);
+            chevron.setGravity(Gravity.CENTER);
+            chevron.setPadding(dp(4), 0, dp(2), 0);
+            titleRow.addView(chevron, new LinearLayout.LayoutParams(-2, -2));
+            wrap.addView(titleRow, matchWrap());
         }
 
-        TextView chevron = text(liveFeedExpanded ? "⌄" : "›", 14, INK_DIM, true);
-        chevron.setGravity(Gravity.CENTER);
-        chevron.setPadding(dp(4), 0, dp(2), 0);
-        titleRow.addView(chevron, new LinearLayout.LayoutParams(-2, -2));
-        wrap.addView(titleRow, matchWrap());
-
-        // v271: for an in-progress game, the collapsed strip carries the live situation
-        // (count, outs, runners, at-bat). Loaded async so it never blocks the hub render.
-        // v273: for an in-progress game, the strip becomes the full Live Tracker — portraits,
-        // diamond, count, strike-zone pitch plot, AB history, and the play feed. Always visible
-        // (collapsed or expanded), auto-refreshing every ~15s.
-        if (game.isLive()) {
+        // Live Tracker: always-on for an in-progress game (portraits, diamond, count, strike-zone
+        // pitch plot, AB history, play feed), auto-refreshing every ~15s.
+        if (liveGame) {
             LinearLayout sitHost = new LinearLayout(this);
             sitHost.setOrientation(LinearLayout.VERTICAL);
             sitHost.setVisibility(View.GONE);
@@ -20348,8 +20474,8 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
             startLiveTrackerPolling(game);
         }
 
-        // Expanded: the three view pills (no instructional sentences — the labels are self-evident).
-        if (liveFeedExpanded) {
+        // Final/pregame only: the classic Line / WinProb / Full Box pills, gated by the collapse.
+        if (!liveGame && liveFeedExpanded) {
             LinearLayout tabs = new LinearLayout(this);
             tabs.setOrientation(LinearLayout.HORIZONTAL);
             tabs.setGravity(Gravity.CENTER_VERTICAL);
