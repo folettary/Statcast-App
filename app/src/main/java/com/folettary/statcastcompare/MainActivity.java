@@ -18526,7 +18526,7 @@ private View liveGameCard(LiveGame game) {
                                 fe.inning = inning; fe.topHalf = topHalf;
                                 fe.headline = safe(evtType).isEmpty() ? "Roster move" : evtType;
                                 fe.detail = desc;
-                                feed.add(fe);
+                                feed.feed.add(fe);
                             }
                         }
                     }
@@ -18542,11 +18542,10 @@ private View liveGameCard(LiveGame game) {
                     fe.inning = inning; fe.topHalf = topHalf;
                     fe.headline = (ab.batter.isEmpty() ? "" : ab.batter + " — ") + result.optString("event", "");
                     fe.detail = result.optString("description", "");
-                    feed.add(fe);
+                    feed.feed.add(fe);
                 }
             }
 
-            JSONObject currentPlay = plays.optJSONObject("currentPlay");
             feed.currentAtBatIndex = feed.atBats.isEmpty() ? -1 : feed.atBats.size() - 1;
             feed.loaded = true;
             feed.fetchedAt = System.currentTimeMillis();
