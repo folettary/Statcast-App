@@ -310,10 +310,9 @@ public class MainActivity extends Activity {
     private boolean liveRefreshInFlight = false;
     private float livePullRefreshStartY = 0f;
     private long lastLivePullRefreshMs = 0L;
-    private TextView liveFeedStatusText = null;
     private TextView liveFeedRefreshButton = null;
-    private ProgressBar liveFeedRefreshSpinner = null;
     private String liveFeedPanelMode = "line"; // line | prob
+    private boolean liveFeedExpanded = false; // v269: feed collapsed by default; tap to open Line/WinProb/Box
     // v167: Matchups tab is now a two-path hub: compact live games or manual create.
     private static final int MATCHUP_PATH_LIVE = 0;
     private static final int MATCHUP_PATH_CREATE = 1;
@@ -748,7 +747,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v268", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v270", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -19230,59 +19229,54 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         }
     }
 
-    private View liveFeedRefreshBar(LiveGame game) {
-        LinearLayout bar = new LinearLayout(this);
-        bar.setOrientation(LinearLayout.HORIZONTAL);
-        bar.setGravity(Gravity.CENTER_VERTICAL);
-        bar.setPadding(dp(12), dp(8), dp(12), dp(8));
-        bar.setBackground(roundedStroke(Color.argb(34, 82, 226, 176), Color.argb(62, 82, 226, 176), 18, 1));
-        LinearLayout.LayoutParams lp = matchWrap();
-        lp.setMargins(dp(12), dp(8), dp(12), dp(8));
-        bar.setLayoutParams(lp);
-
-        TextView copy = text(liveRefreshInFlight
-                ? "Refreshing live feed…"
-                : (game != null && game.isPregame()
-                    ? "Game feed will update once first pitch starts."
-                    : "Pull down from the top to refresh scores, box score, win probability, and key plays."),
-                10, liveRefreshInFlight ? Color.rgb(82, 226, 176) : INK_DIM, false);
-        copy.setSingleLine(false);
-        copy.setMaxLines(2);
-        liveFeedStatusText = copy;
-        bar.addView(copy, new LinearLayout.LayoutParams(0, -2, 1));
-
-        ProgressBar spinner = new ProgressBar(this, null, android.R.attr.progressBarStyleSmall);
-        spinner.setIndeterminate(true);
-        spinner.setVisibility(liveRefreshInFlight ? View.VISIBLE : View.GONE);
-        liveFeedRefreshSpinner = spinner;
-        LinearLayout.LayoutParams spinLp = new LinearLayout.LayoutParams(dp(30), dp(30));
-        spinLp.setMargins(dp(8), 0, dp(2), 0);
-        bar.addView(spinner, spinLp);
-
-        TextView refresh = text("↻", 15, INK, true);
-        refresh.setGravity(Gravity.CENTER);
-        refresh.setPadding(dp(9), dp(5), dp(9), dp(5));
-        refresh.setBackground(roundedStroke(Color.argb(38, 255, 255, 255), Color.argb(70, 255, 255, 255), 999, 1));
-        refresh.setForeground(ripple(true));
-        refresh.setClickable(true);
-        refresh.setEnabled(!liveRefreshInFlight);
-        refresh.setAlpha(liveRefreshInFlight ? 0.42f : 1f);
-        refresh.setOnClickListener(v -> refreshLiveGameMenu(game));
-        liveFeedRefreshButton = refresh;
-        bar.addView(refresh);
-        return bar;
+    private void setLiveRefreshUiState(boolean refreshing) {
+        // v270: the ↻ button spins continuously while refreshing, so it's obvious work is happening.
+        TextView b = liveFeedRefreshButton;
+        if (b == null) return;
+        b.setEnabled(!refreshing);
+        if (refreshing) {
+            b.setText("↻");
+            b.animate().cancel();
+            b.setRotation(0f);
+            b.animate().rotationBy(360f).setDuration(700)
+                .setInterpolator(new android.view.animation.LinearInterpolator())
+                .withEndAction(new Runnable() {
+                    @Override public void run() {
+                        if (liveRefreshInFlight && liveFeedRefreshButton != null) {
+                            liveFeedRefreshButton.setRotation(0f);
+                            liveFeedRefreshButton.animate().rotationBy(360f).setDuration(700)
+                                .setInterpolator(new android.view.animation.LinearInterpolator())
+                                .withEndAction(this).start();
+                        }
+                    }
+                }).start();
+            b.setAlpha(1f);
+        } else {
+            b.animate().cancel();
+            b.animate().rotation(0f).setDuration(160).start();
+        }
     }
 
-    private void setLiveRefreshUiState(boolean refreshing) {
-        if (liveFeedStatusText != null) {
-            liveFeedStatusText.setText(refreshing ? "Refreshing live feed…" : "Pull down from the top to refresh scores, box score, win probability, and key plays.");
-            liveFeedStatusText.setTextColor(refreshing ? Color.rgb(82, 226, 176) : INK_DIM);
-        }
-        if (liveFeedRefreshSpinner != null) liveFeedRefreshSpinner.setVisibility(refreshing ? View.VISIBLE : View.GONE);
-        if (liveFeedRefreshButton != null) {
-            liveFeedRefreshButton.setEnabled(!refreshing);
-            liveFeedRefreshButton.animate().alpha(refreshing ? 0.42f : 1f).setDuration(120).start();
-        }
+    // Brief "Refreshed ✓" confirmation, then settle back to the ↻ icon.
+    private void setLiveRefreshDone() {
+        TextView b = liveFeedRefreshButton;
+        if (b == null) return;
+        b.animate().cancel();
+        b.setEnabled(true);
+        b.setRotation(0f);
+        b.setText("✓");
+        b.setTextColor(Color.rgb(82, 226, 176));
+        b.setAlpha(1f);
+        b.postDelayed(() -> {
+            if (liveFeedRefreshButton != null && !liveRefreshInFlight) {
+                liveFeedRefreshButton.animate().alpha(0f).setDuration(140).withEndAction(() -> {
+                    if (liveFeedRefreshButton == null) return;
+                    liveFeedRefreshButton.setText("↻");
+                    liveFeedRefreshButton.setTextColor(INK);
+                    liveFeedRefreshButton.animate().alpha(1f).setDuration(180).start();
+                }).start();
+            }
+        }, 1100);
     }
 
 
@@ -19291,12 +19285,14 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         liveRefreshInFlight = true;
         final int keepY = mainScroll == null ? 0 : mainScroll.getScrollY();
         setLiveRefreshUiState(true);
-        if (standingsBox != null) standingsBox.animate().alpha(0.86f).setDuration(120).start();
+        // Gentle dim of current content while we fetch (single direction, no bounce).
+        if (standingsBox != null) standingsBox.animate().alpha(0.55f).setDuration(160).start();
         io.execute(() -> {
             try {
                 LiveGame fresh = fetchUpdatedLiveGame(game);
                 if (fresh != null) copyLiveGameRefreshData(game, fresh);
-                // Clear optional sections so line score / win probability / key plays reload fresh.
+                // Invalidate lazily-loaded sections so line score / win probability / key plays
+                // all reload from scratch on the re-render (this is the "refresh everything" part).
                 game.lineScoreLoaded = false;
                 game.wpLoaded = false;
                 game.lineInnings = new ArrayList<>();
@@ -19308,20 +19304,22 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
                 game.wpSwings = new java.util.ArrayList<>();
                 main.post(() -> {
                     liveRefreshInFlight = false;
+                    // Re-render while dimmed, then crossfade the fresh content in smoothly (one fade,
+                    // from 0 → 1) so there's no flash of the tree being torn down and rebuilt.
                     renderLiveGameMenu(game);
                     if (mainScroll != null) mainScroll.post(() -> mainScroll.scrollTo(0, keepY));
                     if (standingsBox != null) {
-                        standingsBox.setAlpha(0.88f);
-                        standingsBox.animate().alpha(1f).setDuration(180).start();
+                        standingsBox.setAlpha(0f);
+                        standingsBox.animate().alpha(1f).setDuration(260).start();
                     }
-                    setLiveRefreshUiState(false);
+                    setLiveRefreshDone();
                 });
             } catch (Exception e) {
                 main.post(() -> {
                     liveRefreshInFlight = false;
-                    if (standingsBox != null) standingsBox.animate().alpha(1f).setDuration(120).start();
+                    if (standingsBox != null) standingsBox.animate().alpha(1f).setDuration(160).start();
                     setLiveRefreshUiState(false);
-                    Toast.makeText(this, "Could not refresh live feed", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, "Couldn't refresh — check your connection", Toast.LENGTH_SHORT).show();
                 });
             }
         });
@@ -19330,7 +19328,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
     private LiveGame fetchUpdatedLiveGame(LiveGame original) throws Exception {
         if (original == null) return null;
         String dateStr = scheduleDateForLiveGame(original);
-        String url = "https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=" + URLEncoder.encode(dateStr, "UTF-8") + "&hydrate=probablePitcher";
+        String url = "https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=" + URLEncoder.encode(dateStr, "UTF-8") + "&hydrate=probablePitcher,linescore,team";
         JSONObject root = new JSONObject(httpGet(url));
         JSONArray dates = root.optJSONArray("dates");
         if (dates == null) return null;
@@ -19466,8 +19464,21 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         livePill.setPadding(dp(8), dp(4), dp(8), dp(4));
         livePill.setBackground(roundedStroke(Color.argb(game.isPregame() ? 22 : 42, 82, 226, 176), Color.argb(game.isPregame() ? 48 : 112, 82, 226, 176), 999, 1));
         top.addView(livePill);
+        // v269: compact refresh control lives in the top bar (replaces the old instruction row).
+        TextView topRefresh = text("↻", 14, INK, true);
+        topRefresh.setGravity(Gravity.CENTER);
+        topRefresh.setPadding(dp(8), dp(4), dp(8), dp(4));
+        topRefresh.setBackground(roundedStroke(Color.argb(38, 255, 255, 255), Color.argb(70, 255, 255, 255), 999, 1));
+        topRefresh.setForeground(ripple(true));
+        topRefresh.setClickable(true);
+        topRefresh.setEnabled(!liveRefreshInFlight);
+        topRefresh.setAlpha(liveRefreshInFlight ? 0.42f : 1f);
+        topRefresh.setOnClickListener(v -> refreshLiveGameMenu(game));
+        liveFeedRefreshButton = topRefresh;
+        LinearLayout.LayoutParams trLp = new LinearLayout.LayoutParams(-2, -2);
+        trLp.setMargins(dp(6), 0, 0, 0);
+        top.addView(topRefresh, trLp);
         panel.addView(top, matchWrap());
-        panel.addView(liveFeedRefreshBar(game), matchWrap());
 
         String pitchers = (safe(game.awayPitcher).isEmpty() ? "Away SP TBD" : lastNameOnly(game.awayPitcher))
                 + " vs " + (safe(game.homePitcher).isEmpty() ? "Home SP TBD" : lastNameOnly(game.homePitcher));
@@ -19476,37 +19487,38 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         heroLp.setMargins(dp(12), dp(8), dp(12), dp(10));
         panel.addView(gameMatchupHeroCard(game, away, home, awayPalette, homePalette, pitchers), heroLp);
 
-        // v268: Live game feed is now a premium module selector so the hub does not become a
-        // long stacked feed before users reach matchup cards. Key plays stay with win probability.
+        // v269: Live feed sits on top (score story first) but is COLLAPSED by default — a single
+        // strip the user taps to open Line / Win Prob / Full Box. Keeps the matchup cards close
+        // to the top instead of behind a tall feed.
         if (!game.isPregame()) {
             panel.addView(liveFeedModuleSelector(game, awayPalette, homePalette), matchWrap());
-            if ("prob".equals(liveFeedPanelMode)) {
-                LinearLayout wpHost = new LinearLayout(this);
-                wpHost.setOrientation(LinearLayout.VERTICAL);
-                wpHost.setVisibility(View.GONE);
-                LinearLayout.LayoutParams wpLp = matchWrap();
-                wpLp.setMargins(dp(12), 0, dp(12), dp(6));
-                panel.addView(wpHost, wpLp);
-                loadWinProbability(game, wpHost, awayPalette, homePalette);
-            } else {
-                liveFeedPanelMode = "line";
-                LinearLayout boxScoreHost = new LinearLayout(this);
-                boxScoreHost.setOrientation(LinearLayout.VERTICAL);
-                boxScoreHost.setVisibility(View.GONE);
-                LinearLayout.LayoutParams boxScoreLp = matchWrap();
-                boxScoreLp.setMargins(dp(12), 0, dp(12), dp(6));
-                panel.addView(boxScoreHost, boxScoreLp);
-                loadCompactLineScore(game, boxScoreHost, awayPalette, homePalette);
+            if (liveFeedExpanded) {
+                if ("prob".equals(liveFeedPanelMode)) {
+                    LinearLayout wpHost = new LinearLayout(this);
+                    wpHost.setOrientation(LinearLayout.VERTICAL);
+                    wpHost.setVisibility(View.GONE);
+                    LinearLayout.LayoutParams wpLp = matchWrap();
+                    wpLp.setMargins(dp(12), 0, dp(12), dp(6));
+                    panel.addView(wpHost, wpLp);
+                    loadWinProbability(game, wpHost, awayPalette, homePalette);
+                } else {
+                    liveFeedPanelMode = "line";
+                    LinearLayout boxScoreHost = new LinearLayout(this);
+                    boxScoreHost.setOrientation(LinearLayout.VERTICAL);
+                    boxScoreHost.setVisibility(View.GONE);
+                    LinearLayout.LayoutParams boxScoreLp = matchWrap();
+                    boxScoreLp.setMargins(dp(12), 0, dp(12), dp(6));
+                    panel.addView(boxScoreHost, boxScoreLp);
+                    loadCompactLineScore(game, boxScoreHost, awayPalette, homePalette);
+                }
             }
         }
-
-        panel.addView(matchupCardsCue(accent), matchWrap());
 
         LinearLayout lensHeader = new LinearLayout(this);
         lensHeader.setOrientation(LinearLayout.HORIZONTAL);
         lensHeader.setGravity(Gravity.CENTER_VERTICAL);
-        lensHeader.setPadding(dp(14), 0, dp(14), dp(5));
-        TextView lensTitle = text("CHOOSE MATCHUP TYPE", 10, INK, true);
+        lensHeader.setPadding(dp(14), dp(6), dp(14), dp(5));
+        TextView lensTitle = text("MATCHUP CARDS", 10, Color.rgb(244, 207, 100), true);
         lensTitle.setLetterSpacing(0.16f);
         lensHeader.addView(lensTitle, new LinearLayout.LayoutParams(0, -2, 1));
         panel.addView(lensHeader, matchWrap());
@@ -19625,39 +19637,62 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         wrapLp.setMargins(dp(12), 0, dp(12), dp(8));
         wrap.setLayoutParams(wrapLp);
 
+        // Header row doubles as the collapse/expand toggle.
         LinearLayout titleRow = new LinearLayout(this);
         titleRow.setOrientation(LinearLayout.HORIZONTAL);
         titleRow.setGravity(Gravity.CENTER_VERTICAL);
+        titleRow.setForeground(ripple(false));
+        titleRow.setClickable(true);
+        titleRow.setOnClickListener(v -> {
+            liveFeedExpanded = !liveFeedExpanded;
+            final int keepY = mainScroll == null ? 0 : mainScroll.getScrollY();
+            renderLiveGameMenu(game);
+            if (mainScroll != null) mainScroll.post(() -> mainScroll.scrollTo(0, keepY));
+        });
+
         TextView title = text("GAME FEED", 10, Color.rgb(244, 207, 100), true);
         title.setLetterSpacing(0.16f);
-        titleRow.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+        titleRow.addView(title, new LinearLayout.LayoutParams(-2, -2));
 
-        TextView hint = text("One live view at a time", 8, INK_DIM, true);
-        hint.setGravity(Gravity.RIGHT);
-        hint.setSingleLine(true);
-        titleRow.addView(hint);
+        // Collapsed: show the current score inline so the strip is informative on its own.
+        if (!liveFeedExpanded) {
+            String awayAb = displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr);
+            String homeAb = displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr);
+            String aRuns = game.awayScore < 0 ? "–" : String.valueOf(game.awayScore);
+            String hRuns = game.homeScore < 0 ? "–" : String.valueOf(game.homeScore);
+            String scoreStr = awayAb + " " + aRuns + "  ·  " + homeAb + " " + hRuns;
+            TextView score = text(scoreStr, 10, INK_SOFT, true);
+            score.setGravity(Gravity.RIGHT);
+            score.setSingleLine(true);
+            score.setPadding(dp(8), 0, dp(8), 0);
+            titleRow.addView(score, new LinearLayout.LayoutParams(0, -2, 1));
+        } else {
+            Space sp = new Space(this);
+            titleRow.addView(sp, new LinearLayout.LayoutParams(0, dp(1), 1));
+        }
+
+        TextView chevron = text(liveFeedExpanded ? "⌄" : "›", 14, INK_DIM, true);
+        chevron.setGravity(Gravity.CENTER);
+        chevron.setPadding(dp(4), 0, dp(2), 0);
+        titleRow.addView(chevron, new LinearLayout.LayoutParams(-2, -2));
         wrap.addView(titleRow, matchWrap());
 
-        LinearLayout tabs = new LinearLayout(this);
-        tabs.setOrientation(LinearLayout.HORIZONTAL);
-        tabs.setGravity(Gravity.CENTER_VERTICAL);
-        tabs.setPadding(0, dp(8), 0, 0);
+        // Expanded: the three view pills (no instructional sentences — the labels are self-evident).
+        if (liveFeedExpanded) {
+            LinearLayout tabs = new LinearLayout(this);
+            tabs.setOrientation(LinearLayout.HORIZONTAL);
+            tabs.setGravity(Gravity.CENTER_VERTICAL);
+            tabs.setPadding(0, dp(10), 0, 0);
 
-        tabs.addView(liveFeedModePill("Line", "line", game, awayPalette, homePalette), new LinearLayout.LayoutParams(0, dp(38), 1));
-        LinearLayout.LayoutParams probLp = new LinearLayout.LayoutParams(0, dp(38), 1.25f);
-        probLp.setMargins(dp(7), 0, 0, 0);
-        tabs.addView(liveFeedModePill("Win Prob + Plays", "prob", game, awayPalette, homePalette), probLp);
-        LinearLayout.LayoutParams fullLp = new LinearLayout.LayoutParams(0, dp(38), 0.95f);
-        fullLp.setMargins(dp(7), 0, 0, 0);
-        tabs.addView(liveFeedFullBoxPill(game, awayPalette, homePalette), fullLp);
-        wrap.addView(tabs, matchWrap());
-
-        TextView sub = text("Key plays are paired with the win-probability chart so the dots and descriptions tell the same story.",
-                9, INK_DIM, false);
-        sub.setPadding(0, dp(7), 0, 0);
-        sub.setSingleLine(false);
-        sub.setMaxLines(2);
-        wrap.addView(sub, matchWrap());
+            tabs.addView(liveFeedModePill("Line", "line", game, awayPalette, homePalette), new LinearLayout.LayoutParams(0, dp(38), 1));
+            LinearLayout.LayoutParams probLp = new LinearLayout.LayoutParams(0, dp(38), 1.25f);
+            probLp.setMargins(dp(7), 0, 0, 0);
+            tabs.addView(liveFeedModePill("Win Prob + Plays", "prob", game, awayPalette, homePalette), probLp);
+            LinearLayout.LayoutParams fullLp = new LinearLayout.LayoutParams(0, dp(38), 0.95f);
+            fullLp.setMargins(dp(7), 0, 0, 0);
+            tabs.addView(liveFeedFullBoxPill(game, awayPalette, homePalette), fullLp);
+            wrap.addView(tabs, matchWrap());
+        }
 
         return wrap;
     }
@@ -19697,38 +19732,13 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
     }
 
     private void setLiveFeedPanelMode(String mode, LiveGame game) {
-        if (game == null || mode == null || mode.equals(liveFeedPanelMode)) return;
+        if (game == null || mode == null) return;
+        if (mode.equals(liveFeedPanelMode) && liveFeedExpanded) return;
         liveFeedPanelMode = mode;
+        liveFeedExpanded = true;
         final int keepY = mainScroll == null ? 0 : mainScroll.getScrollY();
         renderLiveGameMenu(game);
         if (mainScroll != null) mainScroll.post(() -> mainScroll.scrollTo(0, keepY));
-    }
-
-
-    private View matchupCardsCue(int accent) {
-        LinearLayout cue = new LinearLayout(this);
-        cue.setOrientation(LinearLayout.HORIZONTAL);
-        cue.setGravity(Gravity.CENTER_VERTICAL);
-        cue.setPadding(dp(12), dp(9), dp(12), dp(9));
-        cue.setBackground(roundedStroke(Color.argb(30, Color.red(accent), Color.green(accent), Color.blue(accent)), Color.argb(80, Color.red(accent), Color.green(accent), Color.blue(accent)), 18, 1));
-        LinearLayout.LayoutParams cueLp = matchWrap();
-        cueLp.setMargins(dp(12), dp(4), dp(12), dp(8));
-        cue.setLayoutParams(cueLp);
-
-        LinearLayout copy = new LinearLayout(this);
-        copy.setOrientation(LinearLayout.VERTICAL);
-        TextView title = text("MATCHUP CARDS", 10, Color.rgb(244, 207, 100), true);
-        title.setLetterSpacing(0.14f);
-        copy.addView(title, matchWrap());
-        TextView sub = text("Choose a card to compare team edges, starters, bullpens, or hitters.", 10, INK_DIM, false);
-        sub.setPadding(0, dp(2), 0, 0);
-        copy.addView(sub, matchWrap());
-        cue.addView(copy, new LinearLayout.LayoutParams(0, -2, 1));
-
-        TextView arrow = text("START", 9, INK, true);
-        arrow.setGravity(Gravity.CENTER);
-        cue.addView(arrow, new LinearLayout.LayoutParams(dp(26), -2));
-        return cue;
     }
 
 
