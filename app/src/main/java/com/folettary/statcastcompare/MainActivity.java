@@ -720,7 +720,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v254", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v255", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -1135,7 +1135,7 @@ public class MainActivity extends Activity {
         } else {
             if (matchupHubTitle != null) matchupHubTitle.setText("MATCHUPS");
             if (matchupHubSubtitle != null) matchupHubSubtitle.setText(matchupPathMode == MATCHUP_PATH_LIVE
-                    ? "Today’s slate in compact game tiles. Tap one for recommended matchups."
+                    ? "Today’s games, ready to compare. Pick any matchup to see team edges, starters, bullpens, and key hitters."
                     : "Build a custom player or team matchup.");
             if (matchupLivePathButton != null) matchupLivePathButton.setText("Live Matchups");
             if (matchupCreatePathButton != null) matchupCreatePathButton.setText("Create Matchup");
@@ -1403,7 +1403,7 @@ public class MainActivity extends Activity {
         eyebrow.setLetterSpacing(0.18f);
         titleCol.addView(eyebrow, matchWrap());
 
-        TextView title = text("Today’s games, instantly comparable", 17, Color.WHITE, true);
+        TextView title = text("Today’s games, ready to compare", 17, Color.WHITE, true);
         title.setPadding(0, dp(3), 0, 0);
         titleCol.addView(title, matchWrap());
 
@@ -1644,7 +1644,7 @@ private View homeFeaturedLiveGameCard(LiveGame game) {
     sub.setShadowLayer(dp(1.5f), 0, dp(1), Color.argb(140, 0, 0, 0));
     content.addView(sub, matchWrap());
 
-    TextView cta = text("Open recommended matchups  ❯", 10, INK, true);
+    TextView cta = text("Open matchup options  ❯", 10, INK, true);
     cta.setGravity(Gravity.CENTER);
     cta.setPadding(0, dp(8), 0, 0);
     cta.setShadowLayer(dp(1.5f), 0, dp(1), Color.argb(150, 0, 0, 0));
@@ -7284,7 +7284,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             for (int j = 0; j < 2 && i + j < metrics.size(); j++) {
                 Metric m = metrics.get(i + j);
                 View tile = metricComparisonTile(c, m, palette);
-                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, expectedMode ? dp(142) : dp(136), 1);
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, expectedMode ? dp(150) : dp(146), 1);
                 lp.setMargins(j == 0 ? 0 : dp(5), 0, 0, 0);
                 row.addView(tile, lp);
             }
@@ -7478,7 +7478,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
         LinearLayout tile = new LinearLayout(this);
         tile.setOrientation(LinearLayout.VERTICAL);
-        tile.setPadding(dp(7), dp(8), dp(7), dp(7));
+        tile.setPadding(dp(7), dp(8), dp(7), dp(10));
         tile.setBackground(roundedGradientStroke(new int[] {
                 Color.argb(222, 9, 13, 20),
                 Color.argb(210, 14, 19, 28)
@@ -7515,8 +7515,8 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         tile.addView(big, bigLp);
 
         LeagueSparkBarView bar = new LeagueSparkBarView(this, m, value, league, pct, palette);
-        LinearLayout.LayoutParams barLp = new LinearLayout.LayoutParams(-1, dp(42));
-        barLp.setMargins(0, dp(1), 0, 0);
+        LinearLayout.LayoutParams barLp = new LinearLayout.LayoutParams(-1, dp(38));
+        barLp.setMargins(0, dp(1), 0, dp(1));
         tile.addView(bar, barLp);
 
         LinearLayout vals = new LinearLayout(this);
@@ -7543,7 +7543,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
         LinearLayout tile = new LinearLayout(this);
         tile.setOrientation(LinearLayout.VERTICAL);
-        tile.setPadding(dp(8), dp(8), dp(8), dp(7));
+        tile.setPadding(dp(8), dp(8), dp(8), dp(10));
         tile.setBackground(roundedGradientStroke(new int[] {
                 Color.argb(230, 6, 11, 20),
                 Color.argb(214, 7, 20, 36),
@@ -7597,8 +7597,8 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         tile.addView(values, valuesLp);
 
         ExpectedActualBarView bar = new ExpectedActualBarView(this, actualMetric, actual, expected, null, null, palette);
-        LinearLayout.LayoutParams barLp = new LinearLayout.LayoutParams(-1, dp(38));
-        barLp.setMargins(0, dp(1), 0, 0);
+        LinearLayout.LayoutParams barLp = new LinearLayout.LayoutParams(-1, dp(36));
+        barLp.setMargins(0, dp(1), 0, dp(1));
         tile.addView(bar, barLp);
 
         TextView gapTv = text(expectedPerformanceLabel(actual, expected, actualMetric), 10, accent, true);
@@ -7622,9 +7622,9 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     }
 
     private TextView metricTileMiniValue(String label, String value, int color) {
-        TextView tv = text((value == null ? "—" : value) + "\n" + label, 8, color, true);
+        TextView tv = text((value == null ? "—" : value) + "\n" + label, 7, color, true);
         tv.setGravity(Gravity.CENTER);
-        tv.setPadding(dp(2), dp(3), dp(2), dp(3));
+        tv.setPadding(dp(2), dp(3), dp(2), dp(4));
         tv.setLineSpacing(dp(1), 1.0f);
         tv.setBackground(roundedStroke(Color.argb(26, 255, 255, 255), Color.argb(40, 255, 255, 255), 10, 1));
         tv.setFontFeatureSettings("'tnum' 1");
@@ -8315,6 +8315,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
         ArrayList<Metric> visibleMetrics = showAllResultsStats ? availableRowMetrics : rowMetrics;
         if (visibleMetrics.isEmpty() && showAllResultsStats) visibleMetrics = rowMetrics;
+        visibleMetrics = contributionSortedHeadToHeadMetrics(h, visibleMetrics, 999);
 
         int count = 0;
         String lastSection = "";
@@ -8428,7 +8429,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     // v240: explainability expander beneath the battle card.
     private void addWhyThisEdge(HeadToHeadComparison h, TeamPalette paletteA, TeamPalette paletteB) {
         if (h == null) return;
-        ArrayList<Metric> shareMetrics = collectHeadToHeadMetrics(h, isBullpenHeroComparison(h) ? 12 : 8, true);
+        ArrayList<Metric> shareMetrics = contributionSortedHeadToHeadMetrics(h, collectHeadToHeadMetrics(h, 999, true), isBullpenHeroComparison(h) ? 12 : 8);
         StatScoreSummary summary = summarizeHeadToHeadEdges(h, shareMetrics);
         if (summary == null || summary.contributions.isEmpty()) return;
 
@@ -8494,6 +8495,9 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 if (c.winner == winner) driving.add(c); else against.add(c);
             }
 
+            String caveat = edgeTrustCaveat(h, ranked, winner, winnerName);
+            if (!caveat.isEmpty()) body.addView(whyEdgeCaveat(caveat, leaderColor));
+
             TextView drivingHead = text("DRIVING THE " + winnerName.toUpperCase(Locale.US) + " EDGE", 10, INK_SOFT, true);
             drivingHead.setLetterSpacing(0.12f);
             body.addView(drivingHead);
@@ -8526,7 +8530,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             }
         }
         // Footnote: make the lens dependency explicit, since the answer changes per lens.
-        TextView foot = text("Shares reflect each stat's weight in the " + presetDisplayName(activeComparisonPreset, roleForScope(h.scope)) + " lens — not just the size of the gap.", 11, EYEBROW, false);
+        TextView foot = text("Shares reflect sample-adjusted weight in the " + presetDisplayName(activeComparisonPreset, roleForScope(h.scope)) + " lens — not just the size of the gap.", 11, EYEBROW, false);
         foot.setPadding(0, dp(10), 0, 0);
         body.addView(foot);
 
@@ -8548,6 +8552,38 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     // v245: a driver row in the lens-weighting view. sharePct >= 0 shows that stat's % of the
     // decision (leading, since it's the number that exists nowhere else); sharePct < 0 hides it
     // (used for the "working against" group, where a leader-share % would be meaningless).
+    private String edgeTrustCaveat(HeadToHeadComparison h, ArrayList<EdgeContribution> ranked, int winner, String winnerName) {
+        if (h == null || h.isTeam || ranked == null || ranked.isEmpty() || winner == 0) return "";
+        String loserName = winner < 0 ? shortName(h.nameB) : shortName(h.nameA);
+        boolean winnerHasSmallSample = sideHasSmallSampleForCard(h, winner < 0, collectHeadToHeadMetrics(h, 999, true));
+        boolean loserHasSmallSample = sideHasSmallSampleForCard(h, winner > 0, collectHeadToHeadMetrics(h, 999, true));
+        boolean currentResultsPushBack = false;
+        boolean underlyingDrivesWinner = false;
+        for (EdgeContribution c : ranked) {
+            if (c == null) continue;
+            String label = safe(c.label).toLowerCase(Locale.US);
+            if ((label.equals("ops") || label.equals("woba") || label.equals("avg") || label.equals("slg")) && c.winner != 0 && c.winner != winner) currentResultsPushBack = true;
+            if ((label.contains("xwoba") || label.contains("barrel") || label.contains("hard-hit") || label.contains("hard hit") || label.contains("bb%") || label.contains("k%")) && c.winner == winner) underlyingDrivesWinner = true;
+        }
+        if (currentResultsPushBack && underlyingDrivesWinner) {
+            return loserName + " leads some current results, but those rows are treated cautiously when the sample is smaller. " + winnerName + " leads the model through expected production, contact quality, or plate discipline.";
+        }
+        if (winnerHasSmallSample || loserHasSmallSample) {
+            return "Small-sample rows still show who leads the displayed stat, but their impact is softened in the model.";
+        }
+        return "";
+    }
+
+    private View whyEdgeCaveat(String bodyText, int accent) {
+        TextView tv = text(bodyText, 11, INK_SOFT, false);
+        tv.setPadding(dp(10), dp(8), dp(10), dp(8));
+        tv.setBackground(roundedStroke(Color.argb(26, Color.red(accent), Color.green(accent), Color.blue(accent)), Color.argb(76, Color.red(accent), Color.green(accent), Color.blue(accent)), 14, 1));
+        LinearLayout.LayoutParams lp = matchWrap();
+        lp.setMargins(0, 0, 0, dp(10));
+        tv.setLayoutParams(lp);
+        return tv;
+    }
+
     private LinearLayout whyEdgeRow(EdgeContribution c, String nameA, String nameB, int sharePct,
                                     boolean towardLeader, int leaderColor, String note) {
         LinearLayout row = new LinearLayout(this);
@@ -8647,8 +8683,8 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             this.h = h;
             this.paletteA = paletteA;
             this.paletteB = paletteB;
-            this.allMetrics = collectHeadToHeadMetrics(h, 999, false);
-            this.shareMetrics = collectHeadToHeadMetrics(h, isBullpenHeroComparison(h) ? 12 : 8, true);
+            this.allMetrics = contributionSortedHeadToHeadMetrics(h, collectHeadToHeadMetrics(h, 999, false), 999);
+            this.shareMetrics = contributionSortedHeadToHeadMetrics(h, collectHeadToHeadMetrics(h, 999, true), isBullpenHeroComparison(h) ? 12 : 8);
             this.keyScore = summarizeHeadToHeadEdges(h, shareMetrics);
             this.overallScore = summarizeHeadToHeadEdges(h, allMetrics);
             int[] keyWins = scoreSummaryToInts(keyScore);
@@ -9578,6 +9614,29 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             paint.setShadowLayer(dp(6), 0, 0, Color.argb(120, 0, 0, 0));
             drawText(canvas, safe(meta).toUpperCase(Locale.US), cx, y + dp(58), dp(11), metaColor, true, Paint.Align.CENTER, 0.11f);
             paint.clearShadowLayer();
+
+            if (sideHasSmallSampleForCard(h, left, shareMetrics)) {
+                drawSampleChip(canvas, "SMALL SAMPLE", cx, y + dp(78), readableTeamColor(palette.primary, palette.secondary, left));
+            }
+        }
+
+        private void drawSampleChip(Canvas canvas, String label, float cx, float cy, int accent) {
+            paint.setTextSize(dp(7.2f));
+            paint.setTypeface(tfBold);
+            paint.setTextAlign(Paint.Align.CENTER);
+            float textW = paint.measureText(label);
+            float chipW = Math.max(dp(62), textW + dp(13));
+            float chipH = dp(15);
+            RectF r = new RectF(cx - chipW / 2f, cy - chipH / 2f, cx + chipW / 2f, cy + chipH / 2f);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setShader(null);
+            paint.setColor(Color.argb(42, Color.red(accent), Color.green(accent), Color.blue(accent)));
+            canvas.drawRoundRect(r, chipH / 2f, chipH / 2f, paint);
+            strokePaint.setStyle(Paint.Style.STROKE);
+            strokePaint.setStrokeWidth(dp(0.8f));
+            strokePaint.setColor(Color.argb(118, Color.red(accent), Color.green(accent), Color.blue(accent)));
+            canvas.drawRoundRect(r, chipH / 2f, chipH / 2f, strokePaint);
+            drawText(canvas, label, cx, centeredTextBaseline(cy, dp(7.2f), true), dp(7.2f), softColor(accent, 0.10f), true, Paint.Align.CENTER, 0.08f);
         }
 
         private void drawScoreBlock(Canvas canvas, RectF score) {
@@ -9795,7 +9854,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 drawContextShareMetric(canvas, m, panel, top, bottom, a, b);
                 return;
             }
-            int winner = edge == null ? 0 : edge.winner;
+            int winner = edge == null ? 0 : (edge.visualWinner != 0 ? edge.visualWinner : edge.winner);
             int aBase = battleTeamColor(paletteA, paletteB, true);
             int bBase = battleTeamColor(paletteB, paletteA, false);
             int aStrong = boostNeonColor(aBase, 1.58f, 1.18f);
@@ -9948,7 +10007,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         private void drawShareMetric(Canvas canvas, Metric m, RectF panel, float top, float bottom) {
             Double a = h.statsA.get(m.key), b = h.statsB.get(m.key);
             StatEdgeResult edge = statEdgeForMetric(h, m);
-            int winner = edge == null ? 0 : edge.winner;
+            int winner = edge == null ? 0 : (edge.visualWinner != 0 ? edge.visualWinner : edge.winner);
             int aBase = battleTeamColor(paletteA, paletteB, true);
             int bBase = battleTeamColor(paletteB, paletteA, false);
             int aStrong = boostNeonColor(aBase, 1.58f, 1.18f);
@@ -10607,6 +10666,32 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         }
     }
 
+    private ArrayList<Metric> contributionSortedHeadToHeadMetrics(HeadToHeadComparison h, ArrayList<Metric> metrics, int max) {
+        ArrayList<Metric> out = new ArrayList<>();
+        if (metrics != null) out.addAll(metrics);
+        if (h == null || out.size() <= 1) return out;
+        Collections.sort(out, (m1, m2) -> {
+            double s1 = contributionSortScore(h, m1);
+            double s2 = contributionSortScore(h, m2);
+            if (Math.abs(s2 - s1) > 0.000001d) return Double.compare(s2, s1);
+            return safe(m1 == null ? "" : m1.label).compareToIgnoreCase(safe(m2 == null ? "" : m2.label));
+        });
+        if (max > 0 && out.size() > max) return new ArrayList<>(out.subList(0, max));
+        return out;
+    }
+
+    private double contributionSortScore(HeadToHeadComparison h, Metric m) {
+        if (h == null || m == null) return 0d;
+        StatEdgeResult edge = statEdgeForMetric(h, m);
+        if (edge == null || !edge.valid) return 0d;
+        double weight = headToHeadScoringWeight(h, m);
+        if (weight <= 0d || Double.isNaN(weight)) weight = edge.scoring ? 1d : 0.15d;
+        double modelDrive = edge.scoring ? Math.max(0d, Math.min(1d, edge.scoreStrength)) : 0d;
+        double visualDrive = Math.max(0d, Math.min(1d, edge.visualStrength));
+        double samplePenalty = edge.sampleFlag ? 0.92d : 1d;
+        return samplePenalty * weight * (modelDrive + 0.30d * visualDrive);
+    }
+
     private ArrayList<Metric> collectHeadToHeadMetrics(HeadToHeadComparison h, int max) {
         return collectHeadToHeadMetrics(h, max, false);
     }
@@ -11174,9 +11259,12 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         boolean tossUp = false;
         boolean volumeSensitive = false;
         boolean sampleFlag = false;
+        boolean sampleA = false;
+        boolean sampleB = false;
         boolean contextOnly = false;
         boolean targetRange = false;
-        int winner = 0; // -1 A, +1 B, 0 toss-up/unknown
+        int winner = 0; // scoring/model winner: -1 A, +1 B, 0 toss-up/unknown
+        int visualWinner = 0; // v255: row visual winner must match the displayed stat value
         double qualityA = 50d, qualityB = 50d;
         double rawEdge = 0d;
         double adjustedEdge = 0d;
@@ -11203,6 +11291,11 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         out.qualityB = statQualityScore(h, m, b, false);
         int qualityWinner = Math.abs(out.qualityA - out.qualityB) < 0.0001d ? 0 : (out.qualityA > out.qualityB ? -1 : 1);
         int rawWinner = headToHeadWinner(h, m);
+
+        // v255: scoring can still use the model-quality read, but the row visual must
+        // stay truthful to the values printed on the row. If OPS/wOBA says the right
+        // player leads, the row glow points right; sample size may soften it, never flip it.
+        out.visualWinner = out.contextOnly ? 0 : (out.targetRange ? qualityWinner : rawWinner);
         out.winner = out.contextOnly ? 0 : (out.targetRange ? qualityWinner : (m.isCount() ? rawWinner : qualityWinner));
 
         double pctEdge = Math.abs(out.qualityA - out.qualityB);
@@ -11223,17 +11316,21 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
         out.reliability = sampleReliabilityForEdge(h, m);
         double opportunityBalance = opportunityBalanceForEdge(h, m);
-        // v130: sample adjustment can still soften the math, but the row-level "S"
-        // badge is reserved for material caveats. Normal sample adjustment is shown once
-        // in the hero instead of repeating on every rate row.
-        boolean bothLowSample = bothSidesLowSampleForEdge(h, m);
-        out.sampleFlag = !h.isTeam && bothLowSample && (out.reliability < 0.86d || opportunityBalance < 0.58d);
-        boolean showSampleBadge = !h.isTeam && bothLowSample && (out.reliability < 0.68d || opportunityBalance < 0.40d);
+
+        // v255: surface one-sided low samples too. The math already discounts the
+        // row using the smaller/opportunity-balanced sample; the UI now tells the user
+        // which side is being treated cautiously.
+        out.sampleA = !h.isTeam && sideLowSampleForEdge(h.statsA, m);
+        out.sampleB = !h.isTeam && sideLowSampleForEdge(h.statsB, m);
+        boolean anyLowSample = out.sampleA || out.sampleB;
+        out.sampleFlag = !h.isTeam && anyLowSample && (out.reliability < 0.86d || opportunityBalance < 0.70d);
+        boolean showSampleBadge = !h.isTeam && anyLowSample && (out.reliability < 0.82d || opportunityBalance < 0.58d);
         out.adjustedEdge = out.rawEdge * out.reliability;
 
         double deadZone = m.isCount() ? 5.0d : (out.targetRange ? 4.0d : 3.0d);
-        if (out.winner == 0 || out.adjustedEdge <= deadZone) {
+        if ((out.winner == 0 && out.visualWinner == 0) || out.adjustedEdge <= deadZone) {
             out.winner = 0;
+            if (out.adjustedEdge <= deadZone) out.visualWinner = 0;
             out.tossUp = true;
             out.visualStrength = 0d;
             out.glowStrength = 0d;
@@ -11268,7 +11365,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         if (out.contextOnly) out.badge = "CTX";
         else if (out.targetRange) out.badge = "TGT";
         else if (out.volumeSensitive) out.badge = "VOL";
-        if (showSampleBadge) out.badge = out.badge.isEmpty() ? "S" : out.badge + "/S";
+        if (showSampleBadge) out.badge = out.badge.isEmpty() ? "SAMPLE" : out.badge + "/SAMPLE";
         return out;
     }
 
@@ -11358,6 +11455,40 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         double a = sampleSizeForMetric(h.statsA, m);
         double b = sampleSizeForMetric(h.statsB, m);
         return a < target * 0.70d && b < target * 0.70d;
+    }
+
+    private boolean sideLowSampleForEdge(Stats s, Metric m) {
+        if (s == null || m == null) return false;
+        double target = targetSampleForMetric(m);
+        if (target <= 0d) return false;
+        double sample = sampleSizeForMetric(s, m);
+        return sample < target * 0.70d;
+    }
+
+    private boolean sideVeryLowSampleForEdge(Stats s, Metric m) {
+        if (s == null || m == null) return false;
+        double target = targetSampleForMetric(m);
+        if (target <= 0d) return false;
+        double sample = sampleSizeForMetric(s, m);
+        return sample < target * 0.48d;
+    }
+
+    private boolean sideHasSmallSampleForCard(HeadToHeadComparison h, boolean leftSide, ArrayList<Metric> metrics) {
+        if (h == null || h.isTeam || metrics == null || metrics.isEmpty()) return false;
+        Stats s = leftSide ? h.statsA : h.statsB;
+        if (s == null) return false;
+        int checked = 0;
+        int low = 0;
+        boolean veryLow = false;
+        for (Metric m : metrics) {
+            if (m == null || isContextOnlyMetric(m)) continue;
+            double target = targetSampleForMetric(m);
+            if (target <= 0d) continue;
+            checked++;
+            if (sideLowSampleForEdge(s, m)) low++;
+            if (sideVeryLowSampleForEdge(s, m)) veryLow = true;
+        }
+        return checked > 0 && (veryLow || low >= Math.min(2, checked));
     }
 
     private double sampleReliabilityForEdge(HeadToHeadComparison h, Metric m) {
@@ -11831,9 +11962,9 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         int accentB = boostNeonColor(readableTeamColor(paletteB.primary, paletteB.secondary, false), 1.14f, 1.05f);
         int leaderColor = FAINT;
         StatEdgeResult rowEdge = statEdgeForMetric(h, m);
-        if (rowEdge != null && rowEdge.valid && !rowEdge.contextOnly && rowEdge.winner != 0) {
-            aLeads = rowEdge.winner < 0;
-            bLeads = rowEdge.winner > 0;
+        if (rowEdge != null && rowEdge.valid && !rowEdge.contextOnly && rowEdge.visualWinner != 0) {
+            aLeads = rowEdge.visualWinner < 0;
+            bLeads = rowEdge.visualWinner > 0;
             leader = shortName(aLeads ? h.nameA : h.nameB) + " leads";
             leaderColor = aLeads ? accentA : accentB;
         }
@@ -11923,6 +12054,12 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         ctxA.setGravity(Gravity.CENTER);
         ctxA.setPadding(0, dp(2), 0, 0);
         sideA.addView(ctxA, matchWrap());
+        if (rowEdge != null && rowEdge.sampleA) {
+            TextView sample = smallSamplePill(accentA);
+            LinearLayout.LayoutParams sampleLp = matchWrap();
+            sampleLp.setMargins(0, dp(4), 0, 0);
+            sideA.addView(sample, sampleLp);
+        }
         faceOff.addView(sideA, new LinearLayout.LayoutParams(0, -2, 1));
 
         // Center "vs"
@@ -11959,6 +12096,12 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         ctxB.setGravity(Gravity.CENTER);
         ctxB.setPadding(0, dp(2), 0, 0);
         sideB.addView(ctxB, matchWrap());
+        if (rowEdge != null && rowEdge.sampleB) {
+            TextView sample = smallSamplePill(accentB);
+            LinearLayout.LayoutParams sampleLp = matchWrap();
+            sampleLp.setMargins(0, dp(4), 0, 0);
+            sideB.addView(sample, sampleLp);
+        }
         faceOff.addView(sideB, new LinearLayout.LayoutParams(0, -2, 1));
 
         row.addView(faceOff, foLp);
@@ -12029,6 +12172,15 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         gapRow.addView(rankTvB, new LinearLayout.LayoutParams(0, -2, 1));
 
         row.addView(gapRow, gapLp);
+    }
+
+    private TextView smallSamplePill(int accent) {
+        TextView tv = text("Small sample", 8, softColor(accent, 0.12f), true);
+        tv.setGravity(Gravity.CENTER);
+        tv.setSingleLine(true);
+        tv.setPadding(dp(7), dp(3), dp(7), dp(3));
+        tv.setBackground(roundedStroke(Color.argb(26, Color.red(accent), Color.green(accent), Color.blue(accent)), Color.argb(92, Color.red(accent), Color.green(accent), Color.blue(accent)), 999, 1));
+        return tv;
     }
 
     private TeamPalette paletteForHeadToHeadSide(HeadToHeadComparison h, boolean leftSide) {
@@ -17679,7 +17831,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         titleRow.addView(slateChip);
         panel.addView(titleRow, matchWrap());
 
-        TextView sub = text("Tap any compact game tile for team, starter, and key-hitter matchup options.", 11, INK_DIM, false);
+        TextView sub = text("Tap a game to open matchup options.", 11, INK_DIM, false);
         sub.setPadding(0, dp(5), 0, dp(6));
         panel.addView(sub, matchWrap());
 
@@ -17728,7 +17880,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         titleRow.addView(count);
         panel.addView(titleRow, matchWrap());
 
-        TextView sub = text("Tap a game to compare teams, starters, or key hitters.", 11, INK_DIM, false);
+        TextView sub = text("Pick any matchup to see team edges, starters, bullpens, and key hitters.", 11, INK_DIM, false);
         sub.setPadding(0, dp(5), 0, dp(7));
         panel.addView(sub, matchWrap());
 
