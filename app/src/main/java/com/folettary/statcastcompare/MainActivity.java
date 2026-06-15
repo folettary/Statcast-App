@@ -754,7 +754,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v308", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v309", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -18666,6 +18666,16 @@ private View liveGameCard(LiveGame game) {
             float zoneT = mapZ(zoneTop, zMin, zMax, drawT, drawH);
             float zoneB = mapZ(zoneBot, zMin, zMax, drawT, drawH);
 
+            // v309 debug: outline the full pitch-tracking coordinate window, not the strike zone.
+            // This shows exactly where pitches can be plotted before dot-edge insets are applied.
+            p.setShader(null);
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeWidth(dp(1f));
+            p.setColor(Color.argb(150, 82, 226, 176));
+            p.setPathEffect(new android.graphics.DashPathEffect(new float[] { dp(5), dp(4) }, 0));
+            canvas.drawRect(drawL, drawT, drawL + drawW, drawT + drawH, p);
+            p.setPathEffect(null);
+
             // zone fill + thirds grid
             p.setShader(null);
             p.setStyle(Paint.Style.FILL); p.setColor(Color.argb(20, 255, 255, 255));
@@ -19038,7 +19048,7 @@ private View liveGameCard(LiveGame game) {
             legendScroll.setVerticalScrollBarEnabled(false);
             legendScroll.setFillViewport(false);
             legendScroll.setClipToPadding(true);
-            legendScroll.setPadding(0, 0, dp(2), 0);
+            legendScroll.setPadding(0, 0, dp(1), 0);
             legendScroll.setOnTouchListener((v, ev) -> {
                 v.getParent().requestDisallowInterceptTouchEvent(true);
                 if (ev.getAction() == android.view.MotionEvent.ACTION_UP
@@ -19049,7 +19059,7 @@ private View liveGameCard(LiveGame game) {
             });
             LinearLayout legend = new LinearLayout(this);
             legend.setOrientation(LinearLayout.VERTICAL);
-            legend.setPadding(0, 0, dp(4), 0);
+            legend.setPadding(0, 0, dp(2), 0);
             if (ab.pitches.isEmpty()) {
                 TextView waiting = text("Waiting for the first pitch…", 10, INK_DIM, false);
                 waiting.setMaxLines(3);
@@ -19060,8 +19070,8 @@ private View liveGameCard(LiveGame game) {
             legendScroll.addView(legend, new ScrollView.LayoutParams(-1, -2));
             legendClip.addView(legendScroll, new FrameLayout.LayoutParams(-1, zoneH));
             int screenW = getResources().getDisplayMetrics().widthPixels;
-            int railW = Math.min(dp(94), Math.max(dp(82), screenW * 23 / 100));
-            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(railW, zoneH); lgLp.setMargins(dp(3), 0, 0, 0);
+            int railW = Math.min(dp(138), Math.max(dp(122), screenW * 32 / 100));
+            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(railW, zoneH); lgLp.setMargins(dp(6), 0, 0, 0);
             zoneRow.addView(legendClip, lgLp);
             card.addView(zoneRow, zrLp);
 
@@ -19355,7 +19365,7 @@ private View liveGameCard(LiveGame game) {
         TextView num = text(String.valueOf(lp.number), 9, Color.argb(235, 8, 13, 22), true);
         num.setGravity(Gravity.CENTER);
         dotWrap.addView(num, new FrameLayout.LayoutParams(dp(18), dp(18)));
-        LinearLayout.LayoutParams dwl = new LinearLayout.LayoutParams(-2, -2); dwl.setMargins(0, 0, dp(6), 0);
+        LinearLayout.LayoutParams dwl = new LinearLayout.LayoutParams(-2, -2); dwl.setMargins(0, 0, dp(5), 0);
         row.addView(dotWrap, dwl);
         // stacked: "4-Seam · 102" then result/exit-velo beneath — column is weight-bounded so text
         // ellipsizes inside the list instead of overflowing off the right edge.
@@ -19371,7 +19381,7 @@ private View liveGameCard(LiveGame game) {
             res = String.format(Locale.US, "In play · %.0f EV", lp.exitVelo);
         }
         TextView r = text(res, 9, lp.isInPlay ? Color.rgb(82, 226, 176) : INK_DIM, false);
-        r.setSingleLine(true); r.setEllipsize(TextUtils.TruncateAt.END);
+        r.setSingleLine(false); r.setMaxLines(2); r.setEllipsize(TextUtils.TruncateAt.END);
         col.addView(r, matchWrap());
         row.addView(col, new LinearLayout.LayoutParams(0, -2, 1));
         return row;
