@@ -18624,11 +18624,18 @@ private View liveGameCard(LiveGame game) {
             // x ∈ [-0.83, 0.83]; a window of x ∈ [-1.45, 1.45] makes the box ~57% of the width
             // (was ~41% at ±2.0, which is why enlarging the view never appeared to enlarge the box).
             float xMin = -1.6f, xMax = 1.6f, zMin = 0.9f, zMax = 4.1f;
-            float pad = dp(6);
-            // Keep the plot square and centered so the zone box isn't stretched in a wide view.
-            float avail = Math.min(w, h) - pad * 2f;
-            float plotW = avail, plotH = avail;
-            float padL = (w - plotW) / 2f, padT = (h - plotH) / 2f;
+            float pad = dp(8);
+            float plotW = w - pad * 2f, plotH = h - pad * 2f;
+            float padL = pad, padT = pad;
+            // Center the window on the plate and derive its feet-span from the view's aspect ratio
+            // so feet-per-pixel is identical on both axes — the zone keeps true proportions and the
+            // graphic fills the (taller-than-wide) view without letterboxing.
+            float zCenter = 2.5f;                 // vertical center of the window (ft above ground)
+            float ftPerPx = 3.4f / plotH;         // ~3.4 ft tall window → scale
+            float halfH = plotH * ftPerPx / 2f;
+            float halfW = plotW * ftPerPx / 2f;
+            float xMin = -halfW, xMax = halfW;
+            float zMin = zCenter - halfH, zMax = zCenter + halfH;
             // strike zone box: x ∈ [-0.83, 0.83], z ∈ [szBot, szTop] (defaults if missing)
             float szBot = 1.5f, szTop = 3.4f;
             for (LivePitch lp : pitches) { if (!Double.isNaN(lp.szTop) && !Double.isNaN(lp.szBot)) { szTop=(float)lp.szTop; szBot=(float)lp.szBot; break; } }
@@ -18938,7 +18945,7 @@ private View liveGameCard(LiveGame game) {
             LinearLayout.LayoutParams zrLp = matchWrap(); zrLp.setMargins(0, dp(8), 0, 0);
             int zoneH = dp(250);
             StrikeZoneView zone = new StrikeZoneView(this, ab.pitches);
-            LinearLayout.LayoutParams zLp = new LinearLayout.LayoutParams(dp(206), zoneH);
+            LinearLayout.LayoutParams zLp = new LinearLayout.LayoutParams(0, zoneH, 1.25f);
             zoneRow.addView(zone, zLp);
             // pitch list: newest first, scrollable within the fixed zone height
             ScrollView legendScroll = new ScrollView(this);
@@ -18952,7 +18959,7 @@ private View liveGameCard(LiveGame game) {
                 for (int pi = ab.pitches.size() - 1; pi >= 0; pi--) legend.addView(pitchLegendRow(ab.pitches.get(pi)), matchWrap());
             }
             legendScroll.addView(legend, new ScrollView.LayoutParams(-1, -2));
-            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(0, zoneH, 1f); lgLp.setMargins(dp(10), 0, 0, 0);
+            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(0, zoneH, 1f); lgLp.setMargins(dp(8), 0, 0, 0);
             zoneRow.addView(legendScroll, lgLp);
             card.addView(zoneRow, zrLp);
 
@@ -19222,21 +19229,21 @@ private View liveGameCard(LiveGame game) {
         dotWrap.addView(num, new FrameLayout.LayoutParams(dp(18), dp(18)));
         LinearLayout.LayoutParams dwl = new LinearLayout.LayoutParams(-2, -2); dwl.setMargins(0, 0, dp(8), 0);
         row.addView(dotWrap, dwl);
-        // stacked: "Slider · 87"  then  result/exit-velo beneath
+        // stacked: "4-Seam · 102" then result/exit-velo beneath — column is weight-bounded so text
+        // ellipsizes inside the list instead of overflowing off the right edge.
         LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
         String typeShort = pitchTypeShort(lp.typeCode, lp.typeName);
         String speed = lp.speed > 0 ? String.format(Locale.US, "%.0f", lp.speed) : "";
-        TextView t = text(typeShort + (speed.isEmpty() ? "" : "  ·  " + speed + " mph"), 11, INK, true);
-        t.setSingleLine(true);
+        TextView t = text(typeShort + (speed.isEmpty() ? "" : " · " + speed), 11, INK, true);
+        t.setSingleLine(true); t.setEllipsize(TextUtils.TruncateAt.END);
         col.addView(t, matchWrap());
         String res = safe(lp.result);
         if (lp.isInPlay && !Double.isNaN(lp.exitVelo)) {
-            String la = Double.isNaN(lp.launchAngle) ? "" : String.format(Locale.US, " · %.0f°", lp.launchAngle);
-            res = String.format(Locale.US, "In play · %.0f mph EV", lp.exitVelo) + la;
+            res = String.format(Locale.US, "In play · %.0f EV", lp.exitVelo);
         }
         TextView r = text(res, 9, lp.isInPlay ? Color.rgb(82, 226, 176) : INK_DIM, false);
-        r.setSingleLine(true);
+        r.setSingleLine(true); r.setEllipsize(TextUtils.TruncateAt.END);
         col.addView(r, matchWrap());
         row.addView(col, new LinearLayout.LayoutParams(0, -2, 1));
         return row;
