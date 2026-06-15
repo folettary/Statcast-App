@@ -752,7 +752,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v303", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v304", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -1303,7 +1303,7 @@ public class MainActivity extends Activity {
         eyebrow.setLetterSpacing(0.22f);
         hero.addView(eyebrow);
 
-        TextView heroTitle = text("Build a Matchup", 23, Color.WHITE, true);
+        TextView heroTitle = text("Build a Matchup", 19, Color.WHITE, true);
         heroTitle.setPadding(0, dp(6), 0, 0);
         hero.addView(heroTitle);
 
@@ -2009,6 +2009,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         aLp.leftMargin = dp(28);
         aLp.topMargin = dp(143);
         wrap.addView(homeSelectAText, aLp);
+        homeSelectAText.setVisibility(View.GONE);
 
         homeSelectBText = homeSelectorPill("RIGHT", Color.rgb(255, 226, 136));
         homeSelectBText.setSingleLine(true);
@@ -2018,6 +2019,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         bLp.rightMargin = dp(28);
         bLp.topMargin = dp(143);
         wrap.addView(homeSelectBText, bLp);
+        homeSelectBText.setVisibility(View.GONE);
 
         LinearLayout homeModeToggle = new LinearLayout(this);
         homeModeToggle.setOrientation(LinearLayout.HORIZONTAL);
@@ -2028,7 +2030,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         }, 18, Color.argb(92, 255, 255, 255), 1));
         FrameLayout.LayoutParams toggleLp = new FrameLayout.LayoutParams(dp(178), dp(36));
         toggleLp.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
-        toggleLp.bottomMargin = dp(6);
+        toggleLp.bottomMargin = dp(18);
         wrap.addView(homeModeToggle, toggleLp);
 
         homeModePlayersBtn = homeSegmentButton("Player", Color.rgb(84, 142, 247));
@@ -20591,15 +20593,14 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         LinearLayout.LayoutParams trLp = new LinearLayout.LayoutParams(-2, -2);
         trLp.setMargins(dp(6), 0, 0, 0);
         top.addView(topRefresh, trLp);
-        panel.addView(top, matchWrap());
+        if (game.isPregame()) panel.addView(top, matchWrap());
 
         String pitchers = (safe(game.awayPitcher).isEmpty() ? "Away SP TBD" : lastNameOnly(game.awayPitcher))
                 + " vs " + (safe(game.homePitcher).isEmpty() ? "Home SP TBD" : lastNameOnly(game.homePitcher));
 
-        // ===== v295: keep the score hero attached to the live feed =====
-        // When the user is on the LIVE experience, move the control bars ABOVE the score hero so
-        // the score header sits directly on top of the live feed/tracker instead of being separated
-        // from it by layers of buttons. Matchups keeps the older order.
+        // ===== v304: LIVE | MATCHUPS should be the first controls at the top =====
+        // Hide the utility header on live game detail so the main tab bar sits at the very top,
+        // and keep switching between LIVE and MATCHUPS stable without layout jumps.
         boolean pregame = game.isPregame();
         boolean live = game.isLive();
         if (gameHubTabDirty || gameHubTab == null) {
@@ -20611,23 +20612,26 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         if ("box".equals(gameHubTab)) gameHubTab = live ? "live" : "matchups";
 
         boolean controlsAboveHero = !pregame && live;
+        boolean liveHubSelected = "live".equals(gameHubTab);
         if (controlsAboveHero) {
             panel.addView(gameHubTabBar(game, awayPalette, homePalette), tabBarLp());
         }
 
         if (game.isLive()) {
-            // v298: the Tracker/Win Prob/Box sub-tabs are now the HEADER of the live card, sitting
-            // inside the same container as the hero — hierarchy through containment, not a third
-            // floating pill bar. For Win Prob / Box the hero still anchors the card.
+            // v304: LIVE keeps the Tracker/Win Prob/Box sub-tabs; MATCHUPS hides them completely.
+            // Both routes still keep the main LIVE | MATCHUPS switch at the very top.
             LinearLayout liveCard = new LinearLayout(this);
             liveCard.setOrientation(LinearLayout.VERTICAL);
             liveCard.setPadding(dp(6), dp(6), dp(6), dp(8));
             liveCard.setBackground(roundedStroke(Color.argb(150, 6, 11, 20), Color.argb(46, 255, 255, 255), 20, 1));
             LinearLayout.LayoutParams cardLp = matchWrap();
             cardLp.setMargins(dp(12), controlsAboveHero ? dp(2) : dp(8), dp(12), dp(8));
-            liveCard.addView(liveSubBar(game), matchWrap());
+            if (liveHubSelected) {
+                liveCard.addView(liveSubBar(game), matchWrap());
+            }
             View liveHero = liveScoreHero(game, away, home, awayPalette, homePalette);
-            LinearLayout.LayoutParams lhLp = matchWrap(); lhLp.setMargins(0, dp(6), 0, 0);
+            LinearLayout.LayoutParams lhLp = matchWrap();
+            lhLp.setMargins(0, liveHubSelected ? dp(6) : 0, 0, 0);
             liveCard.addView(liveHero, lhLp);
             panel.addView(liveCard, cardLp);
         } else {
@@ -20649,7 +20653,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
 
     private LinearLayout.LayoutParams tabBarLp() {
         LinearLayout.LayoutParams lp = matchWrap();
-        lp.setMargins(dp(12), dp(2), dp(12), dp(10));
+        lp.setMargins(dp(12), 0, dp(12), dp(8));
         return lp;
     }
 
@@ -20997,11 +21001,11 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         row.setGravity(Gravity.LEFT);
         row.setPadding(dp(14), dp(9), dp(14), dp(4));
 
-        TextView label = text(title, 9, Color.rgb(244, 207, 100), true);
+        TextView label = text(title, 10, Color.rgb(244, 207, 100), true);
         label.setLetterSpacing(0.18f);
         row.addView(label, matchWrap());
 
-        TextView sub = text(subtitle, 8, Color.rgb(138, 156, 178), false);
+        TextView sub = text(subtitle, 9, Color.rgb(138, 156, 178), false);
         sub.setSingleLine(true);
         sub.setEllipsize(TextUtils.TruncateAt.END);
         sub.setPadding(0, dp(1), 0, 0);
@@ -21049,7 +21053,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.HORIZONTAL);
         top.setGravity(Gravity.CENTER_VERTICAL);
-        TextView t = text(title, 11, Color.WHITE, true);
+        TextView t = text(title, 12, Color.WHITE, true);
         t.setSingleLine(true);
         top.addView(t, new LinearLayout.LayoutParams(0, -2, 1));
 
@@ -21067,13 +21071,13 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         }
         tile.addView(top, matchWrap());
 
-        TextView v = text(value, 9, INK, true);
+        TextView v = text(value, 10, INK, true);
         v.setSingleLine(true);
         v.setEllipsize(TextUtils.TruncateAt.END);
         v.setPadding(0, dp(5), 0, 0);
         tile.addView(v, matchWrap());
 
-        TextView c = text(enabled || disabledNote == null ? caption : disabledNote, 8,
+        TextView c = text(enabled || disabledNote == null ? caption : disabledNote, 9,
                 enabled ? Color.rgb(146, 164, 188) : Color.rgb(244, 192, 54), false);
         c.setSingleLine(true);
         c.setEllipsize(TextUtils.TruncateAt.END);
