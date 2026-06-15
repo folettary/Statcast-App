@@ -775,7 +775,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v297", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v298", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -18619,11 +18619,10 @@ private View liveGameCard(LiveGame game) {
     }
 
     private ZoneBounds strikeZoneBoundsForFeed(LiveFeed feed) {
-        // v297: fixed calibrated game window. Width still leaves room for far glove-/arm-side misses.
-        // Vertically tightened (was 0.32–4.12) so the plot isn't mostly empty sky: the strike zone
-        // is 1.50–3.40 ft, so 0.55 ft of headroom above and a bit below the plate is plenty for real
-        // misses without leaving a big dead gap above the box.
-        return new ZoneBounds(-2.10f, 1.60f, 0.55f, 3.95f);
+        // v298: narrower horizontal window so the zone box is bigger AND the plot fills more of the
+        // column vertically (narrowing X raises the shared scale, so drawH grows → less empty sky
+        // above). Still leaves ~0.65 ft beyond each edge of the 1.66 ft zone for real misses.
+        return new ZoneBounds(-1.78f, 1.40f, 0.58f, 3.92f);
     }
 
     private class StrikeZoneView extends View {
@@ -18667,12 +18666,15 @@ private View liveGameCard(LiveGame game) {
             // game window left so the zone uses the available card space better.
             float drawL = padL + Math.max(0f, (plotW - drawW) * 0.22f);
 
-            // v297: when the plot is width-constrained (drawH < plotH) there is leftover vertical
-            // room. Bottom-anchoring the plate dumped ALL of it above the zone, which read as a big
-            // empty sky. Instead, place the window so the leftover slack sits mostly BELOW the plate
-            // (a small share above for high misses + tails), lifting the box to ~40% from the top.
-            float slack = Math.max(0f, plotH - drawH);
-            float drawT = padT + slack * 0.30f; // 30% of slack above, 70% below
+            // v298: anchor the plate near the BOTTOM of the column so the RESULT box sits snug
+            // beneath it (no big plate-to-result gap). Any leftover vertical slack from the
+            // width-constrained scale goes above, where the tails come from — and we keep that
+            // small by using a near-square window so drawH ≈ plotH.
+            float bottomGap = dp(2);
+            float drawT = padT + Math.max(0f, plotH - drawH) - 0f;
+            // push the draw region to the bottom of the plot area (minus a tiny gap)
+            drawT = (padT + plotH) - drawH - bottomGap;
+            if (drawT < padT) drawT = padT;
 
             float zoneL = mapX(-zoneHalfWidth, xMin, xMax, drawL, drawW);
             float zoneR = mapX( zoneHalfWidth, xMin, xMax, drawL, drawW);
@@ -20589,18 +20591,26 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         if (!live && "live".equals(gameHubTab)) gameHubTab = "matchups";
         if ("box".equals(gameHubTab)) gameHubTab = live ? "live" : "matchups";
 
-        boolean liveFeedView = !pregame && live && "live".equals(gameHubTab);
-        boolean controlsAboveHero = !pregame && live; // v293: Matchups tab gets the same swapped order as Live.
+        boolean controlsAboveHero = !pregame && live;
         if (controlsAboveHero) {
             panel.addView(gameHubTabBar(game, awayPalette, homePalette), tabBarLp());
-            if (liveFeedView) panel.addView(liveSubBar(game), liveSubBarLp());
         }
 
         if (game.isLive()) {
-            LinearLayout.LayoutParams lhLp = matchWrap();
-            lhLp.setMargins(dp(12), controlsAboveHero ? dp(2) : dp(8), dp(12), liveFeedView ? dp(6) : dp(10));
+            // v298: the Tracker/Win Prob/Box sub-tabs are now the HEADER of the live card, sitting
+            // inside the same container as the hero — hierarchy through containment, not a third
+            // floating pill bar. For Win Prob / Box the hero still anchors the card.
+            LinearLayout liveCard = new LinearLayout(this);
+            liveCard.setOrientation(LinearLayout.VERTICAL);
+            liveCard.setPadding(dp(6), dp(6), dp(6), dp(8));
+            liveCard.setBackground(roundedStroke(Color.argb(150, 6, 11, 20), Color.argb(46, 255, 255, 255), 20, 1));
+            LinearLayout.LayoutParams cardLp = matchWrap();
+            cardLp.setMargins(dp(12), controlsAboveHero ? dp(2) : dp(8), dp(12), dp(8));
+            liveCard.addView(liveSubBar(game), matchWrap());
             View liveHero = liveScoreHero(game, away, home, awayPalette, homePalette);
-            panel.addView(liveHero, lhLp);
+            LinearLayout.LayoutParams lhLp = matchWrap(); lhLp.setMargins(0, dp(6), 0, 0);
+            liveCard.addView(liveHero, lhLp);
+            panel.addView(liveCard, cardLp);
         } else {
             LinearLayout.LayoutParams heroLp = new LinearLayout.LayoutParams(-1, dp(108));
             heroLp.setMargins(dp(12), dp(8), dp(12), dp(10));
@@ -20614,7 +20624,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         if ("matchups".equals(gameHubTab)) {
             renderMatchupCards(panel, game, awayPalette, homePalette, accent);
         } else {
-            renderLiveTab(panel, game, awayPalette, homePalette, !liveFeedView);
+            renderLiveTab(panel, game, awayPalette, homePalette, false); // sub-bar now lives in the live card header
         }
     }
 
