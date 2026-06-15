@@ -754,7 +754,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v312", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v313", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -18646,18 +18646,17 @@ private View liveGameCard(LiveGame game) {
             float spanX = Math.max(0.01f, xMax - xMin);
             float spanZ = Math.max(0.01f, zMax - zMin);
 
-            // v312: FILL THE WHOLE VIEW with the tracking window — no dead space on any side.
-            // The window is centered on the strike zone, and its span on each axis is derived from
-            // the view's aspect ratio so drawW==plotW and drawH==plotH exactly. We start from a base
-            // half-span (how much tracking room beyond the zone we want) and grow whichever axis the
-            // view is longer on, so the window stays proportional (feet-per-pixel equal on x and z)
-            // while using every pixel.
-            final float zoneCx = 0f;                       // strike zone is horizontally centered
-            final float zoneCz = 2.30f;                    // bias center slightly low so the plate
-                                                           // (0.80 ft) and below-plate misses sit
-                                                           // inside the window, not clipped at zMin.
-            float baseHalf = 1.30f; // v312: smaller base half-span → LARGER strike zone visual.
-            float ftPerPx = (2f * baseHalf) / Math.min(plotW, plotH); // shared scale on the short side
+            // v313: FILL THE WHOLE VIEW with the strike zone CENTERED. The window is centered on the
+            // zone's true center and feet-per-pixel is shared across both axes, so the zone sits dead
+            // center with proportional tracking room on every side (a bit more top/bottom since the
+            // view is taller — but even and balanced, never lopsided).
+            final float zoneCx = 0f;                          // zone is horizontally centered
+            final float zoneCz = (zoneBot + zoneTop) / 2f;    // 2.45 ft — true vertical center
+            // Tracking room beyond the zone on the SHORT (horizontal) axis, in feet. Smaller → bigger
+            // zone visual. The taller axis gets proportionally more room at the same scale.
+            float trackMargin = 0.60f;
+            float halfShortFt = zoneHalfWidth + trackMargin;  // half horizontal span (short axis)
+            float ftPerPx = (2f * halfShortFt) / plotW;       // shared scale, set by the short axis
             float halfX = (plotW * ftPerPx) / 2f;
             float halfZ = (plotH * ftPerPx) / 2f;
             xMin = zoneCx - halfX; xMax = zoneCx + halfX;
@@ -19082,10 +19081,10 @@ private View liveGameCard(LiveGame game) {
             legendScroll.addView(legend, new ScrollView.LayoutParams(-1, -2));
             legendClip.addView(legendScroll, new FrameLayout.LayoutParams(-1, zoneH));
             int screenW = getResources().getDisplayMetrics().widthPixels;
-            // Just enough for the dot + the longest result label ("Swinging Strike") and no more,
-            // so the rail sits as far right as possible and the plot keeps the rest.
-            int railW = Math.min(dp(118), Math.max(dp(104), screenW * 27 / 100));
-            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(railW, zoneH); lgLp.setMargins(dp(4), 0, dp(2), 0);
+            // Rail hugs the right edge: just wide enough for the dot + "Swinging Strike" on one line,
+            // and no more, so the plot gets every other pixel. Flush to the card's right edge.
+            int railW = Math.min(dp(104), Math.max(dp(96), screenW * 24 / 100));
+            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(railW, zoneH); lgLp.setMargins(dp(4), 0, -dp(10), 0);
             zoneRow.addView(legendClip, lgLp);
             card.addView(zoneRow, zrLp);
 
