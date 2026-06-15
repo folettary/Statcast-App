@@ -775,7 +775,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v284", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v285", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -18609,7 +18609,7 @@ private View liveGameCard(LiveGame game) {
         }
     }
 
-    // Strike-zone plot: proportional zone + padded pitch viewport. v284 keeps the plot
+    // Strike-zone plot: proportional zone + padded pitch viewport. v285 keeps the plot
     // as the visual centerpiece while preventing far inside/outside pitches from clipping.
     private class StrikeZoneView extends View {
         private final java.util.List<LivePitch> pitches;
@@ -18649,10 +18649,12 @@ private View liveGameCard(LiveGame game) {
             // actual pitch locations plus extra feet-padding, and finally expand whichever axis is
             // needed so feet-per-pixel stays identical horizontally and vertically.
             final float zoneHalfWidth = 0.83f;
-            float xMin = -1.58f, xMax = 1.58f;
-            float zMin = Math.max(0.35f, szBot - 0.78f);
-            float zMax = Math.max(szTop + 0.78f, zMin + 3.25f);
-            final float pitchPadFt = 0.36f;
+            // v285: the default viewport is intentionally tighter so the strike zone itself
+            // is the hero. Wild/edge pitches still grow this window below instead of clipping.
+            float xMin = -1.23f, xMax = 1.23f;
+            float zMin = Math.max(0.62f, szBot - 0.48f);
+            float zMax = Math.max(szTop + 0.58f, zMin + 2.78f);
+            final float pitchPadFt = 0.42f;
             if (pitches != null) {
                 for (LivePitch lp : pitches) {
                     if (lp == null || Double.isNaN(lp.pX) || Double.isNaN(lp.pZ)) continue;
@@ -18670,8 +18672,10 @@ private View liveGameCard(LiveGame game) {
             // Keep a useful minimum around the zone even when the current AB has only near-zone pitches.
             float xMid = (xMin + xMax) / 2f;
             float zMid = (zMin + zMax) / 2f;
-            float minSpanX = 3.16f;
-            float minSpanZ = Math.max(3.25f, (szTop - szBot) + 1.42f);
+            // v285: do not reserve 3+ feet horizontally for every normal AB. That made the
+            // zone tiny. Keep enough default miss room, then let real outside pitches expand it.
+            float minSpanX = 2.46f;
+            float minSpanZ = Math.max(2.78f, (szTop - szBot) + 1.02f);
             if (xMax - xMin < minSpanX) { xMin = xMid - minSpanX / 2f; xMax = xMid + minSpanX / 2f; }
             if (zMax - zMin < minSpanZ) { zMin = zMid - minSpanZ / 2f; zMax = zMid + minSpanZ / 2f; }
 
@@ -19011,7 +19015,7 @@ private View liveGameCard(LiveGame game) {
             }
             card.addView(abNav, abLp);
 
-            // v284: protected two-column live AB layout. The plot keeps the hero footprint while the
+            // v285: protected two-column live AB layout. The plot keeps the hero footprint while the
             // right pitch rail is fixed-width, padded, and independently scrollable for long at-bats.
             LinearLayout zoneRow = new LinearLayout(this);
             zoneRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -19040,7 +19044,7 @@ private View liveGameCard(LiveGame game) {
             }
             legendScroll.addView(legend, new ScrollView.LayoutParams(-1, -2));
             int screenW = getResources().getDisplayMetrics().widthPixels;
-            int railW = Math.min(dp(126), Math.max(dp(108), screenW / 3));
+            int railW = Math.min(dp(116), Math.max(dp(100), screenW / 3));
             LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(railW, zoneH); lgLp.setMargins(dp(11), 0, 0, 0);
             zoneRow.addView(legendScroll, lgLp);
             card.addView(zoneRow, zrLp);
