@@ -754,7 +754,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v321", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v322", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -18936,7 +18936,7 @@ private View liveGameCard(LiveGame game) {
 
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(12), dp(12), dp(12), dp(12));
+        card.setPadding(dp(12), dp(8), dp(12), dp(8));
         card.setBackground(roundedGradientStroke(new int[] {
                 Color.rgb(7, 12, 21),
                 mixColor(batPal.primary, Color.rgb(7, 12, 21), 0.82f),
@@ -18971,7 +18971,7 @@ private View liveGameCard(LiveGame game) {
         LinearLayout matchRow = new LinearLayout(this);
         matchRow.setOrientation(LinearLayout.HORIZONTAL);
         matchRow.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams mrLp = matchWrap(); mrLp.setMargins(0, dp(4), 0, 0);
+        LinearLayout.LayoutParams mrLp = matchWrap(); mrLp.setMargins(0, dp(1), 0, 0);
         matchRow.addView(playerPortraitColumn(pitcherId, pitcherNm, "PITCHING", abPitchColor, pitcherPitchLine(feed, pitcherId)), new LinearLayout.LayoutParams(0, -2, 1f));
         LinearLayout center = new LinearLayout(this);
         center.setOrientation(LinearLayout.VERTICAL);
@@ -19024,11 +19024,12 @@ private View liveGameCard(LiveGame game) {
             TextView abSub = text((abTopHalf ? "Top " : "Bot ") + ordinalNum(abInning) + " · vs " + pitcherNm, 9, INK_DIM, true);
             abSub.setGravity(Gravity.CENTER);
             abNav.addView(abSub, matchWrap());
-            // dots strip + LIVE pill row
+            // dots strip + inline LIVE pill (when browsing a past AB) — kept on ONE row so it never
+            // eats into the tracking window below.
             LinearLayout dotsRow = new LinearLayout(this);
             dotsRow.setOrientation(LinearLayout.HORIZONTAL);
             dotsRow.setGravity(Gravity.CENTER);
-            LinearLayout.LayoutParams drLp = matchWrap(); drLp.setMargins(0, dp(5), 0, 0);
+            LinearLayout.LayoutParams drLp = matchWrap(); drLp.setMargins(0, dp(5), 0, dp(2));
             // show up to ~9 dots centered on the current AB to avoid clutter
             int firstDot = Math.max(0, Math.min(fidx - 4, abCount - 9));
             int lastDot = Math.min(abCount - 1, firstDot + 8);
@@ -19043,23 +19044,19 @@ private View liveGameCard(LiveGame game) {
                 dl.setMargins(dp(3), 0, dp(3), 0); dl.gravity = Gravity.CENTER_VERTICAL;
                 dotsRow.addView(d, dl);
             }
-            abNav.addView(dotsRow, drLp);
-            // BACK TO LIVE pill — only when browsing a past AB, made obvious
+            // inline LIVE pill to the right of the dots, only when browsing a past AB
             if (!liveAb) {
-                LinearLayout pill = new LinearLayout(this);
-                pill.setOrientation(LinearLayout.HORIZONTAL);
-                pill.setGravity(Gravity.CENTER);
-                pill.setPadding(dp(14), dp(7), dp(14), dp(7));
-                pill.setBackground(roundedStroke(Color.argb(36, 82, 226, 176), Color.argb(150, 82, 226, 176), 999, 1));
-                pill.setForeground(ripple(true)); pill.setClickable(true);
-                TextView pillT = text("⟲  BACK TO LIVE", 10, Color.rgb(82, 226, 176), true);
-                pillT.setLetterSpacing(0.08f);
-                pill.addView(pillT, new LinearLayout.LayoutParams(-2, -2));
-                pill.setOnClickListener(v -> { game.viewAtBatIndex = -1; rerenderTracker(game); });
-                LinearLayout.LayoutParams pLp = new LinearLayout.LayoutParams(-2, -2); // wrap, centered
-                pLp.gravity = Gravity.CENTER_HORIZONTAL; pLp.setMargins(0, dp(7), 0, 0);
-                abNav.addView(pill, pLp);
+                TextView livePill = text("● LIVE", 9, Color.rgb(82, 226, 176), true);
+                livePill.setGravity(Gravity.CENTER);
+                livePill.setPadding(dp(9), dp(3), dp(9), dp(3));
+                livePill.setBackground(roundedStroke(Color.argb(36, 82, 226, 176), Color.argb(150, 82, 226, 176), 999, 1));
+                livePill.setForeground(ripple(true)); livePill.setClickable(true);
+                livePill.setOnClickListener(v -> { game.viewAtBatIndex = -1; rerenderTracker(game); });
+                LinearLayout.LayoutParams lpLp = new LinearLayout.LayoutParams(-2, -2);
+                lpLp.gravity = Gravity.CENTER_VERTICAL; lpLp.setMargins(dp(8), 0, 0, 0);
+                dotsRow.addView(livePill, lpLp);
             }
+            abNav.addView(dotsRow, drLp);
             card.addView(abNav, abLp);
 
             // v312: use ALL available space for tracking. Cancel the card's left padding so the
@@ -19084,15 +19081,34 @@ private View liveGameCard(LiveGame game) {
                         return true;
                     }
                 });
-            zone.setOnTouchListener((v, ev) -> {
-                int a = ev.getActionMasked();
-                if (a == android.view.MotionEvent.ACTION_DOWN) {
-                    v.getParent().requestDisallowInterceptTouchEvent(true);
-                } else if (a == android.view.MotionEvent.ACTION_UP || a == android.view.MotionEvent.ACTION_CANCEL) {
-                    v.getParent().requestDisallowInterceptTouchEvent(false);
+            zone.setOnTouchListener(new View.OnTouchListener() {
+                float downX, downY; boolean decided, horizontal;
+                @Override public boolean onTouch(View v, android.view.MotionEvent ev) {
+                    switch (ev.getActionMasked()) {
+                        case android.view.MotionEvent.ACTION_DOWN:
+                            downX = ev.getX(); downY = ev.getY(); decided = false; horizontal = false;
+                            break;
+                        case android.view.MotionEvent.ACTION_MOVE:
+                            if (!decided) {
+                                float adx = Math.abs(ev.getX() - downX), ady = Math.abs(ev.getY() - downY);
+                                if (adx > dp(10) || ady > dp(10)) {
+                                    decided = true;
+                                    horizontal = adx > ady * 1.4f; // clearly sideways → it's a swipe
+                                    // claim the gesture only if horizontal; else let the page scroll
+                                    v.getParent().requestDisallowInterceptTouchEvent(horizontal);
+                                }
+                            }
+                            break;
+                        case android.view.MotionEvent.ACTION_UP:
+                        case android.view.MotionEvent.ACTION_CANCEL:
+                            v.getParent().requestDisallowInterceptTouchEvent(false);
+                            break;
+                    }
+                    swipe.onTouchEvent(ev);
+                    // Only consume when we've committed to a horizontal swipe; otherwise return false
+                    // so vertical drags fall through to the page ScrollView.
+                    return decided && horizontal;
                 }
-                swipe.onTouchEvent(ev);
-                return true; // consume the stream so DOWN→MOVE→UP all reach the detector
             });
             LinearLayout.LayoutParams zLp = new LinearLayout.LayoutParams(0, zoneH, 1f);
             zoneRow.addView(zone, zLp);
@@ -19401,7 +19417,7 @@ private View liveGameCard(LiveGame game) {
             }
             if (!safe(ab.description).isEmpty()) {
                 TextView desc = text(ab.description, 10, INK_DIM, false);
-                desc.setGravity(Gravity.CENTER); desc.setMaxLines(2); desc.setPadding(0, dp(3), 0, 0);
+                desc.setGravity(Gravity.CENTER); desc.setPadding(0, dp(3), 0, 0);
                 card.addView(desc, matchWrap());
             }
             // v319: the pitch that ENDED the at-bat — shown as a secondary section so the outcome
@@ -20831,10 +20847,10 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
             // Both routes still keep the main LIVE | MATCHUPS switch at the very top.
             LinearLayout liveCard = new LinearLayout(this);
             liveCard.setOrientation(LinearLayout.VERTICAL);
-            liveCard.setPadding(dp(2), dp(2), dp(2), dp(8));
+            liveCard.setPadding(dp(2), dp(2), dp(2), dp(4));
             liveCard.setBackground(roundedStroke(Color.argb(150, 6, 11, 20), Color.argb(46, 255, 255, 255), 20, 1));
             LinearLayout.LayoutParams cardLp = matchWrap();
-            cardLp.setMargins(dp(12), controlsAboveHero ? 0 : dp(6), dp(12), dp(8));
+            cardLp.setMargins(dp(12), controlsAboveHero ? 0 : dp(6), dp(12), dp(4));
             if (liveHubSelected) {
                 liveCard.addView(liveSubBar(game), matchWrap());
             }
