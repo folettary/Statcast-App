@@ -775,7 +775,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v288", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v289", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -18609,7 +18609,7 @@ private View liveGameCard(LiveGame game) {
         }
     }
 
-    // Strike-zone plot: proportional zone + padded pitch viewport. v288 keeps the plot
+    // Strike-zone plot: proportional zone + padded pitch viewport. v289 keeps the plot
     // as the visual centerpiece while preventing far inside/outside pitches from clipping.
     private class StrikeZoneView extends View {
         private final java.util.List<LivePitch> pitches;
@@ -18675,12 +18675,12 @@ private View liveGameCard(LiveGame game) {
             }
 
             // Always reserve enough room for the plate, but do not let the plate force the zone tiny.
-            zMin = Math.min(zMin, 0.92f);
+            zMin = Math.min(zMin, 1.02f);
             float spanX = Math.max(0.01f, xMax - xMin);
             float spanZ = Math.max(0.01f, zMax - zMin);
 
             float fitScale = Math.min(plotW / spanX, plotH / spanZ);
-            float targetZoneH = Math.min(plotH * 0.96f, dp(320));
+            float targetZoneH = Math.min(plotH * 0.99f, dp(330));
             float targetScale = targetZoneH / zoneSpanZ;
             float scale = Math.min(targetScale, fitScale);
 
@@ -18688,9 +18688,9 @@ private View liveGameCard(LiveGame game) {
             float drawW = spanX * scale;
             float drawH = spanZ * scale;
             float drawL = padL + (plotW - drawW) / 2f;
-            // v288: top-align the pitch content. The row height is now compact, so centering
+            // v289: top-align the pitch content. The row height is now compact, so centering
             // the data window only creates dead air above and below the actual strike zone.
-            float drawT = padT + Math.max(0f, (plotH - drawH) * 0.08f);
+            float drawT = padT + Math.max(0f, (plotH - drawH) * 0.03f);
 
             float zoneL = mapX(-zoneHalfWidth, xMin, xMax, drawL, drawW);
             float zoneR = mapX(zoneHalfWidth, xMin, xMax, drawL, drawW);
@@ -18988,7 +18988,7 @@ private View liveGameCard(LiveGame game) {
             LinearLayout abNav = new LinearLayout(this);
             abNav.setOrientation(LinearLayout.HORIZONTAL);
             abNav.setGravity(Gravity.CENTER_VERTICAL);
-            LinearLayout.LayoutParams abLp = matchWrap(); abLp.setMargins(0, dp(12), 0, dp(2));
+            LinearLayout.LayoutParams abLp = matchWrap(); abLp.setMargins(0, dp(10), 0, dp(1));
             TextView prev = navChip("‹", fidx > 0, v -> { game.viewAtBatIndex = Math.max(0, fidx - 1); rerenderTracker(game); });
             abNav.addView(prev);
             LinearLayout abInfo = new LinearLayout(this);
@@ -19016,13 +19016,13 @@ private View liveGameCard(LiveGame game) {
             }
             card.addView(abNav, abLp);
 
-            // v288: protected two-column live AB layout. The plot keeps the hero footprint while the
+            // v289: protected two-column live AB layout. The plot keeps the hero footprint while the
             // right pitch rail is fixed-width, padded, and independently scrollable for long at-bats.
             LinearLayout zoneRow = new LinearLayout(this);
             zoneRow.setOrientation(LinearLayout.HORIZONTAL);
             zoneRow.setGravity(Gravity.TOP);
-            LinearLayout.LayoutParams zrLp = matchWrap(); zrLp.setMargins(0, dp(8), 0, 0);
-            int zoneH = dp(ab.pitches.size() >= 10 ? 302 : 286);
+            LinearLayout.LayoutParams zrLp = matchWrap(); zrLp.setMargins(0, dp(4), 0, 0);
+            int zoneH = dp(ab.pitches.size() >= 10 ? 292 : 276);
             StrikeZoneView zone = new StrikeZoneView(this, ab.pitches);
             LinearLayout.LayoutParams zLp = new LinearLayout.LayoutParams(0, zoneH, 1f);
             zoneRow.addView(zone, zLp);
@@ -19045,8 +19045,8 @@ private View liveGameCard(LiveGame game) {
             }
             legendScroll.addView(legend, new ScrollView.LayoutParams(-1, -2));
             int screenW = getResources().getDisplayMetrics().widthPixels;
-            int railW = Math.min(dp(108), Math.max(dp(94), screenW / 3));
-            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(railW, zoneH); lgLp.setMargins(dp(10), 0, 0, 0);
+            int railW = Math.min(dp(100), Math.max(dp(88), screenW / 3));
+            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(railW, zoneH); lgLp.setMargins(dp(6), 0, 0, 0);
             zoneRow.addView(legendScroll, lgLp);
             card.addView(zoneRow, zrLp);
 
@@ -19200,7 +19200,7 @@ private View liveGameCard(LiveGame game) {
 
     private LinearLayout.LayoutParams bannerLp() {
         LinearLayout.LayoutParams lp = matchWrap();
-        lp.setMargins(0, dp(12), 0, dp(2));
+        lp.setMargins(0, dp(3), 0, 0);
         return lp;
     }
 
@@ -20566,40 +20566,45 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         String pitchers = (safe(game.awayPitcher).isEmpty() ? "Away SP TBD" : lastNameOnly(game.awayPitcher))
                 + " vs " + (safe(game.homePitcher).isEmpty() ? "Home SP TBD" : lastNameOnly(game.homePitcher));
 
-        if (game.isLive()) {
-            // v277: live games get a compact score-forward hero (logos · big score · bases · count).
-            LinearLayout.LayoutParams lhLp = matchWrap();
-            lhLp.setMargins(dp(12), dp(8), dp(12), dp(10));
-            View liveHero = liveScoreHero(game, away, home, awayPalette, homePalette);
-            panel.addView(liveHero, lhLp);
-        } else {
-            LinearLayout.LayoutParams heroLp = new LinearLayout.LayoutParams(-1, dp(108)); // v246: tighter hero so the matchup menu starts higher on screen
-            heroLp.setMargins(dp(12), dp(8), dp(12), dp(10));
-            panel.addView(gameMatchupHeroCard(game, away, home, awayPalette, homePalette, pitchers), heroLp);
-        }
-
-        // ===== v276: three-tab information architecture =====
-        // The hero stays permanent. Below it, a top-level switch separates the live game from the
-        // matchup cards from the box score, so none of them gets buried under the others.
+        // ===== v289: keep the score hero attached to the live feed =====
+        // When the user is on the LIVE experience, move the control bars ABOVE the score hero so
+        // the score header sits directly on top of the live feed/tracker instead of being separated
+        // from it by layers of buttons. Matchups keeps the older order.
         boolean pregame = game.isPregame();
         boolean live = game.isLive();
-        // Smart default whenever we (re)enter a game: Live for in-progress, Matchups otherwise.
         if (gameHubTabDirty || gameHubTab == null) {
             gameHubTab = live ? "live" : "matchups";
             gameHubTabDirty = false;
         }
-        if (pregame) gameHubTab = "matchups"; // pregame has no live/box data
+        if (pregame) gameHubTab = "matchups";
         if (!live && "live".equals(gameHubTab)) gameHubTab = "matchups";
-        if ("box".equals(gameHubTab)) gameHubTab = live ? "live" : "matchups"; // box is now a Live sub-view
+        if ("box".equals(gameHubTab)) gameHubTab = live ? "live" : "matchups";
 
-        if (!pregame) {
+        boolean liveFeedView = !pregame && live && "live".equals(gameHubTab);
+        if (liveFeedView) {
+            panel.addView(gameHubTabBar(game, awayPalette, homePalette), tabBarLp());
+            panel.addView(liveSubBar(game), liveSubBarLp());
+        }
+
+        if (game.isLive()) {
+            LinearLayout.LayoutParams lhLp = matchWrap();
+            lhLp.setMargins(dp(12), liveFeedView ? dp(2) : dp(8), dp(12), liveFeedView ? dp(6) : dp(10));
+            View liveHero = liveScoreHero(game, away, home, awayPalette, homePalette);
+            panel.addView(liveHero, lhLp);
+        } else {
+            LinearLayout.LayoutParams heroLp = new LinearLayout.LayoutParams(-1, dp(108));
+            heroLp.setMargins(dp(12), dp(8), dp(12), dp(10));
+            panel.addView(gameMatchupHeroCard(game, away, home, awayPalette, homePalette, pitchers), heroLp);
+        }
+
+        if (!pregame && !liveFeedView) {
             panel.addView(gameHubTabBar(game, awayPalette, homePalette), tabBarLp());
         }
 
         if ("matchups".equals(gameHubTab)) {
             renderMatchupCards(panel, game, awayPalette, homePalette, accent);
-        } else { // "live"
-            renderLiveTab(panel, game, awayPalette, homePalette);
+        } else {
+            renderLiveTab(panel, game, awayPalette, homePalette, !liveFeedView);
         }
     }
 
@@ -20646,17 +20651,28 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         return t;
     }
 
-    // ---- LIVE tab: tracker (default) with a sub-switch to Win Prob / Line ----
-    private void renderLiveTab(LinearLayout panel, LiveGame game, TeamPalette awayPalette, TeamPalette homePalette) {
+    private LinearLayout.LayoutParams liveSubBarLp() {
+        LinearLayout.LayoutParams lp = matchWrap();
+        lp.setMargins(dp(12), 0, dp(12), dp(6));
+        return lp;
+    }
+
+    private View liveSubBar(LiveGame game) {
         LinearLayout sub = new LinearLayout(this);
         sub.setOrientation(LinearLayout.HORIZONTAL);
         sub.setPadding(dp(3), dp(3), dp(3), dp(3));
         sub.setBackground(roundedStroke(Color.argb(120, 6, 11, 20), Color.argb(44, 255, 255, 255), 999, 1));
-        LinearLayout.LayoutParams subLp = matchWrap(); subLp.setMargins(dp(12), 0, dp(12), dp(8));
         sub.addView(liveSubButton("Tracker", "tracker", game));
         sub.addView(liveSubButton("Win Prob", "prob", game));
         sub.addView(liveSubButton("Box Score", "box", game));
-        panel.addView(sub, subLp);
+        return sub;
+    }
+
+    // ---- LIVE tab: tracker (default) with a sub-switch to Win Prob / Line ----
+    private void renderLiveTab(LinearLayout panel, LiveGame game, TeamPalette awayPalette, TeamPalette homePalette, boolean showSubBar) {
+        if (showSubBar) {
+            panel.addView(liveSubBar(game), liveSubBarLp());
+        }
 
         if ("prob".equals(gameHubLiveSub)) {
             LinearLayout wpHost = new LinearLayout(this);
