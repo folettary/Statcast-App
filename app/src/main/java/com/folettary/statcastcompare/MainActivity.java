@@ -315,6 +315,7 @@ public class MainActivity extends Activity {
     private long lastLivePullRefreshMs = 0L;
     private TextView liveFeedRefreshButton = null;
     private LinearLayout activeLiveTrackerHost = null;       // v273: tracker mount for in-place updates
+    private View gameHubTabBarView = null;                   // v301: tab bar, to snap to on tab switch
     private TeamPalette activeLiveTrackerAwayPal = null, activeLiveTrackerHomePal = null;
     private LiveGame activeLiveTrackerGame = null;
     private boolean liveTrackerPolling = false;
@@ -741,46 +742,19 @@ public class MainActivity extends Activity {
         LinearLayout appBar = new LinearLayout(this);
         appBar.setOrientation(LinearLayout.HORIZONTAL);
         appBar.setGravity(Gravity.CENTER_VERTICAL);
-        appBar.setPadding(dp(8), dp(4), dp(8), dp(4));
-        appBar.setBackground(isDark
-            ? roundedGradientStroke(new int[] { Color.rgb(3, 7, 14), Color.rgb(7, 15, 29), Color.rgb(7, 28, 38) }, 20, Color.argb(46, 96, 225, 255), 1)
-            : roundedGradientStroke(new int[] { Color.rgb(4, 10, 22), Color.rgb(8, 22, 42), Color.rgb(7, 48, 56) }, 20, Color.argb(58, 96, 225, 255), 1));
-        appBar.setElevation(dp(4));
+        appBar.setPadding(dp(10), dp(2), dp(10), dp(2));
+        // v301: the big STATCAST banner was pure chrome eating vertical space on every screen.
+        // Pared down to a slim strip: just the live games-today badge and a small version tag.
         root.addView(appBar, matchWrap());
 
-        TextView monogram = text("SC", 13, Color.WHITE, true);
-        monogram.setGravity(Gravity.CENTER);
-        monogram.setLetterSpacing(0.08f);
-        monogram.setBackground(roundedStroke(Color.argb(34, 255, 255, 255), Color.argb(90, 255, 255, 255), 18, 1));
-        LinearLayout.LayoutParams monoLp = new LinearLayout.LayoutParams(dp(30), dp(30));
-        monoLp.setMargins(0, 0, dp(9), 0);
-        appBar.addView(monogram, monoLp);
+        liveBadge = text("LIVE", 9, INK_SOFT, true);
+        liveBadge.setGravity(Gravity.CENTER_VERTICAL);
+        liveBadge.setLetterSpacing(0.08f);
+        appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        LinearLayout titleColApp = new LinearLayout(this);
-        titleColApp.setOrientation(LinearLayout.VERTICAL);
-        appBar.addView(titleColApp, new LinearLayout.LayoutParams(0, -2, 1));
-        TextView title = text("STATCAST", 20, Color.WHITE, true);
-        title.setLetterSpacing(0.01f);
-        titleColApp.addView(title);
-        TextView subtitle = text("Matchup · Search · Rankings", 9, INK, false);
-        subtitle.setPadding(0, dp(1), 0, 0);
-        titleColApp.addView(subtitle);
-
-        LinearLayout badgeStack = new LinearLayout(this);
-        badgeStack.setOrientation(LinearLayout.VERTICAL);
-        badgeStack.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
-        liveBadge = text("LIVE", 10, Color.WHITE, true);
-        liveBadge.setGravity(Gravity.CENTER);
-        liveBadge.setPadding(dp(8), dp(4), dp(8), dp(4));
-        liveBadge.setLetterSpacing(0.12f);
-        liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
-        badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v300", 10, Color.rgb(213, 238, 236), true);
-        versionBadge.setGravity(Gravity.CENTER);
-        versionBadge.setPadding(0, dp(3), 0, 0);
-        badgeStack.addView(versionBadge);
-
-        appBar.addView(badgeStack);
+        TextView versionBadge = text("v301", 9, Color.argb(150, 213, 238, 236), true);
+        versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
+        appBar.addView(versionBadge);
 
         homeBox = buildHomeDashboard();
         LinearLayout.LayoutParams homeLp = matchWrap();
@@ -20643,7 +20617,30 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         bar.setBackground(roundedStroke(Color.argb(150, 6, 11, 20), Color.argb(60, 255, 255, 255), 16, 1));
         if (live) bar.addView(gameHubTabButton("LIVE", "live", Color.rgb(82, 226, 176), game));
         bar.addView(gameHubTabButton("MATCHUPS", "matchups", Color.rgb(247, 197, 77), game));
+        gameHubTabBarView = bar;
         return bar;
+    }
+
+    // v301: unified, natural tab switching. Re-render, then keep the tab bar exactly where it was
+    // on screen so content swaps in place — unless the bar was scrolled above the top, in which
+    // case snap it to the top so the tabs + the start of the new content are both visible. Never
+    // jumps to an arbitrary position.
+    private void switchGameHubView(LiveGame game) {
+        final int beforeY = mainScroll == null ? 0 : mainScroll.getScrollY();
+        final int barBefore = gameHubTabBarView == null ? 0 : gameHubTabBarView.getTop();
+        renderLiveGameMenu(game);
+        if (mainScroll == null) return;
+        mainScroll.post(() -> {
+            int barAfter = gameHubTabBarView == null ? barBefore : gameHubTabBarView.getTop();
+            // Where the bar sat in the viewport before the switch (top of bar minus old scroll).
+            int barViewportY = barBefore - beforeY;
+            // Keep the bar at that same viewport position after the re-render.
+            int target = barAfter - barViewportY;
+            int max = Math.max(0, mainScroll.getChildAt(0).getHeight() - mainScroll.getHeight());
+            if (target < 0) target = 0;
+            if (target > max) target = max;
+            mainScroll.scrollTo(0, target);
+        });
     }
 
     private View gameHubTabButton(String label, String key, int accent, LiveGame game) {
@@ -20663,9 +20660,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
             t.setClickable(true);
             t.setOnClickListener(v -> {
                 gameHubTab = key;
-                final int keepY = mainScroll == null ? 0 : mainScroll.getScrollY();
-                renderLiveGameMenu(game);
-                if (mainScroll != null) mainScroll.post(() -> mainScroll.scrollTo(0, Math.min(keepY, dp(260))));
+                switchGameHubView(game);
             });
         }
         return t;
@@ -20731,9 +20726,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
             t.setOnClickListener(v -> {
                 if (!"tracker".equals(key)) stopLiveTrackerPolling();
                 gameHubLiveSub = key;
-                final int keepY = mainScroll == null ? 0 : mainScroll.getScrollY();
-                renderLiveGameMenu(game);
-                if (mainScroll != null) mainScroll.post(() -> mainScroll.scrollTo(0, keepY));
+                switchGameHubView(game);
             });
         }
         return t;
