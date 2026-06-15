@@ -775,7 +775,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v296", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v297", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -18619,11 +18619,11 @@ private View liveGameCard(LiveGame game) {
     }
 
     private ZoneBounds strikeZoneBoundsForFeed(LiveFeed feed) {
-        // v296: fixed calibrated game window. The prior game-feed bounds could still be widened
-        // by old/loaded pitch outliers, so the zone looked unchanged and too small. This window is
-        // stable across ABs and sized around the misses seen in the SD/BAL sample: far glove-side,
-        // arm-side, and low pitches fit without per-AB resizing or clamping.
-        return new ZoneBounds(-2.10f, 1.60f, 0.32f, 4.12f);
+        // v297: fixed calibrated game window. Width still leaves room for far glove-/arm-side misses.
+        // Vertically tightened (was 0.32–4.12) so the plot isn't mostly empty sky: the strike zone
+        // is 1.50–3.40 ft, so 0.55 ft of headroom above and a bit below the plate is plenty for real
+        // misses without leaving a big dead gap above the box.
+        return new ZoneBounds(-2.10f, 1.60f, 0.55f, 3.95f);
     }
 
     private class StrikeZoneView extends View {
@@ -18667,13 +18667,12 @@ private View liveGameCard(LiveGame game) {
             // game window left so the zone uses the available card space better.
             float drawL = padL + Math.max(0f, (plotW - drawW) * 0.22f);
 
-            // v296: the result card should be snug under the plate. Position the data window
-            // so the plate bottom sits near the bottom of this view instead of leaving dead air.
-            float plateDepth = dp(10);
-            float plateZ = 0.80f;
-            float plateYWithinDraw = (zMax - plateZ) / spanZ * drawH;
-            float drawT = h - dp(4) - plateDepth - plateYWithinDraw;
-            drawT = Math.max(padT, Math.min(drawT, padT + Math.max(0f, plotH - drawH)));
+            // v297: when the plot is width-constrained (drawH < plotH) there is leftover vertical
+            // room. Bottom-anchoring the plate dumped ALL of it above the zone, which read as a big
+            // empty sky. Instead, place the window so the leftover slack sits mostly BELOW the plate
+            // (a small share above for high misses + tails), lifting the box to ~40% from the top.
+            float slack = Math.max(0f, plotH - drawH);
+            float drawT = padT + slack * 0.30f; // 30% of slack above, 70% below
 
             float zoneL = mapX(-zoneHalfWidth, xMin, xMax, drawL, drawW);
             float zoneR = mapX( zoneHalfWidth, xMin, xMax, drawL, drawW);
@@ -18696,6 +18695,7 @@ private View liveGameCard(LiveGame game) {
 
             // home plate hint under the zone
             p.setStyle(Paint.Style.STROKE); p.setStrokeWidth(dp(1f)); p.setColor(Color.argb(70, 255, 255, 255));
+            float plateDepth = dp(10);
             float plateY = mapZ(0.80f, zMin, zMax, drawT, drawH);
             float plCx = (zoneL + zoneR) / 2f, plHalf = (zoneR - zoneL) * 0.5f;
             android.graphics.Path plate = new android.graphics.Path();
@@ -19028,8 +19028,8 @@ private View liveGameCard(LiveGame game) {
             }
             legendScroll.addView(legend, new ScrollView.LayoutParams(-1, -2));
             int screenW = getResources().getDisplayMetrics().widthPixels;
-            int railW = Math.min(dp(90), Math.max(dp(80), screenW / 3));
-            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(railW, zoneH); lgLp.setMargins(dp(4), 0, 0, 0);
+            int railW = Math.min(dp(112), Math.max(dp(96), screenW * 28 / 100));
+            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(railW, zoneH); lgLp.setMargins(dp(6), 0, 0, 0);
             zoneRow.addView(legendScroll, lgLp);
             card.addView(zoneRow, zrLp);
 
