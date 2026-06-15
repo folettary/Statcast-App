@@ -775,7 +775,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v294", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v295", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -18619,40 +18619,11 @@ private View liveGameCard(LiveGame game) {
     }
 
     private ZoneBounds strikeZoneBoundsForFeed(LiveFeed feed) {
-        final float zoneHalfWidth = 0.83f;
-        // Start tight around the real zone; expand only as far as actual pitch centers require.
-        // This makes the zone as large as possible while still fitting every loaded pitch.
-        float xMin = -zoneHalfWidth - 0.22f;
-        float xMax =  zoneHalfWidth + 0.22f;
-        float zMin = 1.50f - 0.28f;
-        float zMax = 3.40f + 0.28f;
-        final float pad = 0.18f;
-        if (feed != null && feed.atBats != null) {
-            for (LiveAtBat ab : feed.atBats) {
-                if (ab == null || ab.pitches == null) continue;
-                for (LivePitch lp : ab.pitches) {
-                    if (lp == null || Double.isNaN(lp.pX) || Double.isNaN(lp.pZ)) continue;
-                    float px = (float) lp.pX;
-                    float pz = (float) lp.pZ;
-                    if (Math.abs(px) > 6f || pz < -1.2f || pz > 8f) continue;
-                    xMin = Math.min(xMin, px - pad);
-                    xMax = Math.max(xMax, px + pad);
-                    zMin = Math.min(zMin, pz - pad);
-                    zMax = Math.max(zMax, pz + pad);
-                }
-            }
-        }
-        // Keep the plate visible, but do not add a giant universal vertical window.
-        zMin = Math.min(zMin, 0.92f);
-
-        // Minimum context only. Real outliers expand these values; these are not allowed to
-        // dominate normal/game-level sizing.
-        float midX = (xMin + xMax) / 2f, midZ = (zMin + zMax) / 2f;
-        float minXSpan = 2.34f;
-        float minZSpan = 2.82f;
-        if (xMax - xMin < minXSpan) { xMin = midX - minXSpan / 2f; xMax = midX + minXSpan / 2f; }
-        if (zMax - zMin < minZSpan) { zMin = midZ - minZSpan / 2f; zMax = midZ + minZSpan / 2f; }
-        return new ZoneBounds(xMin, xMax, zMin, zMax);
+        // v295: fixed calibrated game window. The prior game-feed bounds could still be widened
+        // by old/loaded pitch outliers, so the zone looked unchanged and too small. This window is
+        // stable across ABs and sized around the misses seen in the SD/BAL sample: far glove-side,
+        // arm-side, and low pitches fit without per-AB resizing or clamping.
+        return new ZoneBounds(-2.25f, 1.55f, 0.35f, 4.15f);
     }
 
     private class StrikeZoneView extends View {
@@ -19019,13 +18990,13 @@ private View liveGameCard(LiveGame game) {
             }
             card.addView(abNav, abLp);
 
-            // v294: protected two-column live AB layout. The plot keeps the hero footprint while the
+            // v295: protected two-column live AB layout. The plot keeps the hero footprint while the
             // right pitch rail is fixed-width, padded, and independently scrollable for long at-bats.
             LinearLayout zoneRow = new LinearLayout(this);
             zoneRow.setOrientation(LinearLayout.HORIZONTAL);
             zoneRow.setGravity(Gravity.TOP);
             LinearLayout.LayoutParams zrLp = matchWrap(); zrLp.setMargins(0, dp(4), 0, 0);
-            int zoneH = dp(286);
+            int zoneH = dp(276);
             StrikeZoneView zone = new StrikeZoneView(this, ab.pitches, strikeZoneBoundsForFeed(feed));
             LinearLayout.LayoutParams zLp = new LinearLayout.LayoutParams(0, zoneH, 1f);
             zoneRow.addView(zone, zLp);
@@ -19048,8 +19019,8 @@ private View liveGameCard(LiveGame game) {
             }
             legendScroll.addView(legend, new ScrollView.LayoutParams(-1, -2));
             int screenW = getResources().getDisplayMetrics().widthPixels;
-            int railW = Math.min(dp(98), Math.max(dp(86), screenW / 3));
-            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(railW, zoneH); lgLp.setMargins(dp(5), 0, 0, 0);
+            int railW = Math.min(dp(90), Math.max(dp(80), screenW / 3));
+            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(railW, zoneH); lgLp.setMargins(dp(4), 0, 0, 0);
             zoneRow.addView(legendScroll, lgLp);
             card.addView(zoneRow, zrLp);
 
@@ -20595,7 +20566,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         String pitchers = (safe(game.awayPitcher).isEmpty() ? "Away SP TBD" : lastNameOnly(game.awayPitcher))
                 + " vs " + (safe(game.homePitcher).isEmpty() ? "Home SP TBD" : lastNameOnly(game.homePitcher));
 
-        // ===== v294: keep the score hero attached to the live feed =====
+        // ===== v295: keep the score hero attached to the live feed =====
         // When the user is on the LIVE experience, move the control bars ABOVE the score hero so
         // the score header sits directly on top of the live feed/tracker instead of being separated
         // from it by layers of buttons. Matchups keeps the older order.
