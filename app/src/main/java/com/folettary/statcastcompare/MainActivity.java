@@ -754,7 +754,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v313", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v314", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -18646,21 +18646,27 @@ private View liveGameCard(LiveGame game) {
             float spanX = Math.max(0.01f, xMax - xMin);
             float spanZ = Math.max(0.01f, zMax - zMin);
 
-            // v313: FILL THE WHOLE VIEW with the strike zone CENTERED. The window is centered on the
-            // zone's true center and feet-per-pixel is shared across both axes, so the zone sits dead
-            // center with proportional tracking room on every side (a bit more top/bottom since the
-            // view is taller — but even and balanced, never lopsided).
+            // v313: FILL THE WHOLE VIEW. Horizontally the zone is centered. Vertically we bias the
+            // window UP — high pitches rarely miss far above the zone, so the symmetric top room was
+            // mostly dead space, while below the zone is where the in-dirt pitches actually land.
+            // v314: split the extra vertical room ~36% above / ~64% below the zone. This lifts the
+            // zone (and the plate + result below it) up, removing the top gap, while keeping — even
+            // increasing — the tracking room where misses really occur.
             final float zoneCx = 0f;                          // zone is horizontally centered
-            final float zoneCz = (zoneBot + zoneTop) / 2f;    // 2.45 ft — true vertical center
+            final float zoneSpanZ2 = zoneTop - zoneBot;       // 1.90 ft
             // Tracking room beyond the zone on the SHORT (horizontal) axis, in feet. Smaller → bigger
             // zone visual. The taller axis gets proportionally more room at the same scale.
             float trackMargin = 0.60f;
             float halfShortFt = zoneHalfWidth + trackMargin;  // half horizontal span (short axis)
             float ftPerPx = (2f * halfShortFt) / plotW;       // shared scale, set by the short axis
             float halfX = (plotW * ftPerPx) / 2f;
-            float halfZ = (plotH * ftPerPx) / 2f;
+            float totalSpanZ = plotH * ftPerPx;               // full vertical span the view buys
+            float extraZ = Math.max(0f, totalSpanZ - zoneSpanZ2); // room beyond the zone, vertically
+            float aboveFt = extraZ * 0.36f;                   // less sky above…
+            float belowFt = extraZ * 0.64f;                   // …more room below for in-dirt pitches
             xMin = zoneCx - halfX; xMax = zoneCx + halfX;
-            zMin = zoneCz - halfZ; zMax = zoneCz + halfZ;
+            zMax = zoneTop + aboveFt;
+            zMin = zoneBot - belowFt;
             spanX = Math.max(0.01f, xMax - xMin);
             spanZ = Math.max(0.01f, zMax - zMin);
 
