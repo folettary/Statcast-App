@@ -775,7 +775,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v279", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v280", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -18620,10 +18620,15 @@ private View liveGameCard(LiveGame game) {
         }
         @Override protected void onDraw(Canvas canvas) {
             int w = getWidth(), h = getHeight();
-            // Plot window in feet: x ∈ [-2, 2], z ∈ [0.5, 4.5]. Map to view (z up).
-            float xMin = -2f, xMax = 2f, zMin = 0.5f, zMax = 4.5f;
-            float padL = dp(6), padR = dp(6), padT = dp(6), padB = dp(6);
-            float plotW = w - padL - padR, plotH = h - padT - padB;
+            // Plot window zoomed in so the strike zone fills the frame. The rulebook zone is
+            // x ∈ [-0.83, 0.83]; a window of x ∈ [-1.45, 1.45] makes the box ~57% of the width
+            // (was ~41% at ±2.0, which is why enlarging the view never appeared to enlarge the box).
+            float xMin = -1.6f, xMax = 1.6f, zMin = 0.9f, zMax = 4.1f;
+            float pad = dp(6);
+            // Keep the plot square and centered so the zone box isn't stretched in a wide view.
+            float avail = Math.min(w, h) - pad * 2f;
+            float plotW = avail, plotH = avail;
+            float padL = (w - plotW) / 2f, padT = (h - plotH) / 2f;
             // strike zone box: x ∈ [-0.83, 0.83], z ∈ [szBot, szTop] (defaults if missing)
             float szBot = 1.5f, szTop = 3.4f;
             for (LivePitch lp : pitches) { if (!Double.isNaN(lp.szTop) && !Double.isNaN(lp.szBot)) { szTop=(float)lp.szTop; szBot=(float)lp.szBot; break; } }
@@ -18931,9 +18936,9 @@ private View liveGameCard(LiveGame game) {
             LinearLayout zoneRow = new LinearLayout(this);
             zoneRow.setOrientation(LinearLayout.HORIZONTAL);
             LinearLayout.LayoutParams zrLp = matchWrap(); zrLp.setMargins(0, dp(8), 0, 0);
-            int zoneH = dp(248);
+            int zoneH = dp(250);
             StrikeZoneView zone = new StrikeZoneView(this, ab.pitches);
-            LinearLayout.LayoutParams zLp = new LinearLayout.LayoutParams(0, zoneH, 1.55f);
+            LinearLayout.LayoutParams zLp = new LinearLayout.LayoutParams(dp(206), zoneH);
             zoneRow.addView(zone, zLp);
             // pitch list: newest first, scrollable within the fixed zone height
             ScrollView legendScroll = new ScrollView(this);
@@ -18947,7 +18952,7 @@ private View liveGameCard(LiveGame game) {
                 for (int pi = ab.pitches.size() - 1; pi >= 0; pi--) legend.addView(pitchLegendRow(ab.pitches.get(pi)), matchWrap());
             }
             legendScroll.addView(legend, new ScrollView.LayoutParams(-1, -2));
-            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(0, zoneH, 1f); lgLp.setMargins(dp(8), 0, 0, 0);
+            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(0, zoneH, 1f); lgLp.setMargins(dp(10), 0, 0, 0);
             zoneRow.addView(legendScroll, lgLp);
             card.addView(zoneRow, zrLp);
 
