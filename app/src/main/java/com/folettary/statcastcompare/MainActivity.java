@@ -754,7 +754,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v317", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v319", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -18495,6 +18495,12 @@ private View liveGameCard(LiveGame game) {
                                     lp.pfxX = coord.optDouble("pfxX", Double.NaN); lp.pfxZ = coord.optDouble("pfxZ", Double.NaN); }
                                 lp.szTop = pd.optDouble("strikeZoneTop", Double.NaN);
                                 lp.szBot = pd.optDouble("strikeZoneBottom", Double.NaN);
+                                lp.extension = pd.optDouble("extension", Double.NaN);
+                                JSONObject breaks = pd.optJSONObject("breaks");
+                                if (breaks != null) {
+                                    lp.spinRate = breaks.optDouble("spinRate", Double.NaN);
+                                    lp.breakLength = breaks.optDouble("breakLength", Double.NaN);
+                                }
                             }
                             JSONObject hd = ev.optJSONObject("hitData");
                             if (hd != null) { lp.exitVelo = hd.optDouble("launchSpeed", Double.NaN); lp.launchAngle = hd.optDouble("launchAngle", Double.NaN);
@@ -19124,20 +19130,19 @@ private View liveGameCard(LiveGame game) {
             zoneRow.addView(legendClip, lgLp);
             card.addView(zoneRow, zrLp);
 
-            // ---- Current-pitch showcase (most recent pitch of this AB, with its Statcast data) ----
-            if (!ab.pitches.isEmpty()) {
-                LivePitch latest = ab.pitches.get(ab.pitches.size() - 1);
-                View showcase = currentPitchShowcase(latest, liveAb);
-                LinearLayout.LayoutParams scLp = matchWrap(); scLp.setMargins(0, dp(8), 0, 0);
-                animateShowcaseIn(showcase, (fidx * 100) + latest.number);
-                card.addView(showcase, scLp);
-            }
-
-            // ---- PA RESULT BANNER — big and unmistakable once the at-bat is complete ----
+            // ---- Unified result card: ONE card, content depends on the situation ----
+            //   AB complete  → outcome result (color by outcome) + EV/LA/distance on contact
+            //   AB in progress → latest-pitch data (color by pitch type) + advanced pitch stats
+            // Same animation for both; only the content differs.
             if (ab.complete && !safe(ab.result).isEmpty()) {
-                View banner = paResultBanner(ab, batColor);
-                animateBannerIn(banner, ("res-" + fidx + "-" + ab.result).hashCode());
-                card.addView(banner, bannerLp());
+                View rc = resultCard(ab, null, batColor);
+                animateResultIn(rc, ("res-" + fidx + "-" + ab.result).hashCode());
+                card.addView(rc, bannerLp());
+            } else if (!ab.pitches.isEmpty()) {
+                LivePitch latest = ab.pitches.get(ab.pitches.size() - 1);
+                View rc = resultCard(ab, latest, batColor);
+                animateResultIn(rc, (fidx * 1000) + latest.number);
+                card.addView(rc, bannerLp());
             }
         }
 
@@ -19290,139 +19295,148 @@ private View liveGameCard(LiveGame game) {
     }
 
     // Big, unmistakable result banner for a completed plate appearance.
-    // v317: subtle crossfade + slight upward slide for live cards. Only animates when the slot's
-    // *content* changes (keyed), so the 15s auto-refresh re-render doesn't re-trigger it.
-    private int lastShowcaseKey = Integer.MIN_VALUE;
-    private int lastBannerKey = Integer.MIN_VALUE;
+    // v317/v318: subtle crossfade + slight upward slide for the unified result card. Only animates
+    // when the slot's *content* changes (keyed), so the 15s auto-refresh re-render doesn't re-trigger.
+    private int lastResultKey = Integer.MIN_VALUE;
     private void playCardIn(View v) {
         v.setAlpha(0f);
         v.setTranslationY(dp(10));
         v.animate().alpha(1f).translationY(0f).setStartDelay(40).setDuration(260)
                 .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
     }
-    private void animateShowcaseIn(View v, int key) {
-        if (key == lastShowcaseKey) return;   // same pitch — don't re-animate on poll
-        lastShowcaseKey = key;
-        playCardIn(v);
-    }
-    private void animateBannerIn(View v, int key) {
-        if (key == lastBannerKey) return;     // same result — don't re-animate on poll
-        lastBannerKey = key;
+    private void animateResultIn(View v, int key) {
+        if (key == lastResultKey) return;   // same content — don't re-animate on poll
+        lastResultKey = key;
         playCardIn(v);
     }
 
     // v317: a dedicated showcase for the most recent pitch — big velo, type, result, and whatever
     // Statcast data we have (EV/LA/distance on contact). Sits above the result banner.
-    private View currentPitchShowcase(LivePitch lp, boolean isLivePitch) {
-        int col = pitchTypeColor(lp.typeCode);
+    // v318: ONE unified result card. Content depends on the situation; animation is identical.
+    //   completePitch == null  → at-bat is COMPLETE: show the outcome (color by outcome) + EV/LA/dist
+    //   completePitch != null  → at-bat IN PROGRESS: show that pitch's data (color by pitch type)
+    private View resultCard(LiveAtBat ab, LivePitch pitch, int batColor) {
+        boolean pitchMode = pitch != null;
+        int accent = pitchMode ? pitchTypeColor(pitch.typeCode)
+                               : outcomeColorFromText(safe(ab.result) + " " + safe(ab.description), batColor);
+
         LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.HORIZONTAL);
-        card.setGravity(Gravity.CENTER_VERTICAL);
-        card.setPadding(dp(14), dp(10), dp(14), dp(10));
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setGravity(Gravity.CENTER);
+        card.setPadding(dp(14), dp(12), dp(14), dp(12));
         card.setBackground(roundedGradientStroke(new int[] {
-                Color.argb(38, Color.red(col), Color.green(col), Color.blue(col)),
-                Color.argb(14, Color.red(col), Color.green(col), Color.blue(col)),
-                Color.argb(38, Color.red(col), Color.green(col), Color.blue(col))
-        }, 16, Color.argb(120, Color.red(col), Color.green(col), Color.blue(col)), 1));
-
-        LinearLayout left = new LinearLayout(this);
-        left.setOrientation(LinearLayout.VERTICAL);
-        left.setGravity(Gravity.CENTER_VERTICAL);
-        String velo = lp.speed > 0 ? String.format(Locale.US, "%.0f", lp.speed) : "—";
-        LinearLayout veloRow = new LinearLayout(this);
-        veloRow.setOrientation(LinearLayout.HORIZONTAL);
-        veloRow.setGravity(Gravity.BOTTOM);
-        TextView veloT = text(velo, 30, INK, true);
-        veloRow.addView(veloT, matchWrap());
-        TextView mph = text(" mph", 11, INK_DIM, true);
-        mph.setPadding(0, 0, 0, dp(5));
-        veloRow.addView(mph, matchWrap());
-        left.addView(veloRow, matchWrap());
-        TextView typeT = text(pitchTypeShort(lp.typeCode, lp.typeName), 12, col, true);
-        typeT.setLetterSpacing(0.04f);
-        left.addView(typeT, matchWrap());
-        card.addView(left, new LinearLayout.LayoutParams(0, -2, 1f));
-
-        LinearLayout right = new LinearLayout(this);
-        right.setOrientation(LinearLayout.VERTICAL);
-        right.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
-        TextView label = text(isLivePitch ? "LATEST PITCH" : "LAST PITCH", 8, col, true);
-        label.setLetterSpacing(0.16f); label.setGravity(Gravity.END);
-        right.addView(label, matchWrap());
-        TextView resT = text(safe(lp.result).isEmpty() ? "—" : lp.result, 13, INK, true);
-        resT.setGravity(Gravity.END); resT.setSingleLine(true); resT.setEllipsize(TextUtils.TruncateAt.END);
-        right.addView(resT, matchWrap());
-        if (lp.isInPlay && (!Double.isNaN(lp.exitVelo) || !Double.isNaN(lp.launchAngle) || !Double.isNaN(lp.distance))) {
-            StringBuilder sc = new StringBuilder();
-            if (!Double.isNaN(lp.exitVelo)) sc.append(String.format(Locale.US, "%.0f EV", lp.exitVelo));
-            if (!Double.isNaN(lp.launchAngle)) { if (sc.length() > 0) sc.append(" · "); sc.append(String.format(Locale.US, "%.0f\u00b0 LA", lp.launchAngle)); }
-            if (!Double.isNaN(lp.distance) && lp.distance > 0) { if (sc.length() > 0) sc.append(" · "); sc.append(String.format(Locale.US, "%.0f ft", lp.distance)); }
-            TextView scT = text(sc.toString(), 9, Color.rgb(82, 226, 176), true);
-            scT.setGravity(Gravity.END); scT.setPadding(0, dp(1), 0, 0);
-            right.addView(scT, matchWrap());
-        }
-        card.addView(right, new LinearLayout.LayoutParams(0, -2, 1.1f));
-        return card;
-    }
-
-    private View paResultBanner(LiveAtBat ab, int batColor) {
-        String ev = safe(ab.result);
-        // v317: same outcome color scheme as the play feed. Include the play description so a
-        // run-scoring out (sac fly) reads blue, not yellow.
-        int accent = outcomeColorFromText(ev + " " + safe(ab.description), batColor);
-
-        LivePitch contactPitch = null;
-        if (ab != null && ab.pitches != null) {
-            for (int i = ab.pitches.size() - 1; i >= 0; i--) {
-                LivePitch lp = ab.pitches.get(i);
-                if (lp == null) continue;
-                if (lp.isInPlay || !Double.isNaN(lp.exitVelo) || !Double.isNaN(lp.launchAngle)) {
-                    contactPitch = lp;
-                    break;
-                }
-            }
-        }
-
-        LinearLayout banner = new LinearLayout(this);
-        banner.setOrientation(LinearLayout.VERTICAL);
-        banner.setGravity(Gravity.CENTER);
-        banner.setPadding(dp(12), dp(10), dp(12), dp(10));
-        banner.setBackground(roundedGradientStroke(new int[] {
                 Color.argb(48, Color.red(accent), Color.green(accent), Color.blue(accent)),
                 Color.argb(20, Color.red(accent), Color.green(accent), Color.blue(accent)),
                 Color.argb(48, Color.red(accent), Color.green(accent), Color.blue(accent))
         }, 16, Color.argb(150, Color.red(accent), Color.green(accent), Color.blue(accent)), 2));
-        TextView label = text("RESULT", 8, accent, true);
-        label.setLetterSpacing(0.22f);
-        label.setGravity(Gravity.CENTER);
-        banner.addView(label, matchWrap());
-        TextView big = text(ev.toUpperCase(Locale.US), 20, INK, true);
-        big.setGravity(Gravity.CENTER);
-        big.setLetterSpacing(0.02f);
-        banner.addView(big, matchWrap());
-        if (contactPitch != null && (!Double.isNaN(contactPitch.exitVelo) || !Double.isNaN(contactPitch.launchAngle))) {
-            StringBuilder meta = new StringBuilder();
-            if (!Double.isNaN(contactPitch.exitVelo)) meta.append(String.format(Locale.US, "%.0f mph EV", contactPitch.exitVelo));
-            if (!Double.isNaN(contactPitch.launchAngle)) {
-                if (meta.length() > 0) meta.append(" • ");
-                meta.append(String.format(Locale.US, "%.0f° LA", contactPitch.launchAngle));
+
+        if (pitchMode) {
+            // eyebrow
+            TextView label = text("LATEST PITCH", 8, accent, true);
+            label.setLetterSpacing(0.22f); label.setGravity(Gravity.CENTER);
+            card.addView(label, matchWrap());
+            // big velo + type line
+            LinearLayout headRow = new LinearLayout(this);
+            headRow.setOrientation(LinearLayout.HORIZONTAL);
+            headRow.setGravity(Gravity.CENTER | Gravity.BOTTOM);
+            String velo = pitch.speed > 0 ? String.format(Locale.US, "%.0f", pitch.speed) : "\u2014";
+            TextView veloT = text(velo, 26, INK, true);
+            headRow.addView(veloT, matchWrap());
+            TextView mph = text(" mph", 11, INK_DIM, true);
+            mph.setPadding(0, 0, dp(8), dp(4));
+            headRow.addView(mph, matchWrap());
+            TextView typeT = text(pitchTypeShort(pitch.typeCode, pitch.typeName), 18, accent, true);
+            typeT.setPadding(0, 0, 0, dp(2));
+            headRow.addView(typeT, matchWrap());
+            card.addView(headRow, matchWrap());
+            // result of this pitch (Ball, Called Strike, Foul, In play…)
+            if (!safe(pitch.result).isEmpty()) {
+                TextView resT = text(pitch.result, 12, INK, true);
+                resT.setGravity(Gravity.CENTER);
+                card.addView(resT, matchWrap());
             }
-            if (meta.length() > 0) {
-                TextView metaView = text(meta.toString(), 9, accent, true);
-                metaView.setGravity(Gravity.CENTER);
-                metaView.setPadding(0, dp(2), 0, 0);
-                banner.addView(metaView, matchWrap());
+            // advanced pitch data row (spin / extension / break) — only what the feed gives us
+            StringBuilder adv = new StringBuilder();
+            if (!Double.isNaN(pitch.spinRate) && pitch.spinRate > 0) adv.append(String.format(Locale.US, "%.0f rpm", pitch.spinRate));
+            if (!Double.isNaN(pitch.extension) && pitch.extension > 0) { if (adv.length() > 0) adv.append("  \u00b7  "); adv.append(String.format(Locale.US, "%.1f ft ext", pitch.extension)); }
+            if (!Double.isNaN(pitch.breakLength) && pitch.breakLength > 0) { if (adv.length() > 0) adv.append("  \u00b7  "); adv.append(String.format(Locale.US, "%.0f\" break", pitch.breakLength)); }
+            if (adv.length() > 0) {
+                TextView advT = text(adv.toString(), 9, INK_DIM, true);
+                advT.setGravity(Gravity.CENTER); advT.setPadding(0, dp(3), 0, 0);
+                card.addView(advT, matchWrap());
+            }
+        } else {
+            // COMPLETE at-bat — the outcome.
+            TextView label = text("RESULT", 8, accent, true);
+            label.setLetterSpacing(0.22f); label.setGravity(Gravity.CENTER);
+            card.addView(label, matchWrap());
+            TextView big = text(safe(ab.result).toUpperCase(Locale.US), 20, INK, true);
+            big.setGravity(Gravity.CENTER); big.setLetterSpacing(0.02f);
+            card.addView(big, matchWrap());
+            // EV / LA / distance from the contact pitch, if any
+            LivePitch contact = null;
+            if (ab.pitches != null) {
+                for (int i = ab.pitches.size() - 1; i >= 0; i--) {
+                    LivePitch lp = ab.pitches.get(i);
+                    if (lp != null && (lp.isInPlay || !Double.isNaN(lp.exitVelo) || !Double.isNaN(lp.launchAngle))) { contact = lp; break; }
+                }
+            }
+            if (contact != null) {
+                StringBuilder meta = new StringBuilder();
+                if (!Double.isNaN(contact.exitVelo)) meta.append(String.format(Locale.US, "%.0f mph EV", contact.exitVelo));
+                if (!Double.isNaN(contact.launchAngle)) { if (meta.length() > 0) meta.append(" \u2022 "); meta.append(String.format(Locale.US, "%.0f\u00b0 LA", contact.launchAngle)); }
+                if (!Double.isNaN(contact.distance) && contact.distance > 0) { if (meta.length() > 0) meta.append(" \u2022 "); meta.append(String.format(Locale.US, "%.0f ft", contact.distance)); }
+                if (meta.length() > 0) {
+                    TextView metaView = text(meta.toString(), 9, accent, true);
+                    metaView.setGravity(Gravity.CENTER); metaView.setPadding(0, dp(2), 0, 0);
+                    card.addView(metaView, matchWrap());
+                }
+            }
+            if (!safe(ab.description).isEmpty()) {
+                TextView desc = text(ab.description, 10, INK_DIM, false);
+                desc.setGravity(Gravity.CENTER); desc.setMaxLines(2); desc.setPadding(0, dp(3), 0, 0);
+                card.addView(desc, matchWrap());
+            }
+            // v319: the pitch that ENDED the at-bat — shown as a secondary section so the outcome
+            // stays the hero. Subtle divider, then a compact velo · type · spin line.
+            LivePitch endPitch = (ab.pitches != null && !ab.pitches.isEmpty()) ? ab.pitches.get(ab.pitches.size() - 1) : null;
+            if (endPitch != null && (endPitch.speed > 0 || !safe(endPitch.typeCode).isEmpty())) {
+                View divider = new View(this);
+                GradientDrawable dg = new GradientDrawable();
+                dg.setColor(Color.argb(40, 255, 255, 255));
+                divider.setBackground(dg);
+                LinearLayout.LayoutParams dvLp = new LinearLayout.LayoutParams(dp(120), Math.max(1, dp(0.5f)));
+                dvLp.gravity = Gravity.CENTER_HORIZONTAL; dvLp.setMargins(0, dp(8), 0, dp(6));
+                card.addView(divider, dvLp);
+
+                int pcol = pitchTypeColor(endPitch.typeCode);
+                TextView eyebrow = text("ON THE PITCH", 7, INK_DIM, true);
+                eyebrow.setLetterSpacing(0.2f); eyebrow.setGravity(Gravity.CENTER);
+                card.addView(eyebrow, matchWrap());
+
+                LinearLayout pitchRow = new LinearLayout(this);
+                pitchRow.setOrientation(LinearLayout.HORIZONTAL);
+                pitchRow.setGravity(Gravity.CENTER | Gravity.BOTTOM);
+                pitchRow.setPadding(0, dp(1), 0, 0);
+                if (endPitch.speed > 0) {
+                    TextView v = text(String.format(Locale.US, "%.0f", endPitch.speed), 15, INK, true);
+                    pitchRow.addView(v, matchWrap());
+                    TextView mph = text(" mph ", 9, INK_DIM, true); mph.setPadding(0, 0, dp(2), dp(1));
+                    pitchRow.addView(mph, matchWrap());
+                }
+                TextView typeT = text(pitchTypeShort(endPitch.typeCode, endPitch.typeName), 13, pcol, true);
+                pitchRow.addView(typeT, matchWrap());
+                if (!Double.isNaN(endPitch.spinRate) && endPitch.spinRate > 0) {
+                    TextView spin = text(String.format(Locale.US, "  \u00b7  %.0f rpm", endPitch.spinRate), 10, INK_DIM, true);
+                    spin.setPadding(0, 0, 0, dp(1));
+                    pitchRow.addView(spin, matchWrap());
+                }
+                card.addView(pitchRow, matchWrap());
             }
         }
-        if (!safe(ab.description).isEmpty()) {
-            TextView desc = text(ab.description, 10, INK_DIM, false);
-            desc.setGravity(Gravity.CENTER);
-            desc.setMaxLines(2);
-            desc.setPadding(0, dp(3), 0, 0);
-            banner.addView(desc, matchWrap());
-        }
-        return banner;
+        return card;
     }
+
 
     private void rerenderTracker(LiveGame game) {
         if (game == null || activeLiveTrackerHost == null) return;
@@ -26122,6 +26136,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         double szTop = Double.NaN, szBot = Double.NaN;
         double exitVelo = Double.NaN, launchAngle = Double.NaN; // if put in play
         double distance = Double.NaN; // batted-ball total distance (ft), from feed hitData
+        double spinRate = Double.NaN, breakLength = Double.NaN, extension = Double.NaN; // advanced pitch data
         double xba = Double.NaN; // expected BA — NOT in live feed; reserved for Savant integration
         int balls, strikes;    // count AFTER this pitch
     }
