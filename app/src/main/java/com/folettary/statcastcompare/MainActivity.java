@@ -775,7 +775,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v287", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v288", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -18609,7 +18609,7 @@ private View liveGameCard(LiveGame game) {
         }
     }
 
-    // Strike-zone plot: proportional zone + padded pitch viewport. v287 keeps the plot
+    // Strike-zone plot: proportional zone + padded pitch viewport. v288 keeps the plot
     // as the visual centerpiece while preventing far inside/outside pitches from clipping.
     private class StrikeZoneView extends View {
         private final java.util.List<LivePitch> pitches;
@@ -18624,8 +18624,8 @@ private View liveGameCard(LiveGame game) {
 
             // Leave real screen-space room for marker glow/labels. Pitch centers are mapped inside
             // this inner plot box so an extreme miss can never draw on the edge of the view.
-            float outerPad = dp(6);
-            float markerPad = dp(11);
+            float outerPad = dp(5);
+            float markerPad = dp(10);
             float padL = outerPad + markerPad;
             float padT = outerPad + markerPad;
             float plotW = w - (outerPad + markerPad) * 2f;
@@ -18675,12 +18675,12 @@ private View liveGameCard(LiveGame game) {
             }
 
             // Always reserve enough room for the plate, but do not let the plate force the zone tiny.
-            zMin = Math.min(zMin, 0.78f);
+            zMin = Math.min(zMin, 0.92f);
             float spanX = Math.max(0.01f, xMax - xMin);
             float spanZ = Math.max(0.01f, zMax - zMin);
 
             float fitScale = Math.min(plotW / spanX, plotH / spanZ);
-            float targetZoneH = Math.min(plotH * 0.82f, dp(304));
+            float targetZoneH = Math.min(plotH * 0.96f, dp(320));
             float targetScale = targetZoneH / zoneSpanZ;
             float scale = Math.min(targetScale, fitScale);
 
@@ -18688,7 +18688,9 @@ private View liveGameCard(LiveGame game) {
             float drawW = spanX * scale;
             float drawH = spanZ * scale;
             float drawL = padL + (plotW - drawW) / 2f;
-            float drawT = padT + (plotH - drawH) / 2f;
+            // v288: top-align the pitch content. The row height is now compact, so centering
+            // the data window only creates dead air above and below the actual strike zone.
+            float drawT = padT + Math.max(0f, (plotH - drawH) * 0.08f);
 
             float zoneL = mapX(-zoneHalfWidth, xMin, xMax, drawL, drawW);
             float zoneR = mapX(zoneHalfWidth, xMin, xMax, drawL, drawW);
@@ -19014,13 +19016,13 @@ private View liveGameCard(LiveGame game) {
             }
             card.addView(abNav, abLp);
 
-            // v287: protected two-column live AB layout. The plot keeps the hero footprint while the
+            // v288: protected two-column live AB layout. The plot keeps the hero footprint while the
             // right pitch rail is fixed-width, padded, and independently scrollable for long at-bats.
             LinearLayout zoneRow = new LinearLayout(this);
             zoneRow.setOrientation(LinearLayout.HORIZONTAL);
             zoneRow.setGravity(Gravity.TOP);
             LinearLayout.LayoutParams zrLp = matchWrap(); zrLp.setMargins(0, dp(8), 0, 0);
-            int zoneH = dp(ab.pitches.size() >= 10 ? 360 : 348);
+            int zoneH = dp(ab.pitches.size() >= 10 ? 302 : 286);
             StrikeZoneView zone = new StrikeZoneView(this, ab.pitches);
             LinearLayout.LayoutParams zLp = new LinearLayout.LayoutParams(0, zoneH, 1f);
             zoneRow.addView(zone, zLp);
@@ -19043,8 +19045,8 @@ private View liveGameCard(LiveGame game) {
             }
             legendScroll.addView(legend, new ScrollView.LayoutParams(-1, -2));
             int screenW = getResources().getDisplayMetrics().widthPixels;
-            int railW = Math.min(dp(104), Math.max(dp(90), screenW / 3));
-            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(railW, zoneH); lgLp.setMargins(dp(8), 0, 0, 0);
+            int railW = Math.min(dp(108), Math.max(dp(94), screenW / 3));
+            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(railW, zoneH); lgLp.setMargins(dp(10), 0, 0, 0);
             zoneRow.addView(legendScroll, lgLp);
             card.addView(zoneRow, zrLp);
 
