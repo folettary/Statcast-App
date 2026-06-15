@@ -316,8 +316,9 @@ public class MainActivity extends Activity {
     private LiveGame activeLiveTrackerGame = null;
     private boolean liveTrackerPolling = false;
     private boolean liveFeedPlaysExpanded = false; // v275: play feed compact by default
-    private String liveFeedPanelMode = "line"; // line | prob
-    private boolean liveFeedExpanded = false; // v269: feed collapsed by default; tap to open Line/WinProb/Box
+    private String gameHubTab = "live";            // v276: live | matchups | box
+    private boolean gameHubTabDirty = true;        // v276: apply smart default on fresh game entry
+    private String gameHubLiveSub = "tracker";     // v276: tracker | prob | line (inside Live tab)
     // v167: Matchups tab is now a two-path hub: compact live games or manual create.
     private static final int MATCHUP_PATH_LIVE = 0;
     private static final int MATCHUP_PATH_CREATE = 1;
@@ -770,7 +771,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v275", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v276", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -18282,7 +18283,7 @@ private View liveGameCard(LiveGame game) {
     TeamPalette awayPalette = away == null ? paletteForAbbr(game.awayAbbr) : paletteForTeam(away);
     TeamPalette homePalette = home == null ? paletteForAbbr(game.homeAbbr) : paletteForTeam(home);
 
-    FrameLayout card = buildLiveLogoDuelShell(away, home, awayPalette, homePalette, 17, false, () -> renderLiveGameMenu(game));
+    FrameLayout card = buildLiveLogoDuelShell(away, home, awayPalette, homePalette, 17, false, () -> { gameHubTabDirty = true; gameHubLiveSub = "tracker"; liveFeedPlaysExpanded = false; renderLiveGameMenu(game); });
     card.setLayoutParams(matchWrap());
 
     LinearLayout content = new LinearLayout(this);
@@ -19238,7 +19239,7 @@ private View liveGameCard(LiveGame game) {
         });
     }
 
-    private void showFullBoxScoreDialog(LiveGame game, JSONObject box, TeamPalette awayPalette, TeamPalette homePalette) {
+    private View buildBoxScoreSheet(LiveGame game, JSONObject box, TeamPalette awayPalette, TeamPalette homePalette) {
         int awayColor = ensureReadableColor(awayPalette.primary, 150);
         int homeColor = ensureReadableColor(homePalette.primary, 150);
         LinearLayout sheet = new LinearLayout(this);
@@ -19258,7 +19259,7 @@ private View liveGameCard(LiveGame game) {
         top.addView(score);
         sheet.addView(top, matchWrap());
 
-        TextView hint = text("Scroll for batting, pitching, and traditional box-score notes.", 10, INK_DIM, false);
+        TextView hint = text("Batting, pitching, and traditional box-score notes.", 10, INK_DIM, false);
         hint.setPadding(0, dp(4), 0, dp(8));
         sheet.addView(hint, matchWrap());
 
@@ -19270,7 +19271,11 @@ private View liveGameCard(LiveGame game) {
         Space gap = new Space(this);
         sheet.addView(gap, new LinearLayout.LayoutParams(1, dp(10)));
         sheet.addView(fullBoxTeamSection(displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr), homeBox, homeColor), matchWrap());
+        return sheet;
+    }
 
+    private void showFullBoxScoreDialog(LiveGame game, JSONObject box, TeamPalette awayPalette, TeamPalette homePalette) {
+        View sheet = buildBoxScoreSheet(game, box, awayPalette, homePalette);
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(false);
         scroll.addView(sheet, new ScrollView.LayoutParams(-1, -2));
@@ -19289,6 +19294,7 @@ private View liveGameCard(LiveGame game) {
         });
         dialog.show();
     }
+
 
     private View fullBoxTeamSection(String abbr, JSONObject teamBox, int accent) {
         LinearLayout section = new LinearLayout(this);
@@ -20254,42 +20260,163 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         heroLp.setMargins(dp(12), dp(8), dp(12), dp(10));
         panel.addView(gameMatchupHeroCard(game, away, home, awayPalette, homePalette, pitchers), heroLp);
 
-        // v269: Live feed sits on top (score story first) but is COLLAPSED by default — a single
-        // strip the user taps to open Line / Win Prob / Full Box. Keeps the matchup cards close
-        // to the top instead of behind a tall feed.
-        if (!game.isPregame()) {
-            panel.addView(liveFeedModuleSelector(game, awayPalette, homePalette), matchWrap());
-            if (!game.isLive() && liveFeedExpanded) {
-                if ("prob".equals(liveFeedPanelMode)) {
-                    LinearLayout wpHost = new LinearLayout(this);
-                    wpHost.setOrientation(LinearLayout.VERTICAL);
-                    wpHost.setVisibility(View.GONE);
-                    LinearLayout.LayoutParams wpLp = matchWrap();
-                    wpLp.setMargins(dp(12), 0, dp(12), dp(6));
-                    panel.addView(wpHost, wpLp);
-                    loadWinProbability(game, wpHost, awayPalette, homePalette);
-                } else {
-                    liveFeedPanelMode = "line";
-                    LinearLayout boxScoreHost = new LinearLayout(this);
-                    boxScoreHost.setOrientation(LinearLayout.VERTICAL);
-                    boxScoreHost.setVisibility(View.GONE);
-                    LinearLayout.LayoutParams boxScoreLp = matchWrap();
-                    boxScoreLp.setMargins(dp(12), 0, dp(12), dp(6));
-                    panel.addView(boxScoreHost, boxScoreLp);
-                    loadCompactLineScore(game, boxScoreHost, awayPalette, homePalette);
-                }
-            }
+        // ===== v276: three-tab information architecture =====
+        // The hero stays permanent. Below it, a top-level switch separates the live game from the
+        // matchup cards from the box score, so none of them gets buried under the others.
+        boolean pregame = game.isPregame();
+        boolean live = game.isLive();
+        // Smart default whenever we (re)enter a game: Live for in-progress, Matchups otherwise.
+        if (gameHubTabDirty || gameHubTab == null) {
+            gameHubTab = live ? "live" : "matchups";
+            gameHubTabDirty = false;
+        }
+        if (pregame) gameHubTab = "matchups"; // pregame has no live/box data
+        if (!live && "live".equals(gameHubTab)) gameHubTab = pregame ? "matchups" : "box";
+
+        if (!pregame) {
+            panel.addView(gameHubTabBar(game, awayPalette, homePalette), tabBarLp());
         }
 
-        LinearLayout lensHeader = new LinearLayout(this);
-        lensHeader.setOrientation(LinearLayout.HORIZONTAL);
-        lensHeader.setGravity(Gravity.CENTER_VERTICAL);
-        lensHeader.setPadding(dp(14), dp(6), dp(14), dp(5));
-        TextView lensTitle = text("MATCHUP CARDS", 10, Color.rgb(244, 207, 100), true);
-        lensTitle.setLetterSpacing(0.16f);
-        lensHeader.addView(lensTitle, new LinearLayout.LayoutParams(0, -2, 1));
-        panel.addView(lensHeader, matchWrap());
+        if ("matchups".equals(gameHubTab)) {
+            renderMatchupCards(panel, game, awayPalette, homePalette, accent);
+        } else if ("box".equals(gameHubTab)) {
+            renderBoxTab(panel, game, awayPalette, homePalette);
+        } else { // "live"
+            renderLiveTab(panel, game, awayPalette, homePalette);
+        }
+    }
 
+    private LinearLayout.LayoutParams tabBarLp() {
+        LinearLayout.LayoutParams lp = matchWrap();
+        lp.setMargins(dp(12), dp(2), dp(12), dp(10));
+        return lp;
+    }
+
+    // The LIVE | MATCHUPS | BOX top-level switch.
+    private View gameHubTabBar(LiveGame game, TeamPalette awayPalette, TeamPalette homePalette) {
+        boolean live = game.isLive();
+        LinearLayout bar = new LinearLayout(this);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setPadding(dp(4), dp(4), dp(4), dp(4));
+        bar.setBackground(roundedStroke(Color.argb(150, 6, 11, 20), Color.argb(60, 255, 255, 255), 16, 1));
+        if (live) bar.addView(gameHubTabButton("LIVE", "live", Color.rgb(82, 226, 176), game));
+        bar.addView(gameHubTabButton("MATCHUPS", "matchups", Color.rgb(247, 197, 77), game));
+        bar.addView(gameHubTabButton("BOX SCORE", "box", Color.rgb(120, 200, 255), game));
+        return bar;
+    }
+
+    private View gameHubTabButton(String label, String key, int accent, LiveGame game) {
+        boolean active = key.equals(gameHubTab);
+        TextView t = text(label, 11, active ? Color.rgb(8, 13, 22) : INK_SOFT, true);
+        t.setGravity(Gravity.CENTER);
+        t.setLetterSpacing(0.06f);
+        t.setSingleLine(true);
+        t.setPadding(dp(6), dp(10), dp(6), dp(10));
+        t.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1));
+        if (active) {
+            t.setBackground(roundedGradientStroke(new int[] {
+                    accent, mixColor(accent, Color.WHITE, 0.18f)
+            }, 12, Color.argb(0, 0, 0, 0), 0));
+        } else {
+            t.setForeground(ripple(true));
+            t.setClickable(true);
+            t.setOnClickListener(v -> {
+                gameHubTab = key;
+                final int keepY = mainScroll == null ? 0 : mainScroll.getScrollY();
+                renderLiveGameMenu(game);
+                if (mainScroll != null) mainScroll.post(() -> mainScroll.scrollTo(0, Math.min(keepY, dp(260))));
+            });
+        }
+        return t;
+    }
+
+    // ---- LIVE tab: tracker (default) with a sub-switch to Win Prob / Line ----
+    private void renderLiveTab(LinearLayout panel, LiveGame game, TeamPalette awayPalette, TeamPalette homePalette) {
+        LinearLayout sub = new LinearLayout(this);
+        sub.setOrientation(LinearLayout.HORIZONTAL);
+        sub.setPadding(dp(3), dp(3), dp(3), dp(3));
+        sub.setBackground(roundedStroke(Color.argb(120, 6, 11, 20), Color.argb(44, 255, 255, 255), 999, 1));
+        LinearLayout.LayoutParams subLp = matchWrap(); subLp.setMargins(dp(12), 0, dp(12), dp(8));
+        sub.addView(liveSubButton("Tracker", "tracker", game));
+        sub.addView(liveSubButton("Win Prob", "prob", game));
+        sub.addView(liveSubButton("Line", "line", game));
+        panel.addView(sub, subLp);
+
+        if ("prob".equals(gameHubLiveSub)) {
+            LinearLayout wpHost = new LinearLayout(this);
+            wpHost.setOrientation(LinearLayout.VERTICAL);
+            LinearLayout.LayoutParams wpLp = matchWrap(); wpLp.setMargins(dp(12), 0, dp(12), dp(6));
+            panel.addView(wpHost, wpLp);
+            loadWinProbability(game, wpHost, awayPalette, homePalette);
+        } else if ("line".equals(gameHubLiveSub)) {
+            LinearLayout lineHost = new LinearLayout(this);
+            lineHost.setOrientation(LinearLayout.VERTICAL);
+            LinearLayout.LayoutParams lLp = matchWrap(); lLp.setMargins(dp(12), 0, dp(12), dp(6));
+            panel.addView(lineHost, lLp);
+            loadCompactLineScore(game, lineHost, awayPalette, homePalette);
+        } else {
+            LinearLayout trackerHost = new LinearLayout(this);
+            trackerHost.setOrientation(LinearLayout.VERTICAL);
+            trackerHost.setVisibility(View.GONE);
+            LinearLayout.LayoutParams thLp = matchWrap(); thLp.setMargins(dp(12), 0, dp(12), dp(6));
+            panel.addView(trackerHost, thLp);
+            activeLiveTrackerHost = trackerHost;
+            activeLiveTrackerAwayPal = awayPalette;
+            activeLiveTrackerHomePal = homePalette;
+            activeLiveTrackerGame = game;
+            loadLiveTracker(game, trackerHost, awayPalette, homePalette);
+            startLiveTrackerPolling(game);
+        }
+    }
+
+    private View liveSubButton(String label, String key, LiveGame game) {
+        boolean active = key.equals(gameHubLiveSub);
+        TextView t = text(label, 10, active ? Color.rgb(8, 13, 22) : INK_SOFT, true);
+        t.setGravity(Gravity.CENTER);
+        t.setSingleLine(true);
+        t.setPadding(dp(6), dp(7), dp(6), dp(7));
+        t.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1));
+        if (active) {
+            t.setBackground(roundedStroke(Color.rgb(214, 226, 240), Color.argb(0, 0, 0, 0), 999, 0));
+        } else {
+            t.setForeground(ripple(true)); t.setClickable(true);
+            t.setOnClickListener(v -> {
+                if (!"tracker".equals(key)) stopLiveTrackerPolling();
+                gameHubLiveSub = key;
+                final int keepY = mainScroll == null ? 0 : mainScroll.getScrollY();
+                renderLiveGameMenu(game);
+                if (mainScroll != null) mainScroll.post(() -> mainScroll.scrollTo(0, keepY));
+            });
+        }
+        return t;
+    }
+
+    // ---- BOX tab: full box score inline ----
+    private void renderBoxTab(LinearLayout panel, LiveGame game, TeamPalette awayPalette, TeamPalette homePalette) {
+        stopLiveTrackerPolling();
+        LinearLayout host = new LinearLayout(this);
+        host.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams hLp = matchWrap(); hLp.setMargins(dp(12), 0, dp(12), dp(6));
+        panel.addView(host, hLp);
+        TextView loading = text("Loading box score…", 11, INK_DIM, false);
+        loading.setPadding(dp(4), dp(8), 0, dp(8));
+        host.addView(loading, matchWrap());
+        io.execute(() -> {
+            JSONObject box = null;
+            try { box = new JSONObject(httpGet("https://statsapi.mlb.com/api/v1/game/" + game.gamePk + "/boxscore")); } catch (Exception ignored) { }
+            final JSONObject fbox = box;
+            main.post(() -> {
+                if (host.getParent() == null) return;
+                host.removeAllViews();
+                if (fbox == null) { host.addView(text("Box score unavailable.", 11, INK_DIM, false), matchWrap()); return; }
+                host.addView(buildBoxScoreSheet(game, fbox, awayPalette, homePalette), matchWrap());
+            });
+        });
+    }
+
+    // ---- MATCHUPS tab: the signature matchup cards ----
+    private void renderMatchupCards(LinearLayout panel, LiveGame game, TeamPalette awayPalette, TeamPalette homePalette, int accent) {
+        stopLiveTrackerPolling();
         addMatchupHubSection(panel, "COMPLETE", "Broadest read");
         LinearLayout.LayoutParams overallLp = new LinearLayout.LayoutParams(-1, dp(82));
         overallLp.setMargins(dp(12), 0, dp(12), dp(3));
@@ -20301,18 +20428,14 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         LinearLayout.LayoutParams pdLp = new LinearLayout.LayoutParams(0, -1, 1);
         pdLp.setMargins(dp(7), 0, 0, 0);
         unitRow.addView(gameMenuTile("Pitching/Defense", "Staff prevention", "Run prevention and contact allowed", Color.rgb(120, 220, 207), v -> openLiveTeamPitchingDefenseMatchup(game)), pdLp);
-        // v246: Bullpens was a lone half-width tile centered between two empty spacers, which
-        // broke the two-column rhythm and read as "something's missing." Full-width (like Team
-        // Overall) makes it clearly its own unit and squares up the grid.
         LinearLayout.LayoutParams bullpenLp = new LinearLayout.LayoutParams(-1, dp(82));
         bullpenLp.setMargins(dp(12), 0, dp(12), dp(3));
         panel.addView(gameMenuTile("Bullpens", "Reliever edge", "Freshness + quality by available arms", Color.rgb(120, 220, 207), v -> openLiveBullpenMatchup(game)), bullpenLp);
 
         addMatchupHubSection(panel, "GAME MATCHUPS", "Today-specific");
-        // v252: the two pitcher-dependent matchups need both probable starters. Until they're
-        // posted (typically future games), dim them and mark "Pitchers TBD" rather than opening
-        // an empty comparison. The season-based tiles above work for any date.
         boolean probablesKnown = !safe(game.awayPitcher).isEmpty() && !safe(game.homePitcher).isEmpty();
+        String pitchers = (safe(game.awayPitcher).isEmpty() ? "Away SP TBD" : lastNameOnly(game.awayPitcher))
+                + " vs " + (safe(game.homePitcher).isEmpty() ? "Home SP TBD" : lastNameOnly(game.homePitcher));
         LinearLayout gameRow = matchupHubTileRow(panel);
         gameRow.addView(gameMenuTile("Starting Pitchers", probablesKnown ? pitchers : "Pitchers TBD", "Probable starter duel", Color.rgb(247, 197, 77), v -> openLivePitcherMatchup(game), probablesKnown, "Probable starters not posted yet"), new LinearLayout.LayoutParams(0, -1, 1));
         LinearLayout.LayoutParams ovsLp = new LinearLayout.LayoutParams(0, -1, 1);
@@ -20387,155 +20510,6 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
                 Color.argb(20, 255, 255, 255)
         }, 999, Color.argb(86, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
         return chip;
-    }
-
-    private View liveFeedModuleSelector(LiveGame game, TeamPalette awayPalette, TeamPalette homePalette) {
-        int accent = mixColor(awayPalette.primary, homePalette.primary, 0.50f);
-
-        LinearLayout wrap = new LinearLayout(this);
-        wrap.setOrientation(LinearLayout.VERTICAL);
-        wrap.setPadding(dp(12), dp(10), dp(12), dp(10));
-        wrap.setBackground(roundedGradientStroke(new int[] {
-                Color.argb(226, 5, 10, 18),
-                mixColor(accent, Color.rgb(6, 10, 18), 0.78f),
-                Color.argb(226, 5, 10, 18)
-        }, 20, Color.argb(92, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
-        LinearLayout.LayoutParams wrapLp = matchWrap();
-        wrapLp.setMargins(dp(12), 0, dp(12), dp(8));
-        wrap.setLayoutParams(wrapLp);
-        boolean liveGame = game.isLive();
-        // Header row. For a live game the tracker is always-on content, so the header is just a
-        // label (no collapse gate — that was what made it feel like it "auto-expanded"). For
-        // final/pregame games it stays a collapse toggle for the Line/WinProb/Box views.
-        LinearLayout titleRow = new LinearLayout(this);
-        titleRow.setOrientation(LinearLayout.HORIZONTAL);
-        titleRow.setGravity(Gravity.CENTER_VERTICAL);
-        if (!liveGame) {
-            titleRow.setForeground(ripple(false));
-            titleRow.setClickable(true);
-            titleRow.setOnClickListener(v -> {
-                liveFeedExpanded = !liveFeedExpanded;
-                final int keepY = mainScroll == null ? 0 : mainScroll.getScrollY();
-                renderLiveGameMenu(game);
-                if (mainScroll != null) mainScroll.post(() -> mainScroll.scrollTo(0, keepY));
-            });
-        }
-
-        TextView title = text(liveGame ? "LIVE GAME" : "GAME FEED", 10, Color.rgb(244, 207, 100), true);
-        title.setLetterSpacing(0.16f);
-        titleRow.addView(title, new LinearLayout.LayoutParams(-2, -2));
-
-        if (liveGame) {
-            // live dot + "updating" hint on the right
-            TextView updating = text("● auto-updating", 8, Color.rgb(82, 226, 176), true);
-            updating.setGravity(Gravity.RIGHT);
-            titleRow.addView(updating, new LinearLayout.LayoutParams(0, -2, 1));
-            wrap.addView(titleRow, matchWrap());
-        } else if (!liveFeedExpanded) {
-            String awayAb = displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr);
-            String homeAb = displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr);
-            String aRuns = game.awayScore < 0 ? "–" : String.valueOf(game.awayScore);
-            String hRuns = game.homeScore < 0 ? "–" : String.valueOf(game.homeScore);
-            String scoreStr = awayAb + " " + aRuns + "  ·  " + homeAb + " " + hRuns;
-            TextView score = text(scoreStr, 10, INK_SOFT, true);
-            score.setGravity(Gravity.RIGHT);
-            score.setSingleLine(true);
-            score.setPadding(dp(8), 0, dp(8), 0);
-            titleRow.addView(score, new LinearLayout.LayoutParams(0, -2, 1));
-            TextView chevron = text("›", 14, INK_DIM, true);
-            chevron.setGravity(Gravity.CENTER);
-            chevron.setPadding(dp(4), 0, dp(2), 0);
-            titleRow.addView(chevron, new LinearLayout.LayoutParams(-2, -2));
-            wrap.addView(titleRow, matchWrap());
-        } else {
-            Space sp = new Space(this);
-            titleRow.addView(sp, new LinearLayout.LayoutParams(0, dp(1), 1));
-            TextView chevron = text("⌄", 14, INK_DIM, true);
-            chevron.setGravity(Gravity.CENTER);
-            chevron.setPadding(dp(4), 0, dp(2), 0);
-            titleRow.addView(chevron, new LinearLayout.LayoutParams(-2, -2));
-            wrap.addView(titleRow, matchWrap());
-        }
-
-        // Live Tracker: always-on for an in-progress game (portraits, diamond, count, strike-zone
-        // pitch plot, AB history, play feed), auto-refreshing every ~15s.
-        if (liveGame) {
-            LinearLayout sitHost = new LinearLayout(this);
-            sitHost.setOrientation(LinearLayout.VERTICAL);
-            sitHost.setVisibility(View.GONE);
-            LinearLayout.LayoutParams sitLp = matchWrap();
-            sitLp.setMargins(0, dp(10), 0, 0);
-            wrap.addView(sitHost, sitLp);
-            activeLiveTrackerHost = sitHost;
-            activeLiveTrackerAwayPal = awayPalette;
-            activeLiveTrackerHomePal = homePalette;
-            activeLiveTrackerGame = game;
-            loadLiveTracker(game, sitHost, awayPalette, homePalette);
-            startLiveTrackerPolling(game);
-        }
-
-        // Final/pregame only: the classic Line / WinProb / Full Box pills, gated by the collapse.
-        if (!liveGame && liveFeedExpanded) {
-            LinearLayout tabs = new LinearLayout(this);
-            tabs.setOrientation(LinearLayout.HORIZONTAL);
-            tabs.setGravity(Gravity.CENTER_VERTICAL);
-            tabs.setPadding(0, dp(10), 0, 0);
-
-            tabs.addView(liveFeedModePill("Line", "line", game, awayPalette, homePalette), new LinearLayout.LayoutParams(0, dp(38), 1));
-            LinearLayout.LayoutParams probLp = new LinearLayout.LayoutParams(0, dp(38), 1.25f);
-            probLp.setMargins(dp(7), 0, 0, 0);
-            tabs.addView(liveFeedModePill("Win Prob + Plays", "prob", game, awayPalette, homePalette), probLp);
-            LinearLayout.LayoutParams fullLp = new LinearLayout.LayoutParams(0, dp(38), 0.95f);
-            fullLp.setMargins(dp(7), 0, 0, 0);
-            tabs.addView(liveFeedFullBoxPill(game, awayPalette, homePalette), fullLp);
-            wrap.addView(tabs, matchWrap());
-        }
-
-        return wrap;
-    }
-
-    private TextView liveFeedModePill(String label, String mode, LiveGame game, TeamPalette awayPalette, TeamPalette homePalette) {
-        boolean selected = mode.equals(liveFeedPanelMode);
-        int accent = mixColor(awayPalette.primary, homePalette.primary, 0.50f);
-        TextView pill = text(label, 9, selected ? Color.WHITE : INK_SOFT, true);
-        pill.setGravity(Gravity.CENTER);
-        pill.setSingleLine(true);
-        pill.setEllipsize(TextUtils.TruncateAt.END);
-        pill.setLetterSpacing(0.03f);
-        pill.setPadding(dp(5), 0, dp(5), 0);
-        pill.setBackground(selected
-                ? roundedGradientStroke(new int[] {
-                    Color.argb(120, Color.red(accent), Color.green(accent), Color.blue(accent)),
-                    Color.argb(62, 255, 255, 255)
-                }, 999, Color.argb(126, Color.red(accent), Color.green(accent), Color.blue(accent)), 1)
-                : roundedStroke(Color.argb(42, 255, 255, 255), Color.argb(56, 255, 255, 255), 999, 1));
-        pill.setForeground(ripple(true));
-        pill.setClickable(true);
-        pill.setOnClickListener(v -> setLiveFeedPanelMode(mode, game));
-        return pill;
-    }
-
-    private TextView liveFeedFullBoxPill(LiveGame game, TeamPalette awayPalette, TeamPalette homePalette) {
-        TextView pill = text("Full Box", 9, INK_SOFT, true);
-        pill.setGravity(Gravity.CENTER);
-        pill.setSingleLine(true);
-        pill.setLetterSpacing(0.03f);
-        pill.setPadding(dp(5), 0, dp(5), 0);
-        pill.setBackground(roundedStroke(Color.argb(42, 255, 255, 255), Color.argb(70, 255, 255, 255), 999, 1));
-        pill.setForeground(ripple(true));
-        pill.setClickable(true);
-        pill.setOnClickListener(v -> showFullBoxScoreSheet(game, awayPalette, homePalette));
-        return pill;
-    }
-
-    private void setLiveFeedPanelMode(String mode, LiveGame game) {
-        if (game == null || mode == null) return;
-        if (mode.equals(liveFeedPanelMode) && liveFeedExpanded) return;
-        liveFeedPanelMode = mode;
-        liveFeedExpanded = true;
-        final int keepY = mainScroll == null ? 0 : mainScroll.getScrollY();
-        renderLiveGameMenu(game);
-        if (mainScroll != null) mainScroll.post(() -> mainScroll.scrollTo(0, keepY));
     }
 
 
