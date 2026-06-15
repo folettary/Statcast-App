@@ -74,6 +74,9 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 public class MainActivity extends Activity {
+    // ===== TEMP PREVIEW: treat completed games as live so the live tracker design can be
+    // reviewed against real data. Set back to false to restore normal behavior. (v277) =====
+    static boolean DEBUG_FORCE_LIVE = true;
     private enum StatScope { HIT_ONLY, PITCH_ONLY, BOTH }
     private static final int STATCAST_START_YEAR = 2015;
     private static boolean isDark = false;          // dark mode toggle – static survives recreate()
@@ -771,7 +774,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v276", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v277", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -18507,7 +18510,8 @@ private View liveGameCard(LiveGame game) {
                             if (pd != null) {
                                 lp.speed = pd.optDouble("startSpeed", 0);
                                 JSONObject coord = pd.optJSONObject("coordinates");
-                                if (coord != null) { lp.pX = coord.optDouble("pX", Double.NaN); lp.pZ = coord.optDouble("pZ", Double.NaN); }
+                                if (coord != null) { lp.pX = coord.optDouble("pX", Double.NaN); lp.pZ = coord.optDouble("pZ", Double.NaN);
+                                    lp.pfxX = coord.optDouble("pfxX", Double.NaN); lp.pfxZ = coord.optDouble("pfxZ", Double.NaN); }
                                 lp.szTop = pd.optDouble("strikeZoneTop", Double.NaN);
                                 lp.szBot = pd.optDouble("strikeZoneBottom", Double.NaN);
                             }
@@ -18649,6 +18653,33 @@ private View liveGameCard(LiveGame game) {
 
             // pitches
             if (pitches != null) {
+                // Tails first (dots sit on top): a curved trail from a release origin near the top
+                // down to each plate location, bent by the pitch's movement (pfx).
+                float originX = padL + plotW * 0.5f;
+                float originY = padT + plotH * 0.04f;
+                for (LivePitch lp : pitches) {
+                    if (Double.isNaN(lp.pX) || Double.isNaN(lp.pZ)) continue;
+                    float cx = mapX((float) lp.pX, xMin, xMax, padL, plotW);
+                    float cy = mapZ((float) lp.pZ, zMin, zMax, padT, plotH);
+                    int col = pitchTypeColor(lp.typeCode);
+                    float mx = (originX + cx) / 2f, my = (originY + cy) / 2f;
+                    float bendX = Double.isNaN(lp.pfxX) ? 0f : (float) (-lp.pfxX) * dp(2.2f);
+                    float bendY = Double.isNaN(lp.pfxZ) ? 0f : (float) (lp.pfxZ) * dp(1.4f);
+                    android.graphics.Path path = new android.graphics.Path();
+                    path.moveTo(originX, originY);
+                    path.quadTo(mx + bendX, my + bendY, cx, cy);
+                    android.graphics.LinearGradient lg = new android.graphics.LinearGradient(
+                            originX, originY, cx, cy,
+                            new int[] { Color.argb(0, Color.red(col), Color.green(col), Color.blue(col)),
+                                        Color.argb(210, Color.red(col), Color.green(col), Color.blue(col)) },
+                            new float[] { 0f, 1f }, android.graphics.Shader.TileMode.CLAMP);
+                    p.setStyle(Paint.Style.STROKE);
+                    p.setStrokeWidth(dp(3.4f));
+                    p.setStrokeCap(Paint.Cap.ROUND);
+                    p.setShader(lg);
+                    canvas.drawPath(path, p);
+                    p.setShader(null);
+                }
                 for (LivePitch lp : pitches) {
                     if (Double.isNaN(lp.pX) || Double.isNaN(lp.pZ)) continue;
                     float cx = mapX((float) lp.pX, xMin, xMax, padL, plotW);
@@ -18796,47 +18827,34 @@ private View liveGameCard(LiveGame game) {
                 Color.rgb(7, 12, 21)
         }, 20, Color.argb(96, Color.red(batColor), Color.green(batColor), Color.blue(batColor)), 1));
 
-        // ---- Situation board: inning/outs/score, then portraits + diamond ----
-        LinearLayout topLine = new LinearLayout(this);
-        topLine.setOrientation(LinearLayout.HORIZONTAL);
-        topLine.setGravity(Gravity.CENTER_VERTICAL);
-        TextView inn = text((topHalf ? "▲ Top " : "▼ Bot ") + ordinalNum(game.sitInning), 11, batColor, true);
-        topLine.addView(inn, new LinearLayout.LayoutParams(-2, -2));
-        View outsDots = countDotsRow("", game.sitOuts, 3, Color.rgb(247, 197, 77));
-        LinearLayout.LayoutParams odLp = new LinearLayout.LayoutParams(-2, -2); odLp.setMargins(dp(10), 0, 0, 0);
-        topLine.addView(outsDots, odLp);
-        TextView outLab = text("OUT", 8, INK_DIM, true);
-        LinearLayout.LayoutParams olLp = new LinearLayout.LayoutParams(-2, -2); olLp.setMargins(dp(4), 0, 0, 0);
-        topLine.addView(outLab, olLp);
-        Space sp1 = new Space(this); topLine.addView(sp1, new LinearLayout.LayoutParams(0, dp(1), 1));
-        String awayAb = displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr);
-        String homeAb = displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr);
-        TextView score = text(awayAb + " " + Math.max(0, game.awayScore) + " · " + homeAb + " " + Math.max(0, game.homeScore), 12, INK, true);
-        topLine.addView(score, new LinearLayout.LayoutParams(-2, -2));
-        card.addView(topLine, matchWrap());
-
-        // matchup row: pitcher portrait | diamond+count | batter portrait
+        // ---- Situation board: portraits flanking a big count (inning/outs/score live in the hero) ----
+        // matchup row: pitcher portrait | big count | batter portrait (bases live in the hero now)
         LinearLayout matchRow = new LinearLayout(this);
         matchRow.setOrientation(LinearLayout.HORIZONTAL);
         matchRow.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout.LayoutParams mrLp = matchWrap(); mrLp.setMargins(0, dp(12), 0, 0);
         matchRow.addView(playerPortraitColumn(game.sitPitcherId, game.sitPitcher, "PITCHING", pitchColor), new LinearLayout.LayoutParams(0, -2, 1f));
-        // center: diamond + count
+        // center: inning/outs label, big count, pitch count
         LinearLayout center = new LinearLayout(this);
         center.setOrientation(LinearLayout.VERTICAL);
         center.setGravity(Gravity.CENTER_HORIZONTAL);
-        BaseDiamondView diamond = new BaseDiamondView(this, game.onFirst, game.onSecond, game.onThird, batColor);
-        center.addView(diamond, new LinearLayout.LayoutParams(dp(64), dp(64)));
-        LinearLayout countRow = new LinearLayout(this);
-        countRow.setOrientation(LinearLayout.HORIZONTAL);
-        countRow.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams crLp = matchWrap(); crLp.setMargins(0, dp(6), 0, 0);
-        countRow.addView(countDotsRow("B", game.sitBalls, 3, batColor));
-        View strikes = countDotsRow("S", game.sitStrikes, 2, Color.rgb(247, 197, 77));
-        LinearLayout.LayoutParams stLp = new LinearLayout.LayoutParams(-2, -2); stLp.setMargins(dp(10), 0, 0, 0);
-        countRow.addView(strikes, stLp);
-        center.addView(countRow, crLp);
-        matchRow.addView(center, new LinearLayout.LayoutParams(0, -2, 1.1f));
+        String halfLbl = (topHalf ? "TOP " : "BOT ") + ordinalNum(game.sitInning) + "  ·  " + game.sitOuts + " OUT";
+        TextView half = text(halfLbl, 9, INK_DIM, true);
+        half.setGravity(Gravity.CENTER); half.setLetterSpacing(0.08f);
+        center.addView(half, matchWrap());
+        TextView bigCount = text(game.sitBalls + "-" + game.sitStrikes, 30, Color.WHITE, true);
+        bigCount.setGravity(Gravity.CENTER);
+        center.addView(bigCount, matchWrap());
+        int pitchN = 0;
+        LiveFeed pf = game.liveFeed;
+        if (pf != null && pf.loaded && !pf.atBats.isEmpty()) {
+            int li = game.viewAtBatIndex >= 0 && game.viewAtBatIndex < pf.atBats.size() ? game.viewAtBatIndex : pf.atBats.size() - 1;
+            pitchN = pf.atBats.get(li).pitches.size();
+        }
+        TextView pcount = text(pitchN == 1 ? "1 PITCH" : pitchN + " PITCHES", 9, INK_DIM, true);
+        pcount.setGravity(Gravity.CENTER); pcount.setLetterSpacing(0.06f);
+        center.addView(pcount, matchWrap());
+        matchRow.addView(center, new LinearLayout.LayoutParams(0, -2, 1.2f));
         matchRow.addView(playerPortraitColumn(game.sitBatterId, game.sitBatter, "AT BAT", batColor), new LinearLayout.LayoutParams(0, -2, 1f));
         card.addView(matchRow, mrLp);
 
@@ -20256,9 +20274,17 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         String pitchers = (safe(game.awayPitcher).isEmpty() ? "Away SP TBD" : lastNameOnly(game.awayPitcher))
                 + " vs " + (safe(game.homePitcher).isEmpty() ? "Home SP TBD" : lastNameOnly(game.homePitcher));
 
-        LinearLayout.LayoutParams heroLp = new LinearLayout.LayoutParams(-1, dp(108)); // v246: tighter hero so the matchup menu starts higher on screen
-        heroLp.setMargins(dp(12), dp(8), dp(12), dp(10));
-        panel.addView(gameMatchupHeroCard(game, away, home, awayPalette, homePalette, pitchers), heroLp);
+        if (game.isLive()) {
+            // v277: live games get a compact score-forward hero (logos · big score · bases · count).
+            LinearLayout.LayoutParams lhLp = matchWrap();
+            lhLp.setMargins(dp(12), dp(8), dp(12), dp(10));
+            View liveHero = liveScoreHero(game, away, home, awayPalette, homePalette);
+            panel.addView(liveHero, lhLp);
+        } else {
+            LinearLayout.LayoutParams heroLp = new LinearLayout.LayoutParams(-1, dp(108)); // v246: tighter hero so the matchup menu starts higher on screen
+            heroLp.setMargins(dp(12), dp(8), dp(12), dp(10));
+            panel.addView(gameMatchupHeroCard(game, away, home, awayPalette, homePalette, pitchers), heroLp);
+        }
 
         // ===== v276: three-tab information architecture =====
         // The hero stays permanent. Below it, a top-level switch separates the live game from the
@@ -20498,6 +20524,122 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         content.addView(sp, matchWrap());
 
         return hero;
+    }
+
+    // v277: compact, score-forward hero for live games — team logos on the outside, big score
+    // numbers flanking center, and a center column carrying inning · bases · count · outs.
+    private View liveScoreHero(LiveGame game, Team away, Team home, TeamPalette awayPalette, TeamPalette homePalette) {
+        int awayColor = ensureReadableColor(awayPalette.primary, 150);
+        int homeColor = ensureReadableColor(homePalette.primary, 150);
+
+        FrameLayout shell = new FrameLayout(this);
+        shell.setBackground(roundedGradientStroke(new int[] {
+                mixColor(awayPalette.primary, Color.rgb(8, 12, 20), 0.45f),
+                Color.rgb(8, 12, 20),
+                mixColor(homePalette.primary, Color.rgb(8, 12, 20), 0.45f)
+        }, 22, guardedDuelStroke(awayPalette, homePalette, 150), 1));
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(12), dp(12), dp(12), dp(12));
+
+        // away: logo + abbr/record
+        row.addView(heroTeamBlock(away, displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr), "", awayColor, true), new LinearLayout.LayoutParams(0, -2, 2.1f));
+        // away score
+        TextView aScore = text(game.awayScore < 0 ? "0" : String.valueOf(game.awayScore), 34, Color.WHITE, true);
+        aScore.setGravity(Gravity.CENTER);
+        row.addView(aScore, new LinearLayout.LayoutParams(0, -2, 1.1f));
+
+        // center: inning + bases + count + outs (dynamic; loaded from situation)
+        LinearLayout center = new LinearLayout(this);
+        center.setOrientation(LinearLayout.VERTICAL);
+        center.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams centerLp = new LinearLayout.LayoutParams(0, -2, 2.4f);
+        row.addView(center, centerLp);
+        fillHeroCenter(center, game, awayPalette, homePalette);   // immediate (uses cached sit*)
+        loadHeroCenter(game, center, awayPalette, homePalette);   // async refresh
+
+        // home score
+        TextView hScore = text(game.homeScore < 0 ? "0" : String.valueOf(game.homeScore), 34, Color.WHITE, true);
+        hScore.setGravity(Gravity.CENTER);
+        row.addView(hScore, new LinearLayout.LayoutParams(0, -2, 1.1f));
+        // home: abbr/record + logo
+        row.addView(heroTeamBlock(home, displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr), "", homeColor, false), new LinearLayout.LayoutParams(0, -2, 2.1f));
+
+        shell.addView(row, new FrameLayout.LayoutParams(-1, -2));
+        return shell;
+    }
+
+    private View heroTeamBlock(Team team, String abbr, String record, int color, boolean logoFirst) {
+        LinearLayout block = new LinearLayout(this);
+        block.setOrientation(LinearLayout.HORIZONTAL);
+        block.setGravity(Gravity.CENTER_VERTICAL);
+        ImageView logo = new ImageView(this);
+        logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        if (team != null) loadTeamLogo(team, logo);
+        LinearLayout.LayoutParams logoLp = new LinearLayout.LayoutParams(dp(34), dp(34));
+        LinearLayout txt = new LinearLayout(this);
+        txt.setOrientation(LinearLayout.VERTICAL);
+        TextView ab = text(abbr, 15, Color.WHITE, true);
+        ab.setSingleLine(true);
+        txt.addView(ab, matchWrap());
+        if (!safe(record).isEmpty()) {
+            TextView rec = text(record, 9, INK_DIM, true);
+            rec.setSingleLine(true);
+            txt.addView(rec, matchWrap());
+        }
+        if (logoFirst) {
+            logoLp.setMargins(0, 0, dp(8), 0);
+            block.addView(logo, logoLp);
+            block.addView(txt, matchWrap());
+        } else {
+            block.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
+            txt.setGravity(Gravity.END);
+            ab.setGravity(Gravity.END);
+            logoLp.setMargins(dp(8), 0, 0, 0);
+            block.addView(txt, matchWrap());
+            block.addView(logo, logoLp);
+        }
+        return block;
+    }
+
+    private void fillHeroCenter(LinearLayout center, LiveGame game, TeamPalette awayPalette, TeamPalette homePalette) {
+        center.removeAllViews();
+        boolean topHalf = safe(game.sitInningState).toLowerCase(Locale.US).contains("top")
+                || safe(game.sitInningState).toLowerCase(Locale.US).contains("middle");
+        int batColor = ensureReadableColor((topHalf ? awayPalette : homePalette).primary, 160);
+        // inning
+        String inningStr = game.sitInning > 0 ? (topHalf ? "▲ Top " : "▼ Bot ") + ordinalNum(game.sitInning) : game.statusLabel();
+        TextView inn = text(inningStr, 10, batColor, true);
+        inn.setGravity(Gravity.CENTER);
+        center.addView(inn, matchWrap());
+        // bases diamond
+        BaseDiamondView dia = new BaseDiamondView(this, game.onFirst, game.onSecond, game.onThird, batColor);
+        LinearLayout.LayoutParams diaLp = new LinearLayout.LayoutParams(dp(42), dp(42));
+        diaLp.gravity = Gravity.CENTER_HORIZONTAL; diaLp.setMargins(0, dp(3), 0, dp(3));
+        center.addView(dia, diaLp);
+        // count + outs row
+        LinearLayout cr = new LinearLayout(this);
+        cr.setOrientation(LinearLayout.HORIZONTAL);
+        cr.setGravity(Gravity.CENTER_VERTICAL);
+        TextView count = text(game.sitBalls + "-" + game.sitStrikes, 12, INK, true);
+        cr.addView(count, matchWrap());
+        View outs = countDotsRow("", game.sitOuts, 3, Color.rgb(247, 197, 77));
+        LinearLayout.LayoutParams oLp = new LinearLayout.LayoutParams(-2, -2); oLp.setMargins(dp(8), 0, 0, 0);
+        cr.addView(outs, oLp);
+        center.addView(cr, matchWrap());
+    }
+
+    private void loadHeroCenter(LiveGame game, LinearLayout center, TeamPalette awayPalette, TeamPalette homePalette) {
+        if (game == null || !game.isLive()) return;
+        io.execute(() -> {
+            try {
+                String body = httpGetFresh("https://statsapi.mlb.com/api/v1/game/" + game.gamePk + "/linescore");
+                if (body != null && !body.trim().isEmpty()) parseLiveSituation(new JSONObject(body), game);
+            } catch (Exception ignored) { }
+            main.post(() -> { if (center.getParent() != null) fillHeroCenter(center, game, awayPalette, homePalette); });
+        });
     }
 
     private TextView gameHeroChip(String label, int accent) {
@@ -25415,6 +25557,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         String result = "";    // Ball, Called Strike, Foul, In play...
         boolean isStrike, isBall, isInPlay;
         double pX = Double.NaN, pZ = Double.NaN;     // plate location (ft)
+        double pfxX = Double.NaN, pfxZ = Double.NaN; // movement (in), for the tail curve
         double szTop = Double.NaN, szBot = Double.NaN;
         double exitVelo = Double.NaN, launchAngle = Double.NaN; // if put in play
         int balls, strikes;    // count AFTER this pitch
@@ -25515,9 +25658,12 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         }
         boolean isLive() {
             String s = (detailedState == null || detailedState.isEmpty() ? abstractState : detailedState);
-            if (s == null) return false;
+            if (s == null) return DEBUG_FORCE_LIVE && !isPregame();
             String low = s.toLowerCase(Locale.US);
-            return low.contains("in progress") || low.contains("live");
+            boolean reallyLive = low.contains("in progress") || low.contains("live");
+            // Preview: a finished game still has a full /feed/live, so treat it as live to demo the tracker.
+            if (DEBUG_FORCE_LIVE && !isPregame()) return true;
+            return reallyLive;
         }
         String timeLabel() {
             if (gameDate == null || gameDate.isEmpty()) return "";
