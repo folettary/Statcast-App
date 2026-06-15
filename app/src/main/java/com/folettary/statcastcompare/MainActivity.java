@@ -775,7 +775,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v282", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v283", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -18609,8 +18609,8 @@ private View liveGameCard(LiveGame game) {
         }
     }
 
-    // Strike-zone plot: the rulebook zone with each pitch as a numbered dot at its real location,
-    // colored by pitch type. v273.
+    // Strike-zone plot: proportional zone + padded pitch viewport. v283 keeps the plot
+    // as the visual centerpiece while preventing far inside/outside pitches from clipping.
     private class StrikeZoneView extends View {
         private final java.util.List<LivePitch> pitches;
         private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -18620,41 +18620,97 @@ private View liveGameCard(LiveGame game) {
         }
         @Override protected void onDraw(Canvas canvas) {
             int w = getWidth(), h = getHeight();
-            // Plot window zoomed in so the strike zone fills the frame. The rulebook zone is
-            // x ∈ [-0.83, 0.83]; a window of x ∈ [-1.45, 1.45] makes the box ~57% of the width
-            // (was ~41% at ±2.0, which is why enlarging the view never appeared to enlarge the box).
-            float pad = dp(8);
-            float plotW = w - pad * 2f, plotH = h - pad * 2f;
-            float padL = pad, padT = pad;
-            // Center the window on the plate and derive its feet-span from the view's aspect ratio
-            // so feet-per-pixel is identical on both axes — the zone keeps true proportions and the
-            // graphic fills the (taller-than-wide) view without letterboxing.
-            float zCenter = 2.5f;                 // vertical center of the window (ft above ground)
-            float ftPerPx = 3.4f / plotH;         // ~3.4 ft tall window → scale
-            float halfH = plotH * ftPerPx / 2f;
-            float halfW = plotW * ftPerPx / 2f;
-            float xMin = -halfW, xMax = halfW;
-            float zMin = zCenter - halfH, zMax = zCenter + halfH;
-            // strike zone box: x ∈ [-0.83, 0.83], z ∈ [szBot, szTop] (defaults if missing)
+            if (w <= 0 || h <= 0) return;
+
+            // Leave real screen-space room for marker glow/labels. Pitch centers are mapped inside
+            // this inner plot box so an extreme miss can never draw on the edge of the view.
+            float outerPad = dp(8);
+            float markerPad = dp(13);
+            float padL = outerPad + markerPad;
+            float padT = outerPad + markerPad;
+            float plotW = w - (outerPad + markerPad) * 2f;
+            float plotH = h - (outerPad + markerPad) * 2f;
+            if (plotW <= dp(24) || plotH <= dp(24)) return;
+
+            // Strike zone box: x ∈ [-0.83, 0.83], z ∈ [szBot, szTop] using live zone when MLB provides it.
             float szBot = 1.5f, szTop = 3.4f;
-            for (LivePitch lp : pitches) { if (!Double.isNaN(lp.szTop) && !Double.isNaN(lp.szBot)) { szTop=(float)lp.szTop; szBot=(float)lp.szBot; break; } }
-            float zoneL = mapX(-0.83f, xMin, xMax, padL, plotW);
-            float zoneR = mapX(0.83f, xMin, xMax, padL, plotW);
+            if (pitches != null) {
+                for (LivePitch lp : pitches) {
+                    if (lp == null) continue;
+                    if (!Double.isNaN(lp.szTop) && !Double.isNaN(lp.szBot) && lp.szTop > lp.szBot) {
+                        szTop = (float) lp.szTop;
+                        szBot = (float) lp.szBot;
+                        break;
+                    }
+                }
+            }
+
+            // Start with a generous default window around the rulebook zone. Then grow it to include
+            // actual pitch locations plus extra feet-padding, and finally expand whichever axis is
+            // needed so feet-per-pixel stays identical horizontally and vertically.
+            final float zoneHalfWidth = 0.83f;
+            float xMin = -1.58f, xMax = 1.58f;
+            float zMin = Math.max(0.35f, szBot - 0.78f);
+            float zMax = Math.max(szTop + 0.78f, zMin + 3.25f);
+            final float pitchPadFt = 0.36f;
+            if (pitches != null) {
+                for (LivePitch lp : pitches) {
+                    if (lp == null || Double.isNaN(lp.pX) || Double.isNaN(lp.pZ)) continue;
+                    float px = (float) lp.pX;
+                    float pz = (float) lp.pZ;
+                    // Ignore obviously-bad coordinates, but allow true wild misses to expand the canvas.
+                    if (Math.abs(px) > 6f || pz < -1.2f || pz > 8f) continue;
+                    xMin = Math.min(xMin, px - pitchPadFt);
+                    xMax = Math.max(xMax, px + pitchPadFt);
+                    zMin = Math.min(zMin, pz - pitchPadFt);
+                    zMax = Math.max(zMax, pz + pitchPadFt);
+                }
+            }
+
+            // Keep a useful minimum around the zone even when the current AB has only near-zone pitches.
+            float xMid = (xMin + xMax) / 2f;
+            float zMid = (zMin + zMax) / 2f;
+            float minSpanX = 3.16f;
+            float minSpanZ = Math.max(3.25f, (szTop - szBot) + 1.42f);
+            if (xMax - xMin < minSpanX) { xMin = xMid - minSpanX / 2f; xMax = xMid + minSpanX / 2f; }
+            if (zMax - zMin < minSpanZ) { zMin = zMid - minSpanZ / 2f; zMax = zMid + minSpanZ / 2f; }
+
+            // Preserve true proportions by matching the plot aspect ratio with equal-axis scaling.
+            float spanX = xMax - xMin;
+            float spanZ = zMax - zMin;
+            float viewAspect = plotW / plotH;
+            float dataAspect = spanX / spanZ;
+            xMid = (xMin + xMax) / 2f;
+            zMid = (zMin + zMax) / 2f;
+            if (dataAspect > viewAspect) {
+                spanZ = spanX / viewAspect;
+                zMin = zMid - spanZ / 2f;
+                zMax = zMid + spanZ / 2f;
+            } else {
+                spanX = spanZ * viewAspect;
+                xMin = xMid - spanX / 2f;
+                xMax = xMid + spanX / 2f;
+            }
+
+            float zoneL = mapX(-zoneHalfWidth, xMin, xMax, padL, plotW);
+            float zoneR = mapX(zoneHalfWidth, xMin, xMax, padL, plotW);
             float zoneT = mapZ(szTop, zMin, zMax, padT, plotH);
             float zoneB = mapZ(szBot, zMin, zMax, padT, plotH);
 
             // zone fill + thirds grid
+            p.setShader(null);
             p.setStyle(Paint.Style.FILL); p.setColor(Color.argb(20, 255, 255, 255));
             canvas.drawRect(zoneL, zoneT, zoneR, zoneB, p);
-            p.setStyle(Paint.Style.STROKE); p.setStrokeWidth(dp(1.4f)); p.setColor(Color.argb(150, 255, 255, 255));
+            p.setStyle(Paint.Style.STROKE); p.setStrokeWidth(dp(1.5f)); p.setColor(Color.argb(155, 255, 255, 255));
             canvas.drawRect(zoneL, zoneT, zoneR, zoneB, p);
-            p.setStrokeWidth(dp(0.7f)); p.setColor(Color.argb(60, 255, 255, 255));
+            p.setStrokeWidth(dp(0.75f)); p.setColor(Color.argb(62, 255, 255, 255));
             for (int k = 1; k <= 2; k++) {
                 float gx = zoneL + (zoneR - zoneL) * k / 3f;
                 canvas.drawLine(gx, zoneT, gx, zoneB, p);
                 float gy = zoneT + (zoneB - zoneT) * k / 3f;
                 canvas.drawLine(zoneL, gy, zoneR, gy, p);
             }
+
             // home plate hint under the zone
             p.setStyle(Paint.Style.STROKE); p.setStrokeWidth(dp(1f)); p.setColor(Color.argb(70, 255, 255, 255));
             float plateY = mapZ(0.8f, zMin, zMax, padT, plotH);
@@ -18665,51 +18721,73 @@ private View liveGameCard(LiveGame game) {
             plate.lineTo(plCx - plHalf, plateY + dp(6)); plate.close();
             canvas.drawPath(plate, p);
 
-            // pitches
-            if (pitches != null) {
-                // Tails first (dots sit on top): a curved trail from a release origin near the top
-                // down to each plate location, bent by the pitch's movement (pfx).
-                float originX = padL + plotW * 0.5f;
-                float originY = padT + plotH * 0.04f;
-                for (LivePitch lp : pitches) {
-                    if (Double.isNaN(lp.pX) || Double.isNaN(lp.pZ)) continue;
-                    float cx = mapX((float) lp.pX, xMin, xMax, padL, plotW);
-                    float cy = mapZ((float) lp.pZ, zMin, zMax, padT, plotH);
-                    int col = pitchTypeColor(lp.typeCode);
-                    float mx = (originX + cx) / 2f, my = (originY + cy) / 2f;
-                    float bendX = Double.isNaN(lp.pfxX) ? 0f : (float) (-lp.pfxX) * dp(2.2f);
-                    float bendY = Double.isNaN(lp.pfxZ) ? 0f : (float) (lp.pfxZ) * dp(1.4f);
-                    android.graphics.Path path = new android.graphics.Path();
-                    path.moveTo(originX, originY);
-                    path.quadTo(mx + bendX, my + bendY, cx, cy);
-                    android.graphics.LinearGradient lg = new android.graphics.LinearGradient(
-                            originX, originY, cx, cy,
-                            new int[] { Color.argb(0, Color.red(col), Color.green(col), Color.blue(col)),
-                                        Color.argb(210, Color.red(col), Color.green(col), Color.blue(col)) },
-                            new float[] { 0f, 1f }, android.graphics.Shader.TileMode.CLAMP);
-                    p.setStyle(Paint.Style.STROKE);
-                    p.setStrokeWidth(dp(3.4f));
-                    p.setStrokeCap(Paint.Cap.ROUND);
-                    p.setShader(lg);
-                    canvas.drawPath(path, p);
-                    p.setShader(null);
-                }
-                for (LivePitch lp : pitches) {
-                    if (Double.isNaN(lp.pX) || Double.isNaN(lp.pZ)) continue;
-                    float cx = mapX((float) lp.pX, xMin, xMax, padL, plotW);
-                    float cy = mapZ((float) lp.pZ, zMin, zMax, padT, plotH);
-                    int col = pitchTypeColor(lp.typeCode);
-                    p.setStyle(Paint.Style.FILL);
-                    p.setShadowLayer(dp(4), 0, 0, col); p.setColor(col);
-                    canvas.drawCircle(cx, cy, dp(8.5f), p); p.clearShadowLayer();
-                    p.setColor(Color.argb(235, 8, 13, 22));
-                    canvas.drawCircle(cx, cy, dp(8.5f) - dp(2.4f), p);
-                    p.setColor(Color.WHITE);
-                    p.setTextAlign(Paint.Align.CENTER); p.setFakeBoldText(true);
-                    p.setTextSize(dp(10));
-                    canvas.drawText(String.valueOf(lp.number), cx, cy + dp(3.6f), p);
-                }
+            if (pitches == null || pitches.isEmpty()) return;
+
+            int latestNo = 0;
+            for (LivePitch lp : pitches) if (lp != null) latestNo = Math.max(latestNo, lp.number);
+            int count = pitches.size();
+
+            // Tails first (dots sit on top). Older pitches remain visible, but a long AB does not
+            // become a wall of equally-loud marks: the newest pitch gets the strongest trail/dot.
+            float originX = padL + plotW * 0.5f;
+            float originY = padT + plotH * 0.04f;
+            for (LivePitch lp : pitches) {
+                if (lp == null || Double.isNaN(lp.pX) || Double.isNaN(lp.pZ)) continue;
+                float px = (float) lp.pX, pz = (float) lp.pZ;
+                if (Math.abs(px) > 6f || pz < -1.2f || pz > 8f) continue;
+                float cx = mapX(px, xMin, xMax, padL, plotW);
+                float cy = mapZ(pz, zMin, zMax, padT, plotH);
+                int col = pitchTypeColor(lp.typeCode);
+                int age = Math.max(0, latestNo - lp.number);
+                int alpha = age == 0 ? 220 : (age <= 3 ? 150 : (count >= 9 ? 72 : 100));
+                float stroke = age == 0 ? dp(3.8f) : (age <= 3 ? dp(2.8f) : dp(2.0f));
+                float mx = (originX + cx) / 2f, my = (originY + cy) / 2f;
+                float bendX = Double.isNaN(lp.pfxX) ? 0f : (float) (-lp.pfxX) * dp(2.2f);
+                float bendY = Double.isNaN(lp.pfxZ) ? 0f : (float) (lp.pfxZ) * dp(1.4f);
+                android.graphics.Path path = new android.graphics.Path();
+                path.moveTo(originX, originY);
+                path.quadTo(mx + bendX, my + bendY, cx, cy);
+                android.graphics.LinearGradient lg = new android.graphics.LinearGradient(
+                        originX, originY, cx, cy,
+                        new int[] { Color.argb(0, Color.red(col), Color.green(col), Color.blue(col)),
+                                    Color.argb(alpha, Color.red(col), Color.green(col), Color.blue(col)) },
+                        new float[] { 0f, 1f }, android.graphics.Shader.TileMode.CLAMP);
+                p.setStyle(Paint.Style.STROKE);
+                p.setStrokeWidth(stroke);
+                p.setStrokeCap(Paint.Cap.ROUND);
+                p.setShader(lg);
+                canvas.drawPath(path, p);
+                p.setShader(null);
             }
+
+            for (LivePitch lp : pitches) {
+                if (lp == null || Double.isNaN(lp.pX) || Double.isNaN(lp.pZ)) continue;
+                float px = (float) lp.pX, pz = (float) lp.pZ;
+                if (Math.abs(px) > 6f || pz < -1.2f || pz > 8f) continue;
+                float cx = mapX(px, xMin, xMax, padL, plotW);
+                float cy = mapZ(pz, zMin, zMax, padT, plotH);
+                int col = pitchTypeColor(lp.typeCode);
+                int age = Math.max(0, latestNo - lp.number);
+                boolean latest = age == 0;
+                boolean recent = age <= 3;
+                int alpha = latest ? 255 : (recent ? 215 : (count >= 9 ? 145 : 175));
+                float r = latest ? dp(9.2f) : (recent ? dp(7.8f) : dp(6.8f));
+                p.setStyle(Paint.Style.FILL);
+                if (latest) p.setShadowLayer(dp(5), 0, 0, col);
+                else if (recent) p.setShadowLayer(dp(2.5f), 0, 0, Color.argb(120, Color.red(col), Color.green(col), Color.blue(col)));
+                else p.clearShadowLayer();
+                p.setColor(Color.argb(alpha, Color.red(col), Color.green(col), Color.blue(col)));
+                canvas.drawCircle(cx, cy, r, p);
+                p.clearShadowLayer();
+                p.setColor(Color.argb(latest ? 238 : 205, 8, 13, 22));
+                canvas.drawCircle(cx, cy, Math.max(dp(2.5f), r - dp(2.3f)), p);
+                p.setColor(Color.argb(latest ? 255 : 220, 255, 255, 255));
+                p.setTextAlign(Paint.Align.CENTER); p.setFakeBoldText(true);
+                p.setTextSize(latest ? dp(10) : dp(9));
+                canvas.drawText(String.valueOf(lp.number), cx, cy + dp(3.3f), p);
+            }
+            p.setFakeBoldText(false);
+            p.setStrokeCap(Paint.Cap.BUTT);
         }
         private float mapX(float x, float lo, float hi, float pad, float plot) { return pad + (x - lo) / (hi - lo) * plot; }
         private float mapZ(float z, float lo, float hi, float pad, float plot) { return pad + (hi - z) / (hi - lo) * plot; }
@@ -18938,27 +19016,37 @@ private View liveGameCard(LiveGame game) {
             }
             card.addView(abNav, abLp);
 
-            // zone (larger) on the left, scrollable pitch list (fixed height) on the right
+            // v283: protected two-column live AB layout. The plot keeps the hero footprint while the
+            // right pitch rail is fixed-width, padded, and independently scrollable for long at-bats.
             LinearLayout zoneRow = new LinearLayout(this);
             zoneRow.setOrientation(LinearLayout.HORIZONTAL);
+            zoneRow.setGravity(Gravity.TOP);
             LinearLayout.LayoutParams zrLp = matchWrap(); zrLp.setMargins(0, dp(8), 0, 0);
-            int zoneH = dp(250);
+            int zoneH = dp(ab.pitches.size() >= 10 ? 266 : 258);
             StrikeZoneView zone = new StrikeZoneView(this, ab.pitches);
-            LinearLayout.LayoutParams zLp = new LinearLayout.LayoutParams(0, zoneH, 1.25f);
+            LinearLayout.LayoutParams zLp = new LinearLayout.LayoutParams(0, zoneH, 1f);
             zoneRow.addView(zone, zLp);
-            // pitch list: newest first, scrollable within the fixed zone height
+            // pitch list: newest first, scrollable within the fixed zone height. Keep it a true
+            // right-side rail instead of letting it eat half the card and squeeze the plot.
             ScrollView legendScroll = new ScrollView(this);
             legendScroll.setVerticalScrollBarEnabled(false);
-            legendScroll.setClipToOutline(true);
+            legendScroll.setFillViewport(false);
+            legendScroll.setClipToPadding(false);
+            legendScroll.setPadding(0, 0, dp(3), 0);
             LinearLayout legend = new LinearLayout(this);
             legend.setOrientation(LinearLayout.VERTICAL);
+            legend.setPadding(dp(1), 0, dp(5), 0);
             if (ab.pitches.isEmpty()) {
-                legend.addView(text("Waiting for the first pitch…", 11, INK_DIM, false), matchWrap());
+                TextView waiting = text("Waiting for the first pitch…", 10, INK_DIM, false);
+                waiting.setMaxLines(3);
+                legend.addView(waiting, matchWrap());
             } else {
                 for (int pi = ab.pitches.size() - 1; pi >= 0; pi--) legend.addView(pitchLegendRow(ab.pitches.get(pi)), matchWrap());
             }
             legendScroll.addView(legend, new ScrollView.LayoutParams(-1, -2));
-            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(0, zoneH, 1f); lgLp.setMargins(dp(8), 0, 0, 0);
+            int screenW = getResources().getDisplayMetrics().widthPixels;
+            int railW = Math.min(dp(132), Math.max(dp(112), screenW / 3));
+            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(railW, zoneH); lgLp.setMargins(dp(11), 0, 0, 0);
             zoneRow.addView(legendScroll, lgLp);
             card.addView(zoneRow, zrLp);
 
