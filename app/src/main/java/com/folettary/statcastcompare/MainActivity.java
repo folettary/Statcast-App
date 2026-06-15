@@ -775,7 +775,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v285", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v286", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -18609,7 +18609,7 @@ private View liveGameCard(LiveGame game) {
         }
     }
 
-    // Strike-zone plot: proportional zone + padded pitch viewport. v285 keeps the plot
+    // Strike-zone plot: proportional zone + padded pitch viewport. v286 keeps the plot
     // as the visual centerpiece while preventing far inside/outside pitches from clipping.
     private class StrikeZoneView extends View {
         private final java.util.List<LivePitch> pitches;
@@ -18645,22 +18645,27 @@ private View liveGameCard(LiveGame game) {
                 }
             }
 
-            // Start with a generous default window around the rulebook zone. Then grow it to include
-            // actual pitch locations plus extra feet-padding, and finally expand whichever axis is
-            // needed so feet-per-pixel stays identical horizontally and vertically.
+            // v286: stop making the *canvas* larger while the zone stays small. Instead, give the
+            // zone a target pixel size first, then only scale down if actual pitch locations would
+            // clip. This keeps normal ABs large while still protecting room for true wild misses.
             final float zoneHalfWidth = 0.83f;
-            // v285: the default viewport is intentionally tighter so the strike zone itself
-            // is the hero. Wild/edge pitches still grow this window below instead of clipping.
-            float xMin = -1.23f, xMax = 1.23f;
-            float zMin = Math.max(0.62f, szBot - 0.48f);
-            float zMax = Math.max(szTop + 0.58f, zMin + 2.78f);
-            final float pitchPadFt = 0.42f;
+            float zoneMidZ = (szTop + szBot) / 2f;
+            float zoneSpanZ = Math.max(1.88f, szTop - szBot); // keeps the zone visually baseball-shaped
+            float visualSzBot = zoneMidZ - zoneSpanZ / 2f;
+            float visualSzTop = zoneMidZ + zoneSpanZ / 2f;
+
+            final float pitchPadFt = 0.28f;
+            float xMin = -zoneHalfWidth - 0.18f;
+            float xMax =  zoneHalfWidth + 0.18f;
+            float zMin = visualSzBot - 0.24f;
+            float zMax = visualSzTop + 0.30f;
+
             if (pitches != null) {
                 for (LivePitch lp : pitches) {
                     if (lp == null || Double.isNaN(lp.pX) || Double.isNaN(lp.pZ)) continue;
                     float px = (float) lp.pX;
                     float pz = (float) lp.pZ;
-                    // Ignore obviously-bad coordinates, but allow true wild misses to expand the canvas.
+                    // Ignore obviously-bad coordinates, but allow real wild misses to expand the canvas.
                     if (Math.abs(px) > 6f || pz < -1.2f || pz > 8f) continue;
                     xMin = Math.min(xMin, px - pitchPadFt);
                     xMax = Math.max(xMax, px + pitchPadFt);
@@ -18669,23 +18674,17 @@ private View liveGameCard(LiveGame game) {
                 }
             }
 
-            // Keep a useful minimum around the zone even when the current AB has only near-zone pitches.
-            float xMid = (xMin + xMax) / 2f;
-            float zMid = (zMin + zMax) / 2f;
-            // v285: do not reserve 3+ feet horizontally for every normal AB. That made the
-            // zone tiny. Keep enough default miss room, then let real outside pitches expand it.
-            float minSpanX = 2.46f;
-            float minSpanZ = Math.max(2.78f, (szTop - szBot) + 1.02f);
-            if (xMax - xMin < minSpanX) { xMin = xMid - minSpanX / 2f; xMax = xMid + minSpanX / 2f; }
-            if (zMax - zMin < minSpanZ) { zMin = zMid - minSpanZ / 2f; zMax = zMid + minSpanZ / 2f; }
+            // Always reserve enough room for the plate, but do not let the plate force the zone tiny.
+            zMin = Math.min(zMin, 0.72f);
+            float spanX = Math.max(0.01f, xMax - xMin);
+            float spanZ = Math.max(0.01f, zMax - zMin);
 
-            // Preserve true proportions with ONE shared feet-per-pixel scale, but do not stretch the
-            // data window to fill a wide view. That v283 behavior made the zone look smaller on phones
-            // because the wide left panel forced extra horizontal span. Instead, fit the current data
-            // window inside the available plot box using the max common scale and center the result.
-            float spanX = xMax - xMin;
-            float spanZ = zMax - zMin;
-            float scale = Math.min(plotW / spanX, plotH / spanZ);
+            float fitScale = Math.min(plotW / spanX, plotH / spanZ);
+            float targetZoneH = Math.min(plotH * 0.68f, dp(265));
+            float targetScale = targetZoneH / zoneSpanZ;
+            float scale = Math.min(targetScale, fitScale);
+
+            // Map the current data bounds at the chosen shared scale, centered inside the plot.
             float drawW = spanX * scale;
             float drawH = spanZ * scale;
             float drawL = padL + (plotW - drawW) / 2f;
@@ -18693,8 +18692,8 @@ private View liveGameCard(LiveGame game) {
 
             float zoneL = mapX(-zoneHalfWidth, xMin, xMax, drawL, drawW);
             float zoneR = mapX(zoneHalfWidth, xMin, xMax, drawL, drawW);
-            float zoneT = mapZ(szTop, zMin, zMax, drawT, drawH);
-            float zoneB = mapZ(szBot, zMin, zMax, drawT, drawH);
+            float zoneT = mapZ(visualSzTop, zMin, zMax, drawT, drawH);
+            float zoneB = mapZ(visualSzBot, zMin, zMax, drawT, drawH);
 
             // zone fill + thirds grid
             p.setShader(null);
@@ -19015,13 +19014,13 @@ private View liveGameCard(LiveGame game) {
             }
             card.addView(abNav, abLp);
 
-            // v285: protected two-column live AB layout. The plot keeps the hero footprint while the
+            // v286: protected two-column live AB layout. The plot keeps the hero footprint while the
             // right pitch rail is fixed-width, padded, and independently scrollable for long at-bats.
             LinearLayout zoneRow = new LinearLayout(this);
             zoneRow.setOrientation(LinearLayout.HORIZONTAL);
             zoneRow.setGravity(Gravity.TOP);
             LinearLayout.LayoutParams zrLp = matchWrap(); zrLp.setMargins(0, dp(8), 0, 0);
-            int zoneH = dp(ab.pitches.size() >= 10 ? 332 : 320);
+            int zoneH = dp(ab.pitches.size() >= 10 ? 380 : 368);
             StrikeZoneView zone = new StrikeZoneView(this, ab.pitches);
             LinearLayout.LayoutParams zLp = new LinearLayout.LayoutParams(0, zoneH, 1f);
             zoneRow.addView(zone, zLp);
@@ -19044,7 +19043,7 @@ private View liveGameCard(LiveGame game) {
             }
             legendScroll.addView(legend, new ScrollView.LayoutParams(-1, -2));
             int screenW = getResources().getDisplayMetrics().widthPixels;
-            int railW = Math.min(dp(116), Math.max(dp(100), screenW / 3));
+            int railW = Math.min(dp(112), Math.max(dp(96), screenW / 3));
             LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(railW, zoneH); lgLp.setMargins(dp(11), 0, 0, 0);
             zoneRow.addView(legendScroll, lgLp);
             card.addView(zoneRow, zrLp);
