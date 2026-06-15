@@ -754,7 +754,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v320", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v321", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -19049,16 +19049,15 @@ private View liveGameCard(LiveGame game) {
                 LinearLayout pill = new LinearLayout(this);
                 pill.setOrientation(LinearLayout.HORIZONTAL);
                 pill.setGravity(Gravity.CENTER);
-                pill.setPadding(dp(12), dp(6), dp(12), dp(6));
+                pill.setPadding(dp(14), dp(7), dp(14), dp(7));
                 pill.setBackground(roundedStroke(Color.argb(36, 82, 226, 176), Color.argb(150, 82, 226, 176), 999, 1));
                 pill.setForeground(ripple(true)); pill.setClickable(true);
-                TextView arrow = text("⟲  ", 11, Color.rgb(82, 226, 176), true);
-                pill.addView(arrow, matchWrap());
-                TextView pillT = text("BACK TO LIVE", 10, Color.rgb(82, 226, 176), true);
+                TextView pillT = text("⟲  BACK TO LIVE", 10, Color.rgb(82, 226, 176), true);
                 pillT.setLetterSpacing(0.08f);
-                pill.addView(pillT, matchWrap());
+                pill.addView(pillT, new LinearLayout.LayoutParams(-2, -2));
                 pill.setOnClickListener(v -> { game.viewAtBatIndex = -1; rerenderTracker(game); });
-                LinearLayout.LayoutParams pLp = matchWrap(); pLp.setMargins(0, dp(7), 0, 0);
+                LinearLayout.LayoutParams pLp = new LinearLayout.LayoutParams(-2, -2); // wrap, centered
+                pLp.gravity = Gravity.CENTER_HORIZONTAL; pLp.setMargins(0, dp(7), 0, 0);
                 abNav.addView(pill, pLp);
             }
             card.addView(abNav, abLp);
@@ -19086,8 +19085,14 @@ private View liveGameCard(LiveGame game) {
                     }
                 });
             zone.setOnTouchListener((v, ev) -> {
-                v.getParent().requestDisallowInterceptTouchEvent(true);
-                return swipe.onTouchEvent(ev);
+                int a = ev.getActionMasked();
+                if (a == android.view.MotionEvent.ACTION_DOWN) {
+                    v.getParent().requestDisallowInterceptTouchEvent(true);
+                } else if (a == android.view.MotionEvent.ACTION_UP || a == android.view.MotionEvent.ACTION_CANCEL) {
+                    v.getParent().requestDisallowInterceptTouchEvent(false);
+                }
+                swipe.onTouchEvent(ev);
+                return true; // consume the stream so DOWN→MOVE→UP all reach the detector
             });
             LinearLayout.LayoutParams zLp = new LinearLayout.LayoutParams(0, zoneH, 1f);
             zoneRow.addView(zone, zLp);
@@ -19341,14 +19346,16 @@ private View liveGameCard(LiveGame game) {
             headRow.setGravity(Gravity.CENTER | Gravity.BOTTOM);
             String velo = pitch.speed > 0 ? String.format(Locale.US, "%.0f", pitch.speed) : "\u2014";
             TextView veloT = text(velo, 26, INK, true);
-            headRow.addView(veloT, matchWrap());
+            headRow.addView(veloT, new LinearLayout.LayoutParams(-2, -2));
             TextView mph = text(" mph", 11, INK_DIM, true);
             mph.setPadding(0, 0, dp(8), dp(4));
-            headRow.addView(mph, matchWrap());
+            headRow.addView(mph, new LinearLayout.LayoutParams(-2, -2));
             TextView typeT = text(pitchTypeShort(pitch.typeCode, pitch.typeName), 18, accent, true);
             typeT.setPadding(0, 0, 0, dp(2));
-            headRow.addView(typeT, matchWrap());
-            card.addView(headRow, matchWrap());
+            headRow.addView(typeT, new LinearLayout.LayoutParams(-2, -2));
+            LinearLayout.LayoutParams hrLp = new LinearLayout.LayoutParams(-2, -2);
+            hrLp.gravity = Gravity.CENTER_HORIZONTAL;
+            card.addView(headRow, hrLp);
             // result of this pitch (Ball, Called Strike, Foul, In play…)
             if (!safe(pitch.result).isEmpty()) {
                 TextView resT = text(pitch.result, 12, INK, true);
@@ -19420,18 +19427,20 @@ private View liveGameCard(LiveGame game) {
                 pitchRow.setPadding(0, dp(1), 0, 0);
                 if (endPitch.speed > 0) {
                     TextView v = text(String.format(Locale.US, "%.0f", endPitch.speed), 15, INK, true);
-                    pitchRow.addView(v, matchWrap());
+                    pitchRow.addView(v, new LinearLayout.LayoutParams(-2, -2));
                     TextView mph = text(" mph ", 9, INK_DIM, true); mph.setPadding(0, 0, dp(2), dp(1));
-                    pitchRow.addView(mph, matchWrap());
+                    pitchRow.addView(mph, new LinearLayout.LayoutParams(-2, -2));
                 }
                 TextView typeT = text(pitchTypeShort(endPitch.typeCode, endPitch.typeName), 13, pcol, true);
-                pitchRow.addView(typeT, matchWrap());
+                pitchRow.addView(typeT, new LinearLayout.LayoutParams(-2, -2));
                 if (!Double.isNaN(endPitch.spinRate) && endPitch.spinRate > 0) {
                     TextView spin = text(String.format(Locale.US, "  \u00b7  %.0f rpm", endPitch.spinRate), 10, INK_DIM, true);
                     spin.setPadding(0, 0, 0, dp(1));
-                    pitchRow.addView(spin, matchWrap());
+                    pitchRow.addView(spin, new LinearLayout.LayoutParams(-2, -2));
                 }
-                card.addView(pitchRow, matchWrap());
+                LinearLayout.LayoutParams prLp = new LinearLayout.LayoutParams(-2, -2);
+                prLp.gravity = Gravity.CENTER_HORIZONTAL;
+                card.addView(pitchRow, prLp);
             }
         }
         return card;
