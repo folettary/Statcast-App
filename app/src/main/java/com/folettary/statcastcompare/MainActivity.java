@@ -754,7 +754,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v319", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v320", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -19405,7 +19405,7 @@ private View liveGameCard(LiveGame game) {
                 GradientDrawable dg = new GradientDrawable();
                 dg.setColor(Color.argb(40, 255, 255, 255));
                 divider.setBackground(dg);
-                LinearLayout.LayoutParams dvLp = new LinearLayout.LayoutParams(dp(120), Math.max(1, dp(0.5f)));
+                LinearLayout.LayoutParams dvLp = new LinearLayout.LayoutParams(dp(120), Math.max(1, dp(1)));
                 dvLp.gravity = Gravity.CENTER_HORIZONTAL; dvLp.setMargins(0, dp(8), 0, dp(6));
                 card.addView(divider, dvLp);
 
