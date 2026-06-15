@@ -775,7 +775,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v283", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v284", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -18609,7 +18609,7 @@ private View liveGameCard(LiveGame game) {
         }
     }
 
-    // Strike-zone plot: proportional zone + padded pitch viewport. v283 keeps the plot
+    // Strike-zone plot: proportional zone + padded pitch viewport. v284 keeps the plot
     // as the visual centerpiece while preventing far inside/outside pitches from clipping.
     private class StrikeZoneView extends View {
         private final java.util.List<LivePitch> pitches;
@@ -18675,27 +18675,22 @@ private View liveGameCard(LiveGame game) {
             if (xMax - xMin < minSpanX) { xMin = xMid - minSpanX / 2f; xMax = xMid + minSpanX / 2f; }
             if (zMax - zMin < minSpanZ) { zMin = zMid - minSpanZ / 2f; zMax = zMid + minSpanZ / 2f; }
 
-            // Preserve true proportions by matching the plot aspect ratio with equal-axis scaling.
+            // Preserve true proportions with ONE shared feet-per-pixel scale, but do not stretch the
+            // data window to fill a wide view. That v283 behavior made the zone look smaller on phones
+            // because the wide left panel forced extra horizontal span. Instead, fit the current data
+            // window inside the available plot box using the max common scale and center the result.
             float spanX = xMax - xMin;
             float spanZ = zMax - zMin;
-            float viewAspect = plotW / plotH;
-            float dataAspect = spanX / spanZ;
-            xMid = (xMin + xMax) / 2f;
-            zMid = (zMin + zMax) / 2f;
-            if (dataAspect > viewAspect) {
-                spanZ = spanX / viewAspect;
-                zMin = zMid - spanZ / 2f;
-                zMax = zMid + spanZ / 2f;
-            } else {
-                spanX = spanZ * viewAspect;
-                xMin = xMid - spanX / 2f;
-                xMax = xMid + spanX / 2f;
-            }
+            float scale = Math.min(plotW / spanX, plotH / spanZ);
+            float drawW = spanX * scale;
+            float drawH = spanZ * scale;
+            float drawL = padL + (plotW - drawW) / 2f;
+            float drawT = padT + (plotH - drawH) / 2f;
 
-            float zoneL = mapX(-zoneHalfWidth, xMin, xMax, padL, plotW);
-            float zoneR = mapX(zoneHalfWidth, xMin, xMax, padL, plotW);
-            float zoneT = mapZ(szTop, zMin, zMax, padT, plotH);
-            float zoneB = mapZ(szBot, zMin, zMax, padT, plotH);
+            float zoneL = mapX(-zoneHalfWidth, xMin, xMax, drawL, drawW);
+            float zoneR = mapX(zoneHalfWidth, xMin, xMax, drawL, drawW);
+            float zoneT = mapZ(szTop, zMin, zMax, drawT, drawH);
+            float zoneB = mapZ(szBot, zMin, zMax, drawT, drawH);
 
             // zone fill + thirds grid
             p.setShader(null);
@@ -18713,7 +18708,7 @@ private View liveGameCard(LiveGame game) {
 
             // home plate hint under the zone
             p.setStyle(Paint.Style.STROKE); p.setStrokeWidth(dp(1f)); p.setColor(Color.argb(70, 255, 255, 255));
-            float plateY = mapZ(0.8f, zMin, zMax, padT, plotH);
+            float plateY = mapZ(0.8f, zMin, zMax, drawT, drawH);
             float plCx = (zoneL + zoneR) / 2f, plHalf = (zoneR - zoneL) * 0.5f;
             android.graphics.Path plate = new android.graphics.Path();
             plate.moveTo(plCx - plHalf, plateY); plate.lineTo(plCx + plHalf, plateY);
@@ -18729,14 +18724,14 @@ private View liveGameCard(LiveGame game) {
 
             // Tails first (dots sit on top). Older pitches remain visible, but a long AB does not
             // become a wall of equally-loud marks: the newest pitch gets the strongest trail/dot.
-            float originX = padL + plotW * 0.5f;
-            float originY = padT + plotH * 0.04f;
+            float originX = drawL + drawW * 0.5f;
+            float originY = drawT + drawH * 0.04f;
             for (LivePitch lp : pitches) {
                 if (lp == null || Double.isNaN(lp.pX) || Double.isNaN(lp.pZ)) continue;
                 float px = (float) lp.pX, pz = (float) lp.pZ;
                 if (Math.abs(px) > 6f || pz < -1.2f || pz > 8f) continue;
-                float cx = mapX(px, xMin, xMax, padL, plotW);
-                float cy = mapZ(pz, zMin, zMax, padT, plotH);
+                float cx = mapX(px, xMin, xMax, drawL, drawW);
+                float cy = mapZ(pz, zMin, zMax, drawT, drawH);
                 int col = pitchTypeColor(lp.typeCode);
                 int age = Math.max(0, latestNo - lp.number);
                 int alpha = age == 0 ? 220 : (age <= 3 ? 150 : (count >= 9 ? 72 : 100));
@@ -18764,8 +18759,8 @@ private View liveGameCard(LiveGame game) {
                 if (lp == null || Double.isNaN(lp.pX) || Double.isNaN(lp.pZ)) continue;
                 float px = (float) lp.pX, pz = (float) lp.pZ;
                 if (Math.abs(px) > 6f || pz < -1.2f || pz > 8f) continue;
-                float cx = mapX(px, xMin, xMax, padL, plotW);
-                float cy = mapZ(pz, zMin, zMax, padT, plotH);
+                float cx = mapX(px, xMin, xMax, drawL, drawW);
+                float cy = mapZ(pz, zMin, zMax, drawT, drawH);
                 int col = pitchTypeColor(lp.typeCode);
                 int age = Math.max(0, latestNo - lp.number);
                 boolean latest = age == 0;
@@ -19016,13 +19011,13 @@ private View liveGameCard(LiveGame game) {
             }
             card.addView(abNav, abLp);
 
-            // v283: protected two-column live AB layout. The plot keeps the hero footprint while the
+            // v284: protected two-column live AB layout. The plot keeps the hero footprint while the
             // right pitch rail is fixed-width, padded, and independently scrollable for long at-bats.
             LinearLayout zoneRow = new LinearLayout(this);
             zoneRow.setOrientation(LinearLayout.HORIZONTAL);
             zoneRow.setGravity(Gravity.TOP);
             LinearLayout.LayoutParams zrLp = matchWrap(); zrLp.setMargins(0, dp(8), 0, 0);
-            int zoneH = dp(ab.pitches.size() >= 10 ? 266 : 258);
+            int zoneH = dp(ab.pitches.size() >= 10 ? 332 : 320);
             StrikeZoneView zone = new StrikeZoneView(this, ab.pitches);
             LinearLayout.LayoutParams zLp = new LinearLayout.LayoutParams(0, zoneH, 1f);
             zoneRow.addView(zone, zLp);
@@ -19045,7 +19040,7 @@ private View liveGameCard(LiveGame game) {
             }
             legendScroll.addView(legend, new ScrollView.LayoutParams(-1, -2));
             int screenW = getResources().getDisplayMetrics().widthPixels;
-            int railW = Math.min(dp(132), Math.max(dp(112), screenW / 3));
+            int railW = Math.min(dp(126), Math.max(dp(108), screenW / 3));
             LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(railW, zoneH); lgLp.setMargins(dp(11), 0, 0, 0);
             zoneRow.addView(legendScroll, lgLp);
             card.addView(zoneRow, zrLp);
