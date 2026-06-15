@@ -775,7 +775,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v299", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v300", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -18619,12 +18619,10 @@ private View liveGameCard(LiveGame game) {
     }
 
     private ZoneBounds strikeZoneBoundsForFeed(LiveFeed feed) {
-        // v299: the void above the box was the window's headroom, not leftover plot slack — at this
-        // near-square column the plot already fills the height. The zone is 1.50–3.40 ft; keeping
-        // only ~0.35 ft of air above (zMax 3.75) and ~0.45 ft below the plate makes the box bigger
-        // and lifts it up so it no longer floats in the middle with dead space on top. Width still
-        // leaves ~0.6 ft beyond each edge for misses.
-        return new ZoneBounds(-1.62f, 1.30f, 0.70f, 3.75f);
+        // v300: with the pitch rail narrowed, the plot has more width — extend the glove-side (right)
+        // reach so outside misses sit inside the plot instead of crowding the rail. Slightly
+        // asymmetric (more room right) matches where the misses in the sample landed.
+        return new ZoneBounds(-1.55f, 1.55f, 0.70f, 3.75f);
     }
 
     private class StrikeZoneView extends View {
@@ -19032,8 +19030,8 @@ private View liveGameCard(LiveGame game) {
             }
             legendScroll.addView(legend, new ScrollView.LayoutParams(-1, -2));
             int screenW = getResources().getDisplayMetrics().widthPixels;
-            int railW = Math.min(dp(112), Math.max(dp(96), screenW * 28 / 100));
-            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(railW, zoneH); lgLp.setMargins(dp(6), 0, 0, 0);
+            int railW = Math.min(dp(98), Math.max(dp(84), screenW * 24 / 100));
+            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(railW, zoneH); lgLp.setMargins(dp(4), 0, 0, 0);
             zoneRow.addView(legendScroll, lgLp);
             card.addView(zoneRow, zrLp);
 
