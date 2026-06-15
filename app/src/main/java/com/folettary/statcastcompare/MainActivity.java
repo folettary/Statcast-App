@@ -754,7 +754,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v322", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v323", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -18889,7 +18889,7 @@ private View liveGameCard(LiveGame game) {
                     boolean followingLive = (g.viewAtBatIndex < 0) || (f != null && f.loaded && g.viewAtBatIndex >= f.atBats.size() - 1);
                     if (followingLive) g.viewAtBatIndex = -1;
                     host.removeAllViews();
-                    host.addView(liveTrackerCard(g, activeLiveTrackerAwayPal, activeLiveTrackerHomePal), matchWrap());
+                    host.addView(buildTrackerPager(g), matchWrap());
                     if (!g.isLive()) { stopLiveTrackerPolling(); return; }
                     main.postDelayed(liveTrackerPollRunnable, 15000L);
                 });
@@ -18919,8 +18919,10 @@ private View liveGameCard(LiveGame game) {
             fetchLiveFeedInto(game);
             main.post(() -> {
                 if (host.getParent() == null) return;
+                activeLiveTrackerAwayPal = awayPalette;
+                activeLiveTrackerHomePal = homePalette;
                 host.removeAllViews();
-                host.addView(liveTrackerCard(game, awayPalette, homePalette), matchWrap());
+                host.addView(buildTrackerPager(game), matchWrap());
                 host.setVisibility(View.VISIBLE);
                 host.setAlpha(0f);
                 host.animate().alpha(1f).setDuration(220).start();
@@ -19069,47 +19071,6 @@ private View liveGameCard(LiveGame game) {
             LinearLayout.LayoutParams zrLp = matchWrap(); zrLp.setMargins(-dp(12), 0, -dp(2), 0);
             int zoneH = dp(264);
             StrikeZoneView zone = new StrikeZoneView(this, ab.pitches, strikeZoneBoundsForFeed(feed));
-            // Swipe the zone to move between at-bats: swipe right → previous AB, left → next AB.
-            final android.view.GestureDetector swipe = new android.view.GestureDetector(this,
-                new android.view.GestureDetector.SimpleOnGestureListener() {
-                    @Override public boolean onFling(android.view.MotionEvent e1, android.view.MotionEvent e2, float vx, float vy) {
-                        if (e1 == null || e2 == null) return false;
-                        float dx = e2.getX() - e1.getX(), dy = e2.getY() - e1.getY();
-                        if (Math.abs(dx) < dp(40) || Math.abs(dx) < Math.abs(dy) * 1.5f) return false;
-                        if (dx > 0) { if (fidx > 0) { game.viewAtBatIndex = fidx - 1; rerenderTracker(game); } }
-                        else { int ni = fidx + 1; game.viewAtBatIndex = (ni >= abCount - 1) ? -1 : ni; rerenderTracker(game); }
-                        return true;
-                    }
-                });
-            zone.setOnTouchListener(new View.OnTouchListener() {
-                float downX, downY; boolean decided, horizontal;
-                @Override public boolean onTouch(View v, android.view.MotionEvent ev) {
-                    switch (ev.getActionMasked()) {
-                        case android.view.MotionEvent.ACTION_DOWN:
-                            downX = ev.getX(); downY = ev.getY(); decided = false; horizontal = false;
-                            break;
-                        case android.view.MotionEvent.ACTION_MOVE:
-                            if (!decided) {
-                                float adx = Math.abs(ev.getX() - downX), ady = Math.abs(ev.getY() - downY);
-                                if (adx > dp(10) || ady > dp(10)) {
-                                    decided = true;
-                                    horizontal = adx > ady * 1.4f; // clearly sideways → it's a swipe
-                                    // claim the gesture only if horizontal; else let the page scroll
-                                    v.getParent().requestDisallowInterceptTouchEvent(horizontal);
-                                }
-                            }
-                            break;
-                        case android.view.MotionEvent.ACTION_UP:
-                        case android.view.MotionEvent.ACTION_CANCEL:
-                            v.getParent().requestDisallowInterceptTouchEvent(false);
-                            break;
-                    }
-                    swipe.onTouchEvent(ev);
-                    // Only consume when we've committed to a horizontal swipe; otherwise return false
-                    // so vertical drags fall through to the page ScrollView.
-                    return decided && horizontal;
-                }
-            });
             LinearLayout.LayoutParams zLp = new LinearLayout.LayoutParams(0, zoneH, 1f);
             zoneRow.addView(zone, zLp);
             // pitch list: newest first, in a fixed-height window that scrolls independently of the
@@ -19344,7 +19305,7 @@ private View liveGameCard(LiveGame game) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setGravity(Gravity.CENTER);
-        card.setPadding(dp(14), dp(12), dp(14), dp(12));
+        card.setPadding(dp(14), dp(9), dp(14), dp(9));
         card.setBackground(roundedGradientStroke(new int[] {
                 Color.argb(48, Color.red(accent), Color.green(accent), Color.blue(accent)),
                 Color.argb(20, Color.red(accent), Color.green(accent), Color.blue(accent)),
@@ -19466,7 +19427,115 @@ private View liveGameCard(LiveGame game) {
     private void rerenderTracker(LiveGame game) {
         if (game == null || activeLiveTrackerHost == null) return;
         activeLiveTrackerHost.removeAllViews();
-        activeLiveTrackerHost.addView(liveTrackerCard(game, activeLiveTrackerAwayPal, activeLiveTrackerHomePal), matchWrap());
+        activeLiveTrackerHost.addView(buildTrackerPager(game), matchWrap());
+    }
+
+    // v323: build the tracker card for a SPECIFIC at-bat index by temporarily pointing the game's
+    // viewAtBatIndex at it, rendering, then restoring. -1 means "follow live".
+    private View trackerCardForIndex(LiveGame game, int index) {
+        int saved = game.viewAtBatIndex;
+        game.viewAtBatIndex = index;
+        View card = liveTrackerCard(game, activeLiveTrackerAwayPal, activeLiveTrackerHomePal);
+        game.viewAtBatIndex = saved;
+        return card;
+    }
+
+    // v323: a drag-to-slide carousel. Renders the current AB plus its left/right neighbours in a
+    // horizontal strip; the finger drags the strip, and on release it snaps to the nearest page and
+    // commits the new at-bat index. Vertical drags fall through to the page ScrollView.
+    private View buildTrackerPager(LiveGame game) {
+        LiveFeed feed = game.liveFeed;
+        // Resolve the current absolute index the card is showing.
+        int curIdx;
+        if (feed != null && feed.loaded && !feed.atBats.isEmpty()) {
+            curIdx = (game.viewAtBatIndex >= 0 && game.viewAtBatIndex < feed.atBats.size())
+                    ? game.viewAtBatIndex : liveAtBatIndex(game, feed);
+        } else {
+            // no feed → just render the single card, no paging
+            return liveTrackerCard(game, activeLiveTrackerAwayPal, activeLiveTrackerHomePal);
+        }
+        final int count = feed.atBats.size();
+        final int center = curIdx;
+        final boolean hasPrev = center > 0;
+        final boolean hasNext = center < count - 1;
+
+        final int screenW = getResources().getDisplayMetrics().widthPixels;
+
+        // Horizontal strip holding up to 3 panels (prev, current, next), each screen-width.
+        final LinearLayout strip = new LinearLayout(this);
+        strip.setOrientation(LinearLayout.HORIZONTAL);
+
+        final int firstIdx = hasPrev ? center - 1 : center;
+        // panel index of the "current" card within the strip (0 if no prev, else 1)
+        final int currentPanel = hasPrev ? 1 : 0;
+        for (int i = firstIdx; i <= (hasNext ? center + 1 : center); i++) {
+            LinearLayout panel = new LinearLayout(this);
+            panel.setOrientation(LinearLayout.VERTICAL);
+            panel.addView(trackerCardForIndex(game, i), matchWrap());
+            strip.addView(panel, new LinearLayout.LayoutParams(screenW, LinearLayout.LayoutParams.WRAP_CONTENT));
+        }
+
+        // Host clips the strip to one screen width; strip is offset so the current panel is shown.
+        final FrameLayout host = new FrameLayout(this);
+        host.setClipChildren(true);
+        host.addView(strip, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT));
+        final float restX = -currentPanel * (float) screenW;
+        strip.setTranslationX(restX);
+
+        host.setOnTouchListener(new View.OnTouchListener() {
+            float downX, downY, startTrans; boolean decided, horizontal;
+            @Override public boolean onTouch(View v, android.view.MotionEvent ev) {
+                switch (ev.getActionMasked()) {
+                    case android.view.MotionEvent.ACTION_DOWN:
+                        downX = ev.getX(); downY = ev.getY(); startTrans = strip.getTranslationX();
+                        decided = false; horizontal = false;
+                        break;
+                    case android.view.MotionEvent.ACTION_MOVE: {
+                        float dx = ev.getX() - downX, dy = ev.getY() - downY;
+                        if (!decided && (Math.abs(dx) > dp(10) || Math.abs(dy) > dp(10))) {
+                            decided = true;
+                            horizontal = Math.abs(dx) > Math.abs(dy) * 1.3f;
+                            v.getParent().requestDisallowInterceptTouchEvent(horizontal);
+                        }
+                        if (decided && horizontal) {
+                            float t = startTrans + dx;
+                            // rubber-band at the ends (no neighbour to reveal)
+                            float minT = restX - (hasNext ? screenW : 0);
+                            float maxT = restX + (hasPrev ? screenW : 0);
+                            if (t < minT) t = minT + (t - minT) * 0.3f;
+                            if (t > maxT) t = maxT + (t - maxT) * 0.3f;
+                            strip.setTranslationX(t);
+                        }
+                        break;
+                    }
+                    case android.view.MotionEvent.ACTION_UP:
+                    case android.view.MotionEvent.ACTION_CANCEL: {
+                        v.getParent().requestDisallowInterceptTouchEvent(false);
+                        if (decided && horizontal) {
+                            float moved = strip.getTranslationX() - restX;
+                            int target = center; // default: snap back
+                            if (moved < -screenW * 0.28f && hasNext) target = center + 1;
+                            else if (moved > screenW * 0.28f && hasPrev) target = center - 1;
+                            final int ft = target;
+                            float dest = restX + (center - ft) * (float) screenW;
+                            strip.animate().translationX(dest).setDuration(220)
+                                    .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                                    .withEndAction(() -> {
+                                        if (ft != center) {
+                                            // commit: -1 if we landed on the live (last) AB
+                                            game.viewAtBatIndex = (ft >= count - 1) ? -1 : ft;
+                                            rerenderTracker(game);
+                                        }
+                                    }).start();
+                            return true;
+                        }
+                        break;
+                    }
+                }
+                return decided && horizontal;
+            }
+        });
+        return host;
     }
 
     // v317: scroll so the LIVE/MATCHUPS header sits at the top of the viewport — frames the whole
@@ -21131,7 +21200,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(12), dp(8), dp(12), dp(8));
+        row.setPadding(dp(12), dp(6), dp(12), dp(6));
 
         row.addView(heroTeamBlock(away, displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr), game.awayRecord, awayColor, true), new LinearLayout.LayoutParams(0, -2, 2.1f));
 
