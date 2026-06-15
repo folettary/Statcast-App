@@ -754,7 +754,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v314", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v315", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -18656,7 +18656,7 @@ private View liveGameCard(LiveGame game) {
             final float zoneSpanZ2 = zoneTop - zoneBot;       // 1.90 ft
             // Tracking room beyond the zone on the SHORT (horizontal) axis, in feet. Smaller → bigger
             // zone visual. The taller axis gets proportionally more room at the same scale.
-            float trackMargin = 0.60f;
+            float trackMargin = 0.72f;
             float halfShortFt = zoneHalfWidth + trackMargin;  // half horizontal span (short axis)
             float ftPerPx = (2f * halfShortFt) / plotW;       // shared scale, set by the short axis
             float halfX = (plotW * ftPerPx) / 2f;
@@ -19051,7 +19051,7 @@ private View liveGameCard(LiveGame game) {
             zoneRow.setOrientation(LinearLayout.HORIZONTAL);
             zoneRow.setGravity(Gravity.TOP);
             LinearLayout.LayoutParams zrLp = matchWrap(); zrLp.setMargins(-dp(12), 0, -dp(2), 0);
-            int zoneH = dp(300);
+            int zoneH = dp(264);
             StrikeZoneView zone = new StrikeZoneView(this, ab.pitches, strikeZoneBoundsForFeed(feed));
             LinearLayout.LayoutParams zLp = new LinearLayout.LayoutParams(0, zoneH, 1f);
             zoneRow.addView(zone, zLp);
