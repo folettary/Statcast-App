@@ -752,7 +752,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v302", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v303", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -18689,17 +18689,22 @@ private View liveGameCard(LiveGame game) {
             float originX = drawL + drawW * 0.5f;
             float originY = Math.max(dp(6), drawT + drawH * 0.04f);
 
-            // Tails first (dots sit on top). No AB-specific repositioning or clamping.
+            // Tails first (dots sit on top). Endpoints clamped to the plot so a tail to an
+            // off-the-chart pitch ends at the (pinned) dot rather than running off the edge.
             for (LivePitch lp : pitches) {
                 if (lp == null || Double.isNaN(lp.pX) || Double.isNaN(lp.pZ)) continue;
                 float px = (float) lp.pX, pz = (float) lp.pZ;
                 if (Math.abs(px) > 6f || pz < -1.2f || pz > 8f) continue;
-                float cx = mapX(px, xMin, xMax, drawL, drawW);
-                float cy = mapZ(pz, zMin, zMax, drawT, drawH);
+                float cxRaw = mapX(px, xMin, xMax, drawL, drawW);
+                float cyRaw = mapZ(pz, zMin, zMax, drawT, drawH);
                 int col = pitchTypeColor(lp.typeCode);
                 int age = Math.max(0, latestNo - lp.number);
                 int alpha = age == 0 ? 220 : (age <= 3 ? 150 : (count >= 9 ? 72 : 100));
                 float stroke = age == 0 ? dp(3.8f) : (age <= 3 ? dp(2.8f) : dp(2.0f));
+                float dotR = age == 0 ? dp(9.2f) : (age <= 3 ? dp(7.8f) : dp(6.8f));
+                float tInset = dotR + dp(2);
+                float cx = Math.max(drawL + tInset, Math.min(drawL + drawW - tInset, cxRaw));
+                float cy = Math.max(drawT + tInset, Math.min(drawT + drawH - tInset, cyRaw));
                 float mx = (originX + cx) / 2f, my = (originY + cy) / 2f;
                 float bendX = Double.isNaN(lp.pfxX) ? 0f : (float) (-lp.pfxX) * dp(2.2f);
                 float bendY = Double.isNaN(lp.pfxZ) ? 0f : (float) (lp.pfxZ) * dp(1.4f);
@@ -18723,14 +18728,22 @@ private View liveGameCard(LiveGame game) {
                 if (lp == null || Double.isNaN(lp.pX) || Double.isNaN(lp.pZ)) continue;
                 float px = (float) lp.pX, pz = (float) lp.pZ;
                 if (Math.abs(px) > 6f || pz < -1.2f || pz > 8f) continue;
-                float cx = mapX(px, xMin, xMax, drawL, drawW);
-                float cy = mapZ(pz, zMin, zMax, drawT, drawH);
+                float cxRaw = mapX(px, xMin, xMax, drawL, drawW);
+                float cyRaw = mapZ(pz, zMin, zMax, drawT, drawH);
                 int col = pitchTypeColor(lp.typeCode);
                 int age = Math.max(0, latestNo - lp.number);
                 boolean latest = age == 0;
                 boolean recent = age <= 3;
                 int alpha = latest ? 255 : (recent ? 215 : (count >= 9 ? 145 : 175));
                 float r = latest ? dp(9.2f) : (recent ? dp(7.8f) : dp(6.8f));
+                // Inset so the whole dot (plus a hair for the glow) stays inside the plot, and clamp
+                // any pitch whose true location is outside the window to the edge — marked pinned.
+                float inset = r + dp(2);
+                float minX = drawL + inset, maxX = drawL + drawW - inset;
+                float minY = drawT + inset, maxY = drawT + drawH - inset;
+                float cx = Math.max(minX, Math.min(maxX, cxRaw));
+                float cy = Math.max(minY, Math.min(maxY, cyRaw));
+                boolean pinned = (cx != cxRaw) || (cy != cyRaw);
                 p.setStyle(Paint.Style.FILL);
                 if (latest) p.setShadowLayer(dp(5), 0, 0, col);
                 else if (recent) p.setShadowLayer(dp(2.5f), 0, 0, Color.argb(120, Color.red(col), Color.green(col), Color.blue(col)));
@@ -18744,6 +18757,25 @@ private View liveGameCard(LiveGame game) {
                 p.setTextAlign(Paint.Align.CENTER); p.setFakeBoldText(true);
                 p.setTextSize(latest ? dp(10) : dp(9));
                 canvas.drawText(String.valueOf(lp.number), cx, cy + dp(3.3f), p);
+                // pinned marker: a small chevron just outside the dot, pointing where the pitch
+                // actually went, so an off-the-chart pitch reads as "further this way".
+                if (pinned) {
+                    float dirX = cxRaw - cx, dirY = cyRaw - cy;
+                    float len = (float) Math.hypot(dirX, dirY);
+                    if (len > 0.5f) {
+                        dirX /= len; dirY /= len;
+                        float tipX = cx + dirX * (r + dp(5)), tipY = cy + dirY * (r + dp(5));
+                        float baseX = cx + dirX * (r + dp(1.5f)), baseY = cy + dirY * (r + dp(1.5f));
+                        float perpX = -dirY, perpY = dirX;
+                        android.graphics.Path chev = new android.graphics.Path();
+                        chev.moveTo(tipX, tipY);
+                        chev.lineTo(baseX + perpX * dp(3.2f), baseY + perpY * dp(3.2f));
+                        chev.lineTo(baseX - perpX * dp(3.2f), baseY - perpY * dp(3.2f));
+                        chev.close();
+                        p.setColor(Color.argb(latest ? 255 : 210, Color.red(col), Color.green(col), Color.blue(col)));
+                        canvas.drawPath(chev, p);
+                    }
+                }
             }
             p.setFakeBoldText(false);
             p.setStrokeCap(Paint.Cap.BUTT);
