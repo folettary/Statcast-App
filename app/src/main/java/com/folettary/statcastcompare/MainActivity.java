@@ -775,7 +775,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v289", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v290", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -18609,7 +18609,7 @@ private View liveGameCard(LiveGame game) {
         }
     }
 
-    // Strike-zone plot: proportional zone + padded pitch viewport. v289 keeps the plot
+    // Strike-zone plot: proportional zone + padded pitch viewport. v290 keeps the plot
     // as the visual centerpiece while preventing far inside/outside pitches from clipping.
     private class StrikeZoneView extends View {
         private final java.util.List<LivePitch> pitches;
@@ -18675,12 +18675,12 @@ private View liveGameCard(LiveGame game) {
             }
 
             // Always reserve enough room for the plate, but do not let the plate force the zone tiny.
-            zMin = Math.min(zMin, 1.02f);
+            zMin = Math.min(zMin, 1.12f);
             float spanX = Math.max(0.01f, xMax - xMin);
             float spanZ = Math.max(0.01f, zMax - zMin);
 
             float fitScale = Math.min(plotW / spanX, plotH / spanZ);
-            float targetZoneH = Math.min(plotH * 0.99f, dp(330));
+            float targetZoneH = Math.min(plotH * 1.03f, dp(338));
             float targetScale = targetZoneH / zoneSpanZ;
             float scale = Math.min(targetScale, fitScale);
 
@@ -18688,9 +18688,9 @@ private View liveGameCard(LiveGame game) {
             float drawW = spanX * scale;
             float drawH = spanZ * scale;
             float drawL = padL + (plotW - drawW) / 2f;
-            // v289: top-align the pitch content. The row height is now compact, so centering
+            // v290: top-align the pitch content. The row height is now compact, so centering
             // the data window only creates dead air above and below the actual strike zone.
-            float drawT = padT + Math.max(0f, (plotH - drawH) * 0.03f);
+            float drawT = padT + Math.max(0f, (plotH - drawH) * 0.01f);
 
             float zoneL = mapX(-zoneHalfWidth, xMin, xMax, drawL, drawW);
             float zoneR = mapX(zoneHalfWidth, xMin, xMax, drawL, drawW);
@@ -19016,13 +19016,13 @@ private View liveGameCard(LiveGame game) {
             }
             card.addView(abNav, abLp);
 
-            // v289: protected two-column live AB layout. The plot keeps the hero footprint while the
+            // v290: protected two-column live AB layout. The plot keeps the hero footprint while the
             // right pitch rail is fixed-width, padded, and independently scrollable for long at-bats.
             LinearLayout zoneRow = new LinearLayout(this);
             zoneRow.setOrientation(LinearLayout.HORIZONTAL);
             zoneRow.setGravity(Gravity.TOP);
             LinearLayout.LayoutParams zrLp = matchWrap(); zrLp.setMargins(0, dp(4), 0, 0);
-            int zoneH = dp(ab.pitches.size() >= 10 ? 292 : 276);
+            int zoneH = dp(ab.pitches.size() >= 10 ? 286 : 270);
             StrikeZoneView zone = new StrikeZoneView(this, ab.pitches);
             LinearLayout.LayoutParams zLp = new LinearLayout.LayoutParams(0, zoneH, 1f);
             zoneRow.addView(zone, zLp);
@@ -19045,8 +19045,8 @@ private View liveGameCard(LiveGame game) {
             }
             legendScroll.addView(legend, new ScrollView.LayoutParams(-1, -2));
             int screenW = getResources().getDisplayMetrics().widthPixels;
-            int railW = Math.min(dp(100), Math.max(dp(88), screenW / 3));
-            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(railW, zoneH); lgLp.setMargins(dp(6), 0, 0, 0);
+            int railW = Math.min(dp(96), Math.max(dp(84), screenW / 3));
+            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(railW, zoneH); lgLp.setMargins(dp(5), 0, 0, 0);
             zoneRow.addView(legendScroll, lgLp);
             card.addView(zoneRow, zrLp);
 
@@ -19200,7 +19200,7 @@ private View liveGameCard(LiveGame game) {
 
     private LinearLayout.LayoutParams bannerLp() {
         LinearLayout.LayoutParams lp = matchWrap();
-        lp.setMargins(0, dp(3), 0, 0);
+        lp.setMargins(0, 0, 0, 0);
         return lp;
     }
 
@@ -19216,10 +19216,22 @@ private View liveGameCard(LiveGame game) {
                 : onBase ? Color.rgb(82, 226, 176)
                 : out ? Color.rgb(255, 110, 110) : batColor;
 
+        LivePitch contactPitch = null;
+        if (ab != null && ab.pitches != null) {
+            for (int i = ab.pitches.size() - 1; i >= 0; i--) {
+                LivePitch lp = ab.pitches.get(i);
+                if (lp == null) continue;
+                if (lp.isInPlay || !Double.isNaN(lp.exitVelo) || !Double.isNaN(lp.launchAngle)) {
+                    contactPitch = lp;
+                    break;
+                }
+            }
+        }
+
         LinearLayout banner = new LinearLayout(this);
         banner.setOrientation(LinearLayout.VERTICAL);
         banner.setGravity(Gravity.CENTER);
-        banner.setPadding(dp(12), dp(12), dp(12), dp(12));
+        banner.setPadding(dp(12), dp(10), dp(12), dp(10));
         banner.setBackground(roundedGradientStroke(new int[] {
                 Color.argb(48, Color.red(accent), Color.green(accent), Color.blue(accent)),
                 Color.argb(20, Color.red(accent), Color.green(accent), Color.blue(accent)),
@@ -19233,11 +19245,25 @@ private View liveGameCard(LiveGame game) {
         big.setGravity(Gravity.CENTER);
         big.setLetterSpacing(0.02f);
         banner.addView(big, matchWrap());
+        if (contactPitch != null && (!Double.isNaN(contactPitch.exitVelo) || !Double.isNaN(contactPitch.launchAngle))) {
+            StringBuilder meta = new StringBuilder();
+            if (!Double.isNaN(contactPitch.exitVelo)) meta.append(String.format(Locale.US, "%.0f EV", contactPitch.exitVelo));
+            if (!Double.isNaN(contactPitch.launchAngle)) {
+                if (meta.length() > 0) meta.append(" • ");
+                meta.append(String.format(Locale.US, "%.0f° LA", contactPitch.launchAngle));
+            }
+            if (meta.length() > 0) {
+                TextView metaView = text(meta.toString(), 9, accent, true);
+                metaView.setGravity(Gravity.CENTER);
+                metaView.setPadding(0, dp(2), 0, 0);
+                banner.addView(metaView, matchWrap());
+            }
+        }
         if (!safe(ab.description).isEmpty()) {
             TextView desc = text(ab.description, 10, INK_DIM, false);
             desc.setGravity(Gravity.CENTER);
             desc.setMaxLines(2);
-            desc.setPadding(0, dp(4), 0, 0);
+            desc.setPadding(0, dp(3), 0, 0);
             banner.addView(desc, matchWrap());
         }
         return banner;
@@ -20566,7 +20592,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         String pitchers = (safe(game.awayPitcher).isEmpty() ? "Away SP TBD" : lastNameOnly(game.awayPitcher))
                 + " vs " + (safe(game.homePitcher).isEmpty() ? "Home SP TBD" : lastNameOnly(game.homePitcher));
 
-        // ===== v289: keep the score hero attached to the live feed =====
+        // ===== v290: keep the score hero attached to the live feed =====
         // When the user is on the LIVE experience, move the control bars ABOVE the score hero so
         // the score header sits directly on top of the live feed/tracker instead of being separated
         // from it by layers of buttons. Matchups keeps the older order.
