@@ -775,7 +775,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v280", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v282", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -18623,7 +18623,6 @@ private View liveGameCard(LiveGame game) {
             // Plot window zoomed in so the strike zone fills the frame. The rulebook zone is
             // x ∈ [-0.83, 0.83]; a window of x ∈ [-1.45, 1.45] makes the box ~57% of the width
             // (was ~41% at ±2.0, which is why enlarging the view never appeared to enlarge the box).
-            float xMin = -1.6f, xMax = 1.6f, zMin = 0.9f, zMax = 4.1f;
             float pad = dp(8);
             float plotW = w - pad * 2f, plotH = h - pad * 2f;
             float padL = pad, padT = pad;
