@@ -775,7 +775,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v286", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v287", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -18609,7 +18609,7 @@ private View liveGameCard(LiveGame game) {
         }
     }
 
-    // Strike-zone plot: proportional zone + padded pitch viewport. v286 keeps the plot
+    // Strike-zone plot: proportional zone + padded pitch viewport. v287 keeps the plot
     // as the visual centerpiece while preventing far inside/outside pitches from clipping.
     private class StrikeZoneView extends View {
         private final java.util.List<LivePitch> pitches;
@@ -18624,8 +18624,8 @@ private View liveGameCard(LiveGame game) {
 
             // Leave real screen-space room for marker glow/labels. Pitch centers are mapped inside
             // this inner plot box so an extreme miss can never draw on the edge of the view.
-            float outerPad = dp(8);
-            float markerPad = dp(13);
+            float outerPad = dp(6);
+            float markerPad = dp(11);
             float padL = outerPad + markerPad;
             float padT = outerPad + markerPad;
             float plotW = w - (outerPad + markerPad) * 2f;
@@ -18675,12 +18675,12 @@ private View liveGameCard(LiveGame game) {
             }
 
             // Always reserve enough room for the plate, but do not let the plate force the zone tiny.
-            zMin = Math.min(zMin, 0.72f);
+            zMin = Math.min(zMin, 0.78f);
             float spanX = Math.max(0.01f, xMax - xMin);
             float spanZ = Math.max(0.01f, zMax - zMin);
 
             float fitScale = Math.min(plotW / spanX, plotH / spanZ);
-            float targetZoneH = Math.min(plotH * 0.68f, dp(265));
+            float targetZoneH = Math.min(plotH * 0.82f, dp(304));
             float targetScale = targetZoneH / zoneSpanZ;
             float scale = Math.min(targetScale, fitScale);
 
@@ -19014,13 +19014,13 @@ private View liveGameCard(LiveGame game) {
             }
             card.addView(abNav, abLp);
 
-            // v286: protected two-column live AB layout. The plot keeps the hero footprint while the
+            // v287: protected two-column live AB layout. The plot keeps the hero footprint while the
             // right pitch rail is fixed-width, padded, and independently scrollable for long at-bats.
             LinearLayout zoneRow = new LinearLayout(this);
             zoneRow.setOrientation(LinearLayout.HORIZONTAL);
             zoneRow.setGravity(Gravity.TOP);
             LinearLayout.LayoutParams zrLp = matchWrap(); zrLp.setMargins(0, dp(8), 0, 0);
-            int zoneH = dp(ab.pitches.size() >= 10 ? 380 : 368);
+            int zoneH = dp(ab.pitches.size() >= 10 ? 360 : 348);
             StrikeZoneView zone = new StrikeZoneView(this, ab.pitches);
             LinearLayout.LayoutParams zLp = new LinearLayout.LayoutParams(0, zoneH, 1f);
             zoneRow.addView(zone, zLp);
@@ -19030,10 +19030,10 @@ private View liveGameCard(LiveGame game) {
             legendScroll.setVerticalScrollBarEnabled(false);
             legendScroll.setFillViewport(false);
             legendScroll.setClipToPadding(false);
-            legendScroll.setPadding(0, 0, dp(3), 0);
+            legendScroll.setPadding(0, 0, dp(1), 0);
             LinearLayout legend = new LinearLayout(this);
             legend.setOrientation(LinearLayout.VERTICAL);
-            legend.setPadding(dp(1), 0, dp(5), 0);
+            legend.setPadding(0, 0, dp(2), 0);
             if (ab.pitches.isEmpty()) {
                 TextView waiting = text("Waiting for the first pitch…", 10, INK_DIM, false);
                 waiting.setMaxLines(3);
@@ -19043,8 +19043,8 @@ private View liveGameCard(LiveGame game) {
             }
             legendScroll.addView(legend, new ScrollView.LayoutParams(-1, -2));
             int screenW = getResources().getDisplayMetrics().widthPixels;
-            int railW = Math.min(dp(112), Math.max(dp(96), screenW / 3));
-            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(railW, zoneH); lgLp.setMargins(dp(11), 0, 0, 0);
+            int railW = Math.min(dp(104), Math.max(dp(90), screenW / 3));
+            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(railW, zoneH); lgLp.setMargins(dp(8), 0, 0, 0);
             zoneRow.addView(legendScroll, lgLp);
             card.addView(zoneRow, zrLp);
 
@@ -19312,7 +19312,7 @@ private View liveGameCard(LiveGame game) {
         TextView num = text(String.valueOf(lp.number), 9, Color.argb(235, 8, 13, 22), true);
         num.setGravity(Gravity.CENTER);
         dotWrap.addView(num, new FrameLayout.LayoutParams(dp(18), dp(18)));
-        LinearLayout.LayoutParams dwl = new LinearLayout.LayoutParams(-2, -2); dwl.setMargins(0, 0, dp(8), 0);
+        LinearLayout.LayoutParams dwl = new LinearLayout.LayoutParams(-2, -2); dwl.setMargins(0, 0, dp(6), 0);
         row.addView(dotWrap, dwl);
         // stacked: "4-Seam · 102" then result/exit-velo beneath — column is weight-bounded so text
         // ellipsizes inside the list instead of overflowing off the right edge.
