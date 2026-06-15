@@ -775,7 +775,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v295", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v296", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -18619,11 +18619,11 @@ private View liveGameCard(LiveGame game) {
     }
 
     private ZoneBounds strikeZoneBoundsForFeed(LiveFeed feed) {
-        // v295: fixed calibrated game window. The prior game-feed bounds could still be widened
+        // v296: fixed calibrated game window. The prior game-feed bounds could still be widened
         // by old/loaded pitch outliers, so the zone looked unchanged and too small. This window is
         // stable across ABs and sized around the misses seen in the SD/BAL sample: far glove-side,
         // arm-side, and low pitches fit without per-AB resizing or clamping.
-        return new ZoneBounds(-2.25f, 1.55f, 0.35f, 4.15f);
+        return new ZoneBounds(-2.10f, 1.60f, 0.32f, 4.12f);
     }
 
     private class StrikeZoneView extends View {
@@ -18659,12 +18659,21 @@ private View liveGameCard(LiveGame game) {
             float spanZ = Math.max(0.01f, zMax - zMin);
 
             // Fixed for the game: all ABs use this same coordinate window and shared scale.
-            // v294: true max-fit. No separate target cap, because that was keeping the zone small.
+            // v296: true max-fit with bottom-aligned plate. No separate target cap, because that was keeping the zone small.
             float scale = Math.min(plotW / spanX, plotH / spanZ);
             float drawW = spanX * scale;
             float drawH = spanZ * scale;
-            float drawL = padL + (plotW - drawW) / 2f;
-            float drawT = padT + Math.max(0f, (plotH - drawH) * 0.03f);
+            // v296: do not center the pitch canvas in a huge left gutter. Bias the fixed
+            // game window left so the zone uses the available card space better.
+            float drawL = padL + Math.max(0f, (plotW - drawW) * 0.22f);
+
+            // v296: the result card should be snug under the plate. Position the data window
+            // so the plate bottom sits near the bottom of this view instead of leaving dead air.
+            float plateDepth = dp(10);
+            float plateZ = 0.80f;
+            float plateYWithinDraw = (zMax - plateZ) / spanZ * drawH;
+            float drawT = h - dp(4) - plateDepth - plateYWithinDraw;
+            drawT = Math.max(padT, Math.min(drawT, padT + Math.max(0f, plotH - drawH)));
 
             float zoneL = mapX(-zoneHalfWidth, xMin, xMax, drawL, drawW);
             float zoneR = mapX( zoneHalfWidth, xMin, xMax, drawL, drawW);
@@ -18691,7 +18700,7 @@ private View liveGameCard(LiveGame game) {
             float plCx = (zoneL + zoneR) / 2f, plHalf = (zoneR - zoneL) * 0.5f;
             android.graphics.Path plate = new android.graphics.Path();
             plate.moveTo(plCx - plHalf, plateY); plate.lineTo(plCx + plHalf, plateY);
-            plate.lineTo(plCx + plHalf, plateY + dp(5)); plate.lineTo(plCx, plateY + dp(10));
+            plate.lineTo(plCx + plHalf, plateY + dp(5)); plate.lineTo(plCx, plateY + plateDepth);
             plate.lineTo(plCx - plHalf, plateY + dp(5)); plate.close();
             canvas.drawPath(plate, p);
 
@@ -19006,10 +19015,10 @@ private View liveGameCard(LiveGame game) {
             legendScroll.setVerticalScrollBarEnabled(false);
             legendScroll.setFillViewport(false);
             legendScroll.setClipToPadding(false);
-            legendScroll.setPadding(0, 0, dp(1), 0);
+            legendScroll.setPadding(0, 0, dp(2), 0);
             LinearLayout legend = new LinearLayout(this);
             legend.setOrientation(LinearLayout.VERTICAL);
-            legend.setPadding(0, 0, dp(2), 0);
+            legend.setPadding(0, 0, dp(4), 0);
             if (ab.pitches.isEmpty()) {
                 TextView waiting = text("Waiting for the first pitch…", 10, INK_DIM, false);
                 waiting.setMaxLines(3);
@@ -19322,7 +19331,7 @@ private View liveGameCard(LiveGame game) {
         col.setOrientation(LinearLayout.VERTICAL);
         String typeShort = pitchTypeShort(lp.typeCode, lp.typeName);
         String speed = lp.speed > 0 ? String.format(Locale.US, "%.0f", lp.speed) : "";
-        TextView t = text(typeShort + (speed.isEmpty() ? "" : " · " + speed), 11, INK, true);
+        TextView t = text(typeShort + (speed.isEmpty() ? "" : " · " + speed), 10, INK, true);
         t.setSingleLine(true); t.setEllipsize(TextUtils.TruncateAt.END);
         col.addView(t, matchWrap());
         String res = safe(lp.result);
