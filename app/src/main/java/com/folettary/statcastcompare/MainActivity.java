@@ -775,7 +775,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v298", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v299", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -18619,10 +18619,12 @@ private View liveGameCard(LiveGame game) {
     }
 
     private ZoneBounds strikeZoneBoundsForFeed(LiveFeed feed) {
-        // v298: narrower horizontal window so the zone box is bigger AND the plot fills more of the
-        // column vertically (narrowing X raises the shared scale, so drawH grows → less empty sky
-        // above). Still leaves ~0.65 ft beyond each edge of the 1.66 ft zone for real misses.
-        return new ZoneBounds(-1.78f, 1.40f, 0.58f, 3.92f);
+        // v299: the void above the box was the window's headroom, not leftover plot slack — at this
+        // near-square column the plot already fills the height. The zone is 1.50–3.40 ft; keeping
+        // only ~0.35 ft of air above (zMax 3.75) and ~0.45 ft below the plate makes the box bigger
+        // and lifts it up so it no longer floats in the middle with dead space on top. Width still
+        // leaves ~0.6 ft beyond each edge for misses.
+        return new ZoneBounds(-1.62f, 1.30f, 0.70f, 3.75f);
     }
 
     private class StrikeZoneView extends View {
@@ -19007,7 +19009,7 @@ private View liveGameCard(LiveGame game) {
             zoneRow.setOrientation(LinearLayout.HORIZONTAL);
             zoneRow.setGravity(Gravity.TOP);
             LinearLayout.LayoutParams zrLp = matchWrap(); zrLp.setMargins(0, dp(4), 0, 0);
-            int zoneH = dp(276);
+            int zoneH = dp(248);
             StrikeZoneView zone = new StrikeZoneView(this, ab.pitches, strikeZoneBoundsForFeed(feed));
             LinearLayout.LayoutParams zLp = new LinearLayout.LayoutParams(0, zoneH, 1f);
             zoneRow.addView(zone, zLp);
