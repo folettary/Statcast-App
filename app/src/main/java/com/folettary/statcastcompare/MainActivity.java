@@ -734,7 +734,7 @@ public class MainActivity extends Activity {
         });
         root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(10), dp(2), dp(10), dp(10));
+        root.setPadding(dp(10), 0, dp(10), dp(10));
         scroll.addView(root, new ScrollView.LayoutParams(-1, -2));
         screen.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
         setContentView(screen);
@@ -754,7 +754,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v315", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v316", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -1075,7 +1075,7 @@ public class MainActivity extends Activity {
         standingsBox = new LinearLayout(this);
         standingsBox.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams standingsLp = matchWrap();
-        standingsLp.setMargins(0, dp(14), 0, 0);
+        standingsLp.setMargins(0, dp(5), 0, 0);
         root.addView(standingsBox, standingsLp);
 
         bottomNavHost = buildBottomAppNav();
@@ -18497,7 +18497,11 @@ private View liveGameCard(LiveGame game) {
                                 lp.szBot = pd.optDouble("strikeZoneBottom", Double.NaN);
                             }
                             JSONObject hd = ev.optJSONObject("hitData");
-                            if (hd != null) { lp.exitVelo = hd.optDouble("launchSpeed", Double.NaN); lp.launchAngle = hd.optDouble("launchAngle", Double.NaN); }
+                            if (hd != null) { lp.exitVelo = hd.optDouble("launchSpeed", Double.NaN); lp.launchAngle = hd.optDouble("launchAngle", Double.NaN);
+                                double xba = hd.optDouble("estimatedBA", Double.NaN);
+                                if (Double.isNaN(xba)) xba = hd.optDouble("estimatedBa", Double.NaN);
+                                if (Double.isNaN(xba)) xba = hd.optDouble("xba", Double.NaN);
+                                lp.xba = xba; }
                             JSONObject cnt = ev.optJSONObject("count");
                             if (cnt != null) { lp.balls = cnt.optInt("balls", 0); lp.strikes = cnt.optInt("strikes", 0); }
                             ab.pitches.add(lp);
@@ -18680,16 +18684,6 @@ private View liveGameCard(LiveGame game) {
             float zoneR = mapX( zoneHalfWidth, xMin, xMax, drawL, drawW);
             float zoneT = mapZ(zoneTop, zMin, zMax, drawT, drawH);
             float zoneB = mapZ(zoneBot, zMin, zMax, drawT, drawH);
-
-            // v311 debug: outline the full pitch-tracking coordinate window, not the strike zone.
-            // This shows exactly where pitches can be plotted before dot-edge insets are applied.
-            p.setShader(null);
-            p.setStyle(Paint.Style.STROKE);
-            p.setStrokeWidth(dp(1f));
-            p.setColor(Color.argb(150, 82, 226, 176));
-            p.setPathEffect(new android.graphics.DashPathEffect(new float[] { dp(5), dp(4) }, 0));
-            canvas.drawRect(drawL, drawT, drawL + drawW, drawT + drawH, p);
-            p.setPathEffect(null);
 
             // zone fill + thirds grid
             p.setShader(null);
@@ -19296,6 +19290,13 @@ private View liveGameCard(LiveGame game) {
                 if (meta.length() > 0) meta.append(" • ");
                 meta.append(String.format(Locale.US, "%.0f° LA", contactPitch.launchAngle));
             }
+            if (!Double.isNaN(contactPitch.xba)) {
+                if (meta.length() > 0) meta.append(" • ");
+                // baseball convention: .XXX with no leading zero
+                String x = String.format(Locale.US, "%.3f", contactPitch.xba);
+                if (x.startsWith("0")) x = x.substring(1);
+                meta.append(x).append(" xBA");
+            }
             if (meta.length() > 0) {
                 TextView metaView = text(meta.toString(), 9, accent, true);
                 metaView.setGravity(Gravity.CENTER);
@@ -19426,8 +19427,38 @@ private View liveGameCard(LiveGame game) {
         return safe(name).isEmpty() ? safe(code) : name;
     }
 
+    // v316: color key plays by outcome for fast scanning.
+    //   blue  = a run scored (even on an out, e.g. sac fly) — checked FIRST so it wins
+    //   purple= roster move
+    //   green = reached base (hit, walk, HBP, reached on error)
+    //   red   = strikeout
+    //   yellow= out on contact (groundout/flyout/lineout/popout/etc.)
+    //   fallback = team color
+    private int keyPlayColor(LiveFeedEntry fe, TeamPalette awayPalette, TeamPalette homePalette) {
+        final int BLUE = Color.rgb(96, 175, 255);
+        final int PURPLE = Color.rgb(170, 130, 255);
+        final int GREEN = Color.rgb(82, 226, 176);
+        final int RED = Color.rgb(255, 96, 96);
+        final int YELLOW = Color.rgb(247, 197, 77);
+        if (fe.kind == 2) return PURPLE;                       // roster move
+        String s = (safe(fe.headline) + " " + safe(fe.detail)).toLowerCase(Locale.US);
+        if (fe.kind == 1 || s.contains("scores") || s.contains("homer") || s.contains("home run")
+                || s.contains(" rbi") || s.contains("grand slam") || s.contains("sacrifice")
+                || s.contains("sac fly") || s.contains("bases-clearing")) return BLUE; // a run scored
+        if (s.contains("strikeout") || s.contains("strikes out") || s.contains("struck out")
+                || s.contains("called out on strikes")) return RED;
+        if (s.contains("walk") || s.contains("singles") || s.contains("doubles") || s.contains("triples")
+                || s.contains("single") || s.contains("double") || s.contains("triple")
+                || s.contains("hit by pitch") || s.contains("reaches") || s.contains("reached")
+                || s.contains("intentionally walked") || s.contains("on error")) return GREEN; // reached base
+        if (s.contains("out") || s.contains("grounds") || s.contains("flies") || s.contains("lines")
+                || s.contains("pops") || s.contains("forceout") || s.contains("fielder's choice")
+                || s.contains("double play") || s.contains("grounded") || s.contains("flied")) return YELLOW; // out on contact
+        return ensureReadableColor((fe.topHalf ? awayPalette : homePalette).primary, 150);
+    }
+
     private View playFeedRow(LiveFeedEntry fe, TeamPalette awayPalette, TeamPalette homePalette) {
-        int accent = fe.kind == 1 ? Color.rgb(82, 226, 176) : (fe.kind == 2 ? Color.rgb(170, 130, 255) : ensureReadableColor((fe.topHalf ? awayPalette : homePalette).primary, 150));
+        int accent = keyPlayColor(fe, awayPalette, homePalette);
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         LinearLayout.LayoutParams rowLp = matchWrap(); rowLp.setMargins(0, dp(3), 0, dp(3));
@@ -25976,6 +26007,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         double pfxX = Double.NaN, pfxZ = Double.NaN; // movement (in), for the tail curve
         double szTop = Double.NaN, szBot = Double.NaN;
         double exitVelo = Double.NaN, launchAngle = Double.NaN; // if put in play
+        double xba = Double.NaN; // expected batting average on this batted ball (Statcast)
         int balls, strikes;    // count AFTER this pitch
     }
     static class LiveAtBat {
