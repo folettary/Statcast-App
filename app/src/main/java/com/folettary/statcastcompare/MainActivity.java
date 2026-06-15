@@ -754,7 +754,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v306", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v307", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -18599,13 +18599,15 @@ private View liveGameCard(LiveGame game) {
     }
 
     private ZoneBounds strikeZoneBoundsForFeed(LiveFeed feed) {
-        // v306: use a symmetric tracking window around the strike zone so the pitch canvas feels
+        // v307: use a symmetric tracking window around the strike zone so the pitch canvas feels
         // balanced and consistent. Extra room is equal on all four sides of the zone; any visual
         // space above the zone is now genuine tracking space instead of one-off padding.
         final float zoneHalfWidth = 0.83f;
         final float zoneBot = 1.50f;
         final float zoneTop = 3.40f;
-        final float windowMargin = 1.00f;
+        // v307: keep the window perfectly equal on all four sides, but pull the margin in so the
+        // strike zone does not shrink versus the previous visual baseline.
+        final float windowMargin = 0.75f;
         return new ZoneBounds(-zoneHalfWidth - windowMargin,
                 zoneHalfWidth + windowMargin,
                 zoneBot - windowMargin,
@@ -18624,8 +18626,8 @@ private View liveGameCard(LiveGame game) {
             int w = getWidth(), h = getHeight();
             if (w <= 0 || h <= 0) return;
 
-            float outerPad = dp(4);
-            float markerPad = dp(9);
+            float outerPad = dp(3);
+            float markerPad = dp(8);
             float padL = outerPad + markerPad;
             float padT = outerPad + markerPad;
             float plotW = w - (outerPad + markerPad) * 2f;
@@ -18645,7 +18647,7 @@ private View liveGameCard(LiveGame game) {
             float spanZ = Math.max(0.01f, zMax - zMin);
 
             // Fixed for the game: all ABs use this same coordinate window and shared scale.
-            // v306: max-fit within a symmetric game window. Keep the canvas proportional and use reclaimed top space for real pitch-tracking area.
+            // v307: max-fit within a symmetric game window. Keep the canvas proportional, preserve the prior zone feel, and use more of the upper space as real tracking area.
             float scale = Math.min(plotW / spanX, plotH / spanZ);
             float drawW = spanX * scale;
             float drawH = spanZ * scale;
@@ -18992,7 +18994,7 @@ private View liveGameCard(LiveGame game) {
             LinearLayout abNav = new LinearLayout(this);
             abNav.setOrientation(LinearLayout.HORIZONTAL);
             abNav.setGravity(Gravity.CENTER_VERTICAL);
-            LinearLayout.LayoutParams abLp = matchWrap(); abLp.setMargins(0, dp(5), 0, dp(1));
+            LinearLayout.LayoutParams abLp = matchWrap(); abLp.setMargins(0, dp(2), 0, dp(1));
             TextView prev = navChip("‹", fidx > 0, v -> { game.viewAtBatIndex = Math.max(0, fidx - 1); rerenderTracker(game); });
             abNav.addView(prev);
             LinearLayout abInfo = new LinearLayout(this);
@@ -19026,7 +19028,7 @@ private View liveGameCard(LiveGame game) {
             zoneRow.setOrientation(LinearLayout.HORIZONTAL);
             zoneRow.setGravity(Gravity.TOP);
             LinearLayout.LayoutParams zrLp = matchWrap(); zrLp.setMargins(0, 0, 0, 0);
-            int zoneH = dp(248);
+            int zoneH = dp(252);
             StrikeZoneView zone = new StrikeZoneView(this, ab.pitches, strikeZoneBoundsForFeed(feed));
             LinearLayout.LayoutParams zLp = new LinearLayout.LayoutParams(0, zoneH, 1f);
             zoneRow.addView(zone, zLp);
@@ -19062,8 +19064,8 @@ private View liveGameCard(LiveGame game) {
             legendScroll.addView(legend, new ScrollView.LayoutParams(-1, -2));
             legendClip.addView(legendScroll, new FrameLayout.LayoutParams(-1, zoneH));
             int screenW = getResources().getDisplayMetrics().widthPixels;
-            int railW = Math.min(dp(98), Math.max(dp(84), screenW * 24 / 100));
-            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(railW, zoneH); lgLp.setMargins(dp(4), 0, 0, 0);
+            int railW = Math.min(dp(94), Math.max(dp(82), screenW * 23 / 100));
+            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(railW, zoneH); lgLp.setMargins(dp(3), 0, 0, 0);
             zoneRow.addView(legendClip, lgLp);
             card.addView(zoneRow, zrLp);
 
@@ -20636,7 +20638,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
             // Both routes still keep the main LIVE | MATCHUPS switch at the very top.
             LinearLayout liveCard = new LinearLayout(this);
             liveCard.setOrientation(LinearLayout.VERTICAL);
-            liveCard.setPadding(dp(6), dp(6), dp(6), dp(8));
+            liveCard.setPadding(dp(6), dp(4), dp(6), dp(8));
             liveCard.setBackground(roundedStroke(Color.argb(150, 6, 11, 20), Color.argb(46, 255, 255, 255), 20, 1));
             LinearLayout.LayoutParams cardLp = matchWrap();
             cardLp.setMargins(dp(12), controlsAboveHero ? 0 : dp(6), dp(12), dp(8));
@@ -20645,7 +20647,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
             }
             View liveHero = liveScoreHero(game, away, home, awayPalette, homePalette);
             LinearLayout.LayoutParams lhLp = matchWrap();
-            lhLp.setMargins(0, liveHubSelected ? dp(4) : 0, 0, 0);
+            lhLp.setMargins(0, liveHubSelected ? dp(3) : 0, 0, 0);
             liveCard.addView(liveHero, lhLp);
             panel.addView(liveCard, cardLp);
         } else {
