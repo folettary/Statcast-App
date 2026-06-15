@@ -754,7 +754,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v311", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v312", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -18646,20 +18646,30 @@ private View liveGameCard(LiveGame game) {
             float spanX = Math.max(0.01f, xMax - xMin);
             float spanZ = Math.max(0.01f, zMax - zMin);
 
-            // Fixed for the game: all ABs use this same coordinate window and shared scale.
-            // v311: max-fit within a symmetric game window. Use the card edges much more aggressively so the tracking window reaches farther left, higher, and lower while staying proportional.
+            // v312: FILL THE WHOLE VIEW with the tracking window — no dead space on any side.
+            // The window is centered on the strike zone, and its span on each axis is derived from
+            // the view's aspect ratio so drawW==plotW and drawH==plotH exactly. We start from a base
+            // half-span (how much tracking room beyond the zone we want) and grow whichever axis the
+            // view is longer on, so the window stays proportional (feet-per-pixel equal on x and z)
+            // while using every pixel.
+            final float zoneCx = 0f;                       // strike zone is horizontally centered
+            final float zoneCz = 2.30f;                    // bias center slightly low so the plate
+                                                           // (0.80 ft) and below-plate misses sit
+                                                           // inside the window, not clipped at zMin.
+            float baseHalf = 1.30f; // v312: smaller base half-span → LARGER strike zone visual.
+            float ftPerPx = (2f * baseHalf) / Math.min(plotW, plotH); // shared scale on the short side
+            float halfX = (plotW * ftPerPx) / 2f;
+            float halfZ = (plotH * ftPerPx) / 2f;
+            xMin = zoneCx - halfX; xMax = zoneCx + halfX;
+            zMin = zoneCz - halfZ; zMax = zoneCz + halfZ;
+            spanX = Math.max(0.01f, xMax - xMin);
+            spanZ = Math.max(0.01f, zMax - zMin);
+
             float scale = Math.min(plotW / spanX, plotH / spanZ);
             float drawW = spanX * scale;
             float drawH = spanZ * scale;
-            // v296: do not center the pitch canvas in a huge left gutter. Bias the fixed
-            // game window left so the zone uses the available card space better.
-            float drawL = padL + Math.max(0f, (plotW - drawW) * 0.00f);
-
-            // v308: the old bottom-anchored draw region made the tracker feel visually bottom-heavy,
-            // because any unused vertical slack accumulated above the zone. Keep the pitch window
-            // proportional and equal on all sides, but bias the canvas upward so the top feels tighter.
-            float slackY = Math.max(0f, plotH - drawH);
-            float drawT = padT + (slackY * 0.00f);
+            float drawL = padL; // reach the left edge of the plot region
+            float drawT = padT; // tight to the top
 
             float zoneL = mapX(-zoneHalfWidth, xMin, xMax, drawL, drawW);
             float zoneR = mapX( zoneHalfWidth, xMin, xMax, drawL, drawW);
@@ -19028,13 +19038,15 @@ private View liveGameCard(LiveGame game) {
             }
             card.addView(abNav, abLp);
 
-            // v295: protected two-column live AB layout. The plot keeps the hero footprint while the
-            // right pitch rail is fixed-width, padded, and independently scrollable for long at-bats.
+            // v312: use ALL available space for tracking. Cancel the card's left padding so the
+            // plot reaches the card's left edge, push the rail to the right with just enough width
+            // for the longest label ("Swinging Strike") and no more, and keep the gap tight. The
+            // view is also taller so the tracking window extends below the plate hint.
             LinearLayout zoneRow = new LinearLayout(this);
             zoneRow.setOrientation(LinearLayout.HORIZONTAL);
             zoneRow.setGravity(Gravity.TOP);
-            LinearLayout.LayoutParams zrLp = matchWrap(); zrLp.setMargins(0, 0, 0, 0);
-            int zoneH = dp(262);
+            LinearLayout.LayoutParams zrLp = matchWrap(); zrLp.setMargins(-dp(12), 0, -dp(2), 0);
+            int zoneH = dp(300);
             StrikeZoneView zone = new StrikeZoneView(this, ab.pitches, strikeZoneBoundsForFeed(feed));
             LinearLayout.LayoutParams zLp = new LinearLayout.LayoutParams(0, zoneH, 1f);
             zoneRow.addView(zone, zLp);
@@ -19070,8 +19082,10 @@ private View liveGameCard(LiveGame game) {
             legendScroll.addView(legend, new ScrollView.LayoutParams(-1, -2));
             legendClip.addView(legendScroll, new FrameLayout.LayoutParams(-1, zoneH));
             int screenW = getResources().getDisplayMetrics().widthPixels;
-            int railW = Math.min(dp(126), Math.max(dp(112), screenW * 29 / 100));
-            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(railW, zoneH); lgLp.setMargins(dp(2), 0, 0, 0);
+            // Just enough for the dot + the longest result label ("Swinging Strike") and no more,
+            // so the rail sits as far right as possible and the plot keeps the rest.
+            int railW = Math.min(dp(118), Math.max(dp(104), screenW * 27 / 100));
+            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(railW, zoneH); lgLp.setMargins(dp(4), 0, dp(2), 0);
             zoneRow.addView(legendClip, lgLp);
             card.addView(zoneRow, zrLp);
 
