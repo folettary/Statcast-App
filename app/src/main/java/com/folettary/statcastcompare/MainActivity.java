@@ -754,7 +754,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v309", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v310", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -18626,8 +18626,8 @@ private View liveGameCard(LiveGame game) {
             int w = getWidth(), h = getHeight();
             if (w <= 0 || h <= 0) return;
 
-            float outerPad = dp(3);
-            float markerPad = dp(8);
+            float outerPad = dp(1);
+            float markerPad = dp(5);
             float padL = outerPad + markerPad;
             float padT = outerPad + markerPad;
             float plotW = w - (outerPad + markerPad) * 2f;
@@ -18653,13 +18653,13 @@ private View liveGameCard(LiveGame game) {
             float drawH = spanZ * scale;
             // v296: do not center the pitch canvas in a huge left gutter. Bias the fixed
             // game window left so the zone uses the available card space better.
-            float drawL = padL + Math.max(0f, (plotW - drawW) * 0.22f);
+            float drawL = padL + Math.max(0f, (plotW - drawW) * 0.02f);
 
             // v308: the old bottom-anchored draw region made the tracker feel visually bottom-heavy,
             // because any unused vertical slack accumulated above the zone. Keep the pitch window
             // proportional and equal on all sides, but bias the canvas upward so the top feels tighter.
             float slackY = Math.max(0f, plotH - drawH);
-            float drawT = padT + (slackY * 0.18f);
+            float drawT = padT + (slackY * 0.02f);
 
             float zoneL = mapX(-zoneHalfWidth, xMin, xMax, drawL, drawW);
             float zoneR = mapX( zoneHalfWidth, xMin, xMax, drawL, drawW);
@@ -19000,7 +19000,7 @@ private View liveGameCard(LiveGame game) {
             LinearLayout abNav = new LinearLayout(this);
             abNav.setOrientation(LinearLayout.HORIZONTAL);
             abNav.setGravity(Gravity.CENTER_VERTICAL);
-            LinearLayout.LayoutParams abLp = matchWrap(); abLp.setMargins(0, dp(2), 0, dp(1));
+            LinearLayout.LayoutParams abLp = matchWrap(); abLp.setMargins(0, 0, 0, dp(1));
             TextView prev = navChip("‹", fidx > 0, v -> { game.viewAtBatIndex = Math.max(0, fidx - 1); rerenderTracker(game); });
             abNav.addView(prev);
             LinearLayout abInfo = new LinearLayout(this);
@@ -19034,7 +19034,7 @@ private View liveGameCard(LiveGame game) {
             zoneRow.setOrientation(LinearLayout.HORIZONTAL);
             zoneRow.setGravity(Gravity.TOP);
             LinearLayout.LayoutParams zrLp = matchWrap(); zrLp.setMargins(0, 0, 0, 0);
-            int zoneH = dp(236);
+            int zoneH = dp(244);
             StrikeZoneView zone = new StrikeZoneView(this, ab.pitches, strikeZoneBoundsForFeed(feed));
             LinearLayout.LayoutParams zLp = new LinearLayout.LayoutParams(0, zoneH, 1f);
             zoneRow.addView(zone, zLp);
@@ -19048,7 +19048,7 @@ private View liveGameCard(LiveGame game) {
             legendScroll.setVerticalScrollBarEnabled(false);
             legendScroll.setFillViewport(false);
             legendScroll.setClipToPadding(true);
-            legendScroll.setPadding(0, 0, dp(1), 0);
+            legendScroll.setPadding(0, 0, 0, 0);
             legendScroll.setOnTouchListener((v, ev) -> {
                 v.getParent().requestDisallowInterceptTouchEvent(true);
                 if (ev.getAction() == android.view.MotionEvent.ACTION_UP
@@ -19059,7 +19059,7 @@ private View liveGameCard(LiveGame game) {
             });
             LinearLayout legend = new LinearLayout(this);
             legend.setOrientation(LinearLayout.VERTICAL);
-            legend.setPadding(0, 0, dp(2), 0);
+            legend.setPadding(0, 0, 0, 0);
             if (ab.pitches.isEmpty()) {
                 TextView waiting = text("Waiting for the first pitch…", 10, INK_DIM, false);
                 waiting.setMaxLines(3);
@@ -19070,8 +19070,8 @@ private View liveGameCard(LiveGame game) {
             legendScroll.addView(legend, new ScrollView.LayoutParams(-1, -2));
             legendClip.addView(legendScroll, new FrameLayout.LayoutParams(-1, zoneH));
             int screenW = getResources().getDisplayMetrics().widthPixels;
-            int railW = Math.min(dp(138), Math.max(dp(122), screenW * 32 / 100));
-            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(railW, zoneH); lgLp.setMargins(dp(6), 0, 0, 0);
+            int railW = Math.min(dp(120), Math.max(dp(108), screenW * 28 / 100));
+            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(railW, zoneH); lgLp.setMargins(dp(2), 0, 0, 0);
             zoneRow.addView(legendClip, lgLp);
             card.addView(zoneRow, zrLp);
 
@@ -19354,7 +19354,7 @@ private View liveGameCard(LiveGame game) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(0, dp(3), 0, dp(3));
+        row.setPadding(0, dp(2), 0, dp(2));
         // numbered colored dot
         FrameLayout dotWrap = new FrameLayout(this);
         View dot = new View(this);
@@ -19373,14 +19373,14 @@ private View liveGameCard(LiveGame game) {
         col.setOrientation(LinearLayout.VERTICAL);
         String typeShort = pitchTypeShort(lp.typeCode, lp.typeName);
         String speed = lp.speed > 0 ? String.format(Locale.US, "%.0f", lp.speed) : "";
-        TextView t = text(typeShort + (speed.isEmpty() ? "" : " · " + speed), 10, INK, true);
+        TextView t = text(typeShort + (speed.isEmpty() ? "" : " · " + speed), 9, INK, true);
         t.setSingleLine(true); t.setEllipsize(TextUtils.TruncateAt.END);
         col.addView(t, matchWrap());
         String res = safe(lp.result);
         if (lp.isInPlay && !Double.isNaN(lp.exitVelo)) {
             res = String.format(Locale.US, "In play · %.0f EV", lp.exitVelo);
         }
-        TextView r = text(res, 9, lp.isInPlay ? Color.rgb(82, 226, 176) : INK_DIM, false);
+        TextView r = text(res, 8, lp.isInPlay ? Color.rgb(82, 226, 176) : INK_DIM, false);
         r.setSingleLine(false); r.setMaxLines(2); r.setEllipsize(TextUtils.TruncateAt.END);
         col.addView(r, matchWrap());
         row.addView(col, new LinearLayout.LayoutParams(0, -2, 1));
@@ -19391,16 +19391,16 @@ private View liveGameCard(LiveGame game) {
     private String pitchTypeShort(String code, String name) {
         if (code != null) {
             switch (code) {
-                case "FF": return "4-Seam";
-                case "SI": case "FT": return "Sinker";
-                case "FC": return "Cutter";
-                case "SL": return "Slider";
-                case "ST": return "Sweeper";
+                case "FF": return "4S";
+                case "SI": case "FT": return "Sink";
+                case "FC": return "Cut";
+                case "SL": return "SL";
+                case "ST": return "Sweep";
                 case "CU": case "KC": return "Curve";
-                case "CH": return "Change";
-                case "FS": return "Splitter";
-                case "SV": return "Slurve";
-                case "KN": return "Knuckle";
+                case "CH": return "CH";
+                case "FS": return "Split";
+                case "SV": return "Slv";
+                case "KN": return "Knuck";
                 case "EP": return "Eephus";
             }
         }
@@ -20644,7 +20644,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
             // Both routes still keep the main LIVE | MATCHUPS switch at the very top.
             LinearLayout liveCard = new LinearLayout(this);
             liveCard.setOrientation(LinearLayout.VERTICAL);
-            liveCard.setPadding(dp(6), dp(3), dp(6), dp(8));
+            liveCard.setPadding(dp(4), dp(3), dp(4), dp(8));
             liveCard.setBackground(roundedStroke(Color.argb(150, 6, 11, 20), Color.argb(46, 255, 255, 255), 20, 1));
             LinearLayout.LayoutParams cardLp = matchWrap();
             cardLp.setMargins(dp(12), controlsAboveHero ? 0 : dp(6), dp(12), dp(8));
