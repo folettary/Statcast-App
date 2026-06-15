@@ -775,7 +775,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.12f);
         liveBadge.setBackground(roundedStroke(Color.argb(40, 255, 255, 255), Color.argb(92, 255, 255, 255), 14, 1));
         badgeStack.addView(liveBadge);
-        TextView versionBadge = text("v290", 10, Color.rgb(213, 238, 236), true);
+        TextView versionBadge = text("v291", 10, Color.rgb(213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER);
         versionBadge.setPadding(0, dp(3), 0, 0);
         badgeStack.addView(versionBadge);
@@ -18609,7 +18609,7 @@ private View liveGameCard(LiveGame game) {
         }
     }
 
-    // Strike-zone plot: proportional zone + padded pitch viewport. v290 keeps the plot
+    // Strike-zone plot: proportional zone + padded pitch viewport. v291 keeps the plot
     // as the visual centerpiece while preventing far inside/outside pitches from clipping.
     private class StrikeZoneView extends View {
         private final java.util.List<LivePitch> pitches;
@@ -18622,9 +18622,11 @@ private View liveGameCard(LiveGame game) {
             int w = getWidth(), h = getHeight();
             if (w <= 0 || h <= 0) return;
 
-            // Leave real screen-space room for marker glow/labels. Pitch centers are mapped inside
-            // this inner plot box so an extreme miss can never draw on the edge of the view.
-            float outerPad = dp(5);
+            // v291: fixed-size zone. Earlier versions grew/shrank the actual strike-zone
+            // rectangle based on the pitch envelope, which made AB-to-AB navigation feel sloppy.
+            // The zone now has one stable pixel size for this device/layout; wild pitches are
+            // clamped inside the plot instead of shrinking the zone.
+            float outerPad = dp(4);
             float markerPad = dp(10);
             float padL = outerPad + markerPad;
             float padT = outerPad + markerPad;
@@ -18632,7 +18634,8 @@ private View liveGameCard(LiveGame game) {
             float plotH = h - (outerPad + markerPad) * 2f;
             if (plotW <= dp(24) || plotH <= dp(24)) return;
 
-            // Strike zone box: x ∈ [-0.83, 0.83], z ∈ [szBot, szTop] using live zone when MLB provides it.
+            // Current MLB zone is still used to normalize pitch height into the fixed visual box,
+            // but it no longer changes the drawn box size.
             float szBot = 1.5f, szTop = 3.4f;
             if (pitches != null) {
                 for (LivePitch lp : pitches) {
@@ -18644,58 +18647,27 @@ private View liveGameCard(LiveGame game) {
                     }
                 }
             }
+            float liveZoneSpan = Math.max(1.55f, szTop - szBot);
 
-            // v286: stop making the *canvas* larger while the zone stays small. Instead, give the
-            // zone a target pixel size first, then only scale down if actual pitch locations would
-            // clip. This keeps normal ABs large while still protecting room for true wild misses.
             final float zoneHalfWidth = 0.83f;
-            float zoneMidZ = (szTop + szBot) / 2f;
-            float zoneSpanZ = Math.max(1.88f, szTop - szBot); // keeps the zone visually baseball-shaped
-            float visualSzBot = zoneMidZ - zoneSpanZ / 2f;
-            float visualSzTop = zoneMidZ + zoneSpanZ / 2f;
+            final float fixedVisualZoneSpanZ = 1.88f; // visual proportions stay stable across ABs
+            float plateGap = dp(16);
+            float plateDepth = dp(11);
+            float bottomClear = dp(4);
 
-            final float pitchPadFt = 0.28f;
-            float xMin = -zoneHalfWidth - 0.18f;
-            float xMax =  zoneHalfWidth + 0.18f;
-            float zMin = visualSzBot - 0.24f;
-            float zMax = visualSzTop + 0.30f;
+            // Fill as much of the compact row as possible while reserving a small, fixed plate area.
+            float maxZoneHByHeight = h - padT - plateGap - plateDepth - bottomClear;
+            float maxZoneHByWidth = (plotW - dp(10)) * fixedVisualZoneSpanZ / (2f * zoneHalfWidth);
+            float zoneHpx = Math.max(dp(120), Math.min(Math.min(maxZoneHByHeight, maxZoneHByWidth), dp(330)));
+            float zoneWpx = zoneHpx * (2f * zoneHalfWidth) / fixedVisualZoneSpanZ;
 
-            if (pitches != null) {
-                for (LivePitch lp : pitches) {
-                    if (lp == null || Double.isNaN(lp.pX) || Double.isNaN(lp.pZ)) continue;
-                    float px = (float) lp.pX;
-                    float pz = (float) lp.pZ;
-                    // Ignore obviously-bad coordinates, but allow real wild misses to expand the canvas.
-                    if (Math.abs(px) > 6f || pz < -1.2f || pz > 8f) continue;
-                    xMin = Math.min(xMin, px - pitchPadFt);
-                    xMax = Math.max(xMax, px + pitchPadFt);
-                    zMin = Math.min(zMin, pz - pitchPadFt);
-                    zMax = Math.max(zMax, pz + pitchPadFt);
-                }
-            }
-
-            // Always reserve enough room for the plate, but do not let the plate force the zone tiny.
-            zMin = Math.min(zMin, 1.12f);
-            float spanX = Math.max(0.01f, xMax - xMin);
-            float spanZ = Math.max(0.01f, zMax - zMin);
-
-            float fitScale = Math.min(plotW / spanX, plotH / spanZ);
-            float targetZoneH = Math.min(plotH * 1.03f, dp(338));
-            float targetScale = targetZoneH / zoneSpanZ;
-            float scale = Math.min(targetScale, fitScale);
-
-            // Map the current data bounds at the chosen shared scale, centered inside the plot.
-            float drawW = spanX * scale;
-            float drawH = spanZ * scale;
-            float drawL = padL + (plotW - drawW) / 2f;
-            // v290: top-align the pitch content. The row height is now compact, so centering
-            // the data window only creates dead air above and below the actual strike zone.
-            float drawT = padT + Math.max(0f, (plotH - drawH) * 0.01f);
-
-            float zoneL = mapX(-zoneHalfWidth, xMin, xMax, drawL, drawW);
-            float zoneR = mapX(zoneHalfWidth, xMin, xMax, drawL, drawW);
-            float zoneT = mapZ(visualSzTop, zMin, zMax, drawT, drawH);
-            float zoneB = mapZ(visualSzBot, zMin, zMax, drawT, drawH);
+            float zoneCx = padL + plotW * 0.47f;
+            zoneCx = Math.max(padL + zoneWpx / 2f, Math.min(padL + plotW - zoneWpx / 2f, zoneCx));
+            float zoneB = h - bottomClear - plateDepth - plateGap;
+            float zoneT = zoneB - zoneHpx;
+            if (zoneT < padT) { zoneT = padT; zoneB = zoneT + zoneHpx; }
+            float zoneL = zoneCx - zoneWpx / 2f;
+            float zoneR = zoneCx + zoneWpx / 2f;
 
             // zone fill + thirds grid
             p.setShader(null);
@@ -18711,14 +18683,14 @@ private View liveGameCard(LiveGame game) {
                 canvas.drawLine(zoneL, gy, zoneR, gy, p);
             }
 
-            // home plate hint under the zone
+            // home plate hint sits at a fixed snug distance under the fixed-size zone.
             p.setStyle(Paint.Style.STROKE); p.setStrokeWidth(dp(1f)); p.setColor(Color.argb(70, 255, 255, 255));
-            float plateY = mapZ(0.8f, zMin, zMax, drawT, drawH);
+            float plateY = zoneB + plateGap;
             float plCx = (zoneL + zoneR) / 2f, plHalf = (zoneR - zoneL) * 0.5f;
             android.graphics.Path plate = new android.graphics.Path();
             plate.moveTo(plCx - plHalf, plateY); plate.lineTo(plCx + plHalf, plateY);
-            plate.lineTo(plCx + plHalf, plateY + dp(6)); plate.lineTo(plCx, plateY + dp(11));
-            plate.lineTo(plCx - plHalf, plateY + dp(6)); plate.close();
+            plate.lineTo(plCx + plHalf, plateY + dp(5)); plate.lineTo(plCx, plateY + plateDepth);
+            plate.lineTo(plCx - plHalf, plateY + dp(5)); plate.close();
             canvas.drawPath(plate, p);
 
             if (pitches == null || pitches.isEmpty()) return;
@@ -18727,16 +18699,23 @@ private View liveGameCard(LiveGame game) {
             for (LivePitch lp : pitches) if (lp != null) latestNo = Math.max(latestNo, lp.number);
             int count = pitches.size();
 
-            // Tails first (dots sit on top). Older pitches remain visible, but a long AB does not
-            // become a wall of equally-loud marks: the newest pitch gets the strongest trail/dot.
-            float originX = drawL + drawW * 0.5f;
-            float originY = drawT + drawH * 0.04f;
+            float originX = zoneCx;
+            float originY = Math.max(dp(6), zoneT - dp(18));
+            float minDotX = padL + dp(8);
+            float maxDotX = padL + plotW - dp(8);
+            float minDotY = padT + dp(8);
+            float maxDotY = h - dp(9);
+
+            // Tails first (dots sit on top). Pitch centers use the same fixed zone mapping every AB.
             for (LivePitch lp : pitches) {
                 if (lp == null || Double.isNaN(lp.pX) || Double.isNaN(lp.pZ)) continue;
                 float px = (float) lp.pX, pz = (float) lp.pZ;
                 if (Math.abs(px) > 6f || pz < -1.2f || pz > 8f) continue;
-                float cx = mapX(px, xMin, xMax, drawL, drawW);
-                float cy = mapZ(pz, zMin, zMax, drawT, drawH);
+                float rawX = zoneCx + (px / zoneHalfWidth) * (zoneWpx / 2f);
+                float normZ = (pz - szBot) / liveZoneSpan;
+                float rawY = zoneB - normZ * zoneHpx;
+                float cx = Math.max(minDotX, Math.min(maxDotX, rawX));
+                float cy = Math.max(minDotY, Math.min(maxDotY, rawY));
                 int col = pitchTypeColor(lp.typeCode);
                 int age = Math.max(0, latestNo - lp.number);
                 int alpha = age == 0 ? 220 : (age <= 3 ? 150 : (count >= 9 ? 72 : 100));
@@ -18764,8 +18743,11 @@ private View liveGameCard(LiveGame game) {
                 if (lp == null || Double.isNaN(lp.pX) || Double.isNaN(lp.pZ)) continue;
                 float px = (float) lp.pX, pz = (float) lp.pZ;
                 if (Math.abs(px) > 6f || pz < -1.2f || pz > 8f) continue;
-                float cx = mapX(px, xMin, xMax, drawL, drawW);
-                float cy = mapZ(pz, zMin, zMax, drawT, drawH);
+                float rawX = zoneCx + (px / zoneHalfWidth) * (zoneWpx / 2f);
+                float normZ = (pz - szBot) / liveZoneSpan;
+                float rawY = zoneB - normZ * zoneHpx;
+                float cx = Math.max(minDotX, Math.min(maxDotX, rawX));
+                float cy = Math.max(minDotY, Math.min(maxDotY, rawY));
                 int col = pitchTypeColor(lp.typeCode);
                 int age = Math.max(0, latestNo - lp.number);
                 boolean latest = age == 0;
@@ -19016,13 +18998,13 @@ private View liveGameCard(LiveGame game) {
             }
             card.addView(abNav, abLp);
 
-            // v290: protected two-column live AB layout. The plot keeps the hero footprint while the
+            // v291: protected two-column live AB layout. The plot keeps the hero footprint while the
             // right pitch rail is fixed-width, padded, and independently scrollable for long at-bats.
             LinearLayout zoneRow = new LinearLayout(this);
             zoneRow.setOrientation(LinearLayout.HORIZONTAL);
             zoneRow.setGravity(Gravity.TOP);
             LinearLayout.LayoutParams zrLp = matchWrap(); zrLp.setMargins(0, dp(4), 0, 0);
-            int zoneH = dp(ab.pitches.size() >= 10 ? 286 : 270);
+            int zoneH = dp(270);
             StrikeZoneView zone = new StrikeZoneView(this, ab.pitches);
             LinearLayout.LayoutParams zLp = new LinearLayout.LayoutParams(0, zoneH, 1f);
             zoneRow.addView(zone, zLp);
@@ -20592,7 +20574,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         String pitchers = (safe(game.awayPitcher).isEmpty() ? "Away SP TBD" : lastNameOnly(game.awayPitcher))
                 + " vs " + (safe(game.homePitcher).isEmpty() ? "Home SP TBD" : lastNameOnly(game.homePitcher));
 
-        // ===== v290: keep the score hero attached to the live feed =====
+        // ===== v291: keep the score hero attached to the live feed =====
         // When the user is on the LIVE experience, move the control bars ABOVE the score hero so
         // the score header sits directly on top of the live feed/tracker instead of being separated
         // from it by layers of buttons. Matchups keeps the older order.
