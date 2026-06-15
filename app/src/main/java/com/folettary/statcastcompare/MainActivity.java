@@ -155,6 +155,7 @@ public class MainActivity extends Activity {
     private final Map<String, ArrayList<GameLogEntry>> gameLogCache = Collections.synchronizedMap(new HashMap<>());
 
     private LinearLayout root;
+    private LinearLayout appBarView;
     private LinearLayout form;
     private Button playerModeButton;
     private Button teamModeButton;
@@ -733,13 +734,14 @@ public class MainActivity extends Activity {
         });
         root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(10), dp(18), dp(10), dp(10));
+        root.setPadding(dp(10), dp(2), dp(10), dp(10));
         scroll.addView(root, new ScrollView.LayoutParams(-1, -2));
         screen.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
         setContentView(screen);
         screen.post(() -> screen.requestApplyInsets());
 
         LinearLayout appBar = new LinearLayout(this);
+        appBarView = appBar;
         appBar.setOrientation(LinearLayout.HORIZONTAL);
         appBar.setGravity(Gravity.CENTER_VERTICAL);
         appBar.setPadding(dp(10), dp(2), dp(10), dp(2));
@@ -752,7 +754,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v304", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v305", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -1187,6 +1189,7 @@ public class MainActivity extends Activity {
         activeLiveTrackerHost = null;
         screenRequestToken++;
         activeLiveGameMenu = null;
+        if (appBarView != null) appBarView.setVisibility(View.VISIBLE);
         activePrimaryTab = TAB_MATCHUP;
         matchupPathMode = MATCHUP_PATH_LIVE;
         matchupResultMode = false;
@@ -3186,6 +3189,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     private void setPrimaryTab(int tab) {
         screenRequestToken++;
         activeLiveGameMenu = null;
+        if (appBarView != null) appBarView.setVisibility(View.VISIBLE);
         if (!restoringNavHistory && activePrimaryTab != tab) {
             navTabHistory.push(activePrimaryTab);
             while (navTabHistory.size() > 12) navTabHistory.removeLast();
@@ -18133,7 +18137,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         panel.setPadding(dp(12), dp(11), dp(12), dp(12));
         panel.setBackground(roundedGradientStroke(new int[] { Color.rgb(5, 9, 17), Color.rgb(10, 18, 32) }, 20, Color.argb(82, 255, 255, 255), 1));
         LinearLayout.LayoutParams panelLp = matchWrap();
-        panelLp.setMargins(0, dp(9), 0, dp(8));
+        panelLp.setMargins(0, 0, 0, dp(8));
 
         LinearLayout titleRow = new LinearLayout(this);
         titleRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -18182,7 +18186,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         panel.setPadding(dp(12), dp(11), dp(12), dp(12));
         panel.setBackground(roundedGradientStroke(new int[] { Color.rgb(5, 9, 17), Color.rgb(10, 18, 32) }, 20, Color.argb(82, 255, 255, 255), 1));
         LinearLayout.LayoutParams panelLp = matchWrap();
-        panelLp.setMargins(0, dp(9), 0, dp(8));
+        panelLp.setMargins(0, 0, 0, dp(8));
 
         LinearLayout titleRow = new LinearLayout(this);
         titleRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -19014,8 +19018,8 @@ private View liveGameCard(LiveGame game) {
             LinearLayout zoneRow = new LinearLayout(this);
             zoneRow.setOrientation(LinearLayout.HORIZONTAL);
             zoneRow.setGravity(Gravity.TOP);
-            LinearLayout.LayoutParams zrLp = matchWrap(); zrLp.setMargins(0, dp(4), 0, 0);
-            int zoneH = dp(248);
+            LinearLayout.LayoutParams zrLp = matchWrap(); zrLp.setMargins(0, 0, 0, 0);
+            int zoneH = dp(238);
             StrikeZoneView zone = new StrikeZoneView(this, ab.pitches, strikeZoneBoundsForFeed(feed));
             LinearLayout.LayoutParams zLp = new LinearLayout.LayoutParams(0, zoneH, 1f);
             zoneRow.addView(zone, zLp);
@@ -20513,6 +20517,8 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         target.homeAbbr = fresh.homeAbbr;
         target.awayPitcher = fresh.awayPitcher;
         target.homePitcher = fresh.homePitcher;
+        target.awayRecord = fresh.awayRecord;
+        target.homeRecord = fresh.homeRecord;
         target.awayScore = fresh.awayScore;
         target.homeScore = fresh.homeScore;
         target.abstractState = fresh.abstractState;
@@ -20538,6 +20544,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         if (resultsBox != null) resultsBox.setVisibility(View.GONE);
         standingsBox.setVisibility(View.VISIBLE);
         standingsBox.removeAllViews();
+        if (appBarView != null) appBarView.setVisibility(View.GONE);
         refreshMatchupHub();
         if (matchupHubBox != null) matchupHubBox.setVisibility(View.GONE); // v208: game hub owns this screen; no duplicate top path buttons
 
@@ -20549,7 +20556,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
 
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(0, dp(12), 0, dp(12));
+        panel.setPadding(0, dp(3), 0, dp(12));
         panel.setBackground(roundedGradientStroke(
                 guardedDuelGradient(awayPalette, homePalette, true),
                 22,
@@ -20598,7 +20605,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         String pitchers = (safe(game.awayPitcher).isEmpty() ? "Away SP TBD" : lastNameOnly(game.awayPitcher))
                 + " vs " + (safe(game.homePitcher).isEmpty() ? "Home SP TBD" : lastNameOnly(game.homePitcher));
 
-        // ===== v304: LIVE | MATCHUPS should be the first controls at the top =====
+        // ===== v305: LIVE | MATCHUPS should be the first controls at the top =====
         // Hide the utility header on live game detail so the main tab bar sits at the very top,
         // and keep switching between LIVE and MATCHUPS stable without layout jumps.
         boolean pregame = game.isPregame();
@@ -20618,7 +20625,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         }
 
         if (game.isLive()) {
-            // v304: LIVE keeps the Tracker/Win Prob/Box sub-tabs; MATCHUPS hides them completely.
+            // v305: LIVE keeps the Tracker/Win Prob/Box sub-tabs; MATCHUPS hides them completely.
             // Both routes still keep the main LIVE | MATCHUPS switch at the very top.
             LinearLayout liveCard = new LinearLayout(this);
             liveCard.setOrientation(LinearLayout.VERTICAL);
@@ -20635,9 +20642,9 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
             liveCard.addView(liveHero, lhLp);
             panel.addView(liveCard, cardLp);
         } else {
-            LinearLayout.LayoutParams heroLp = new LinearLayout.LayoutParams(-1, dp(108));
-            heroLp.setMargins(dp(12), dp(8), dp(12), dp(10));
-            panel.addView(gameMatchupHeroCard(game, away, home, awayPalette, homePalette, pitchers), heroLp);
+            LinearLayout.LayoutParams heroLp = matchWrap();
+            heroLp.setMargins(dp(12), dp(2), dp(12), dp(8));
+            panel.addView(liveScoreHero(game, away, home, awayPalette, homePalette), heroLp);
         }
 
         if (!pregame && !controlsAboveHero) {
@@ -20908,27 +20915,52 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(dp(12), dp(8), dp(12), dp(8));
 
-        // away: logo + abbr/record
         row.addView(heroTeamBlock(away, displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr), game.awayRecord, awayColor, true), new LinearLayout.LayoutParams(0, -2, 2.1f));
-        // away score
-        TextView aScore = text(game.awayScore < 0 ? "0" : String.valueOf(game.awayScore), 34, Color.WHITE, true);
-        aScore.setGravity(Gravity.CENTER);
-        row.addView(aScore, new LinearLayout.LayoutParams(0, -2, 1.1f));
 
-        // center: inning + bases + count + outs (dynamic; loaded from situation)
-        LinearLayout center = new LinearLayout(this);
-        center.setOrientation(LinearLayout.VERTICAL);
-        center.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams centerLp = new LinearLayout.LayoutParams(0, -2, 2.4f);
-        row.addView(center, centerLp);
-        fillHeroCenter(center, game, awayPalette, homePalette);   // immediate (uses cached sit*)
-        loadHeroCenter(game, center, awayPalette, homePalette);   // async refresh
+        if (game.isLive()) {
+            // away score
+            TextView aScore = text(game.awayScore < 0 ? "0" : String.valueOf(game.awayScore), 34, Color.WHITE, true);
+            aScore.setGravity(Gravity.CENTER);
+            row.addView(aScore, new LinearLayout.LayoutParams(0, -2, 1.1f));
 
-        // home score
-        TextView hScore = text(game.homeScore < 0 ? "0" : String.valueOf(game.homeScore), 34, Color.WHITE, true);
-        hScore.setGravity(Gravity.CENTER);
-        row.addView(hScore, new LinearLayout.LayoutParams(0, -2, 1.1f));
-        // home: abbr/record + logo
+            // center: inning only; situation details live in the tracker board.
+            LinearLayout center = new LinearLayout(this);
+            center.setOrientation(LinearLayout.VERTICAL);
+            center.setGravity(Gravity.CENTER);
+            row.addView(center, new LinearLayout.LayoutParams(0, -2, 2.4f));
+            fillHeroCenter(center, game, awayPalette, homePalette);
+            loadHeroCenter(game, center, awayPalette, homePalette);
+
+            TextView hScore = text(game.homeScore < 0 ? "0" : String.valueOf(game.homeScore), 34, Color.WHITE, true);
+            hScore.setGravity(Gravity.CENTER);
+            row.addView(hScore, new LinearLayout.LayoutParams(0, -2, 1.1f));
+        } else {
+            // Pregame/final uses the same hero shell and side team blocks, but the center
+            // becomes time/status + probable pitching matchup instead of scores/inning.
+            LinearLayout center = new LinearLayout(this);
+            center.setOrientation(LinearLayout.VERTICAL);
+            center.setGravity(Gravity.CENTER);
+            row.addView(center, new LinearLayout.LayoutParams(0, -2, 3.7f));
+
+            String primary = game.isPregame() && !safe(game.timeLabel()).isEmpty()
+                    ? game.timeLabel()
+                    : game.statusLabel();
+            TextView time = text(primary, 15, statusColor(game), true);
+            time.setGravity(Gravity.CENTER);
+            time.setSingleLine(true);
+            time.setEllipsize(TextUtils.TruncateAt.END);
+            center.addView(time, matchWrap());
+
+            String awayP = safe(game.awayPitcher).isEmpty() ? "Away SP TBD" : lastNameOnly(game.awayPitcher);
+            String homeP = safe(game.homePitcher).isEmpty() ? "Home SP TBD" : lastNameOnly(game.homePitcher);
+            TextView pit = text(awayP + " vs " + homeP, 10, INK_SOFT, true);
+            pit.setGravity(Gravity.CENTER);
+            pit.setSingleLine(true);
+            pit.setEllipsize(TextUtils.TruncateAt.END);
+            pit.setPadding(0, dp(3), 0, 0);
+            center.addView(pit, matchWrap());
+        }
+
         row.addView(heroTeamBlock(home, displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr), game.homeRecord, homeColor, false), new LinearLayout.LayoutParams(0, -2, 2.1f));
 
         shell.addView(row, new FrameLayout.LayoutParams(-1, -2));
@@ -24987,6 +25019,8 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
                 live.detailedState = status == null ? "" : status.optString("detailedState", "");
                 live.awayPitcher = pitcherName(awayNode == null ? null : awayNode.optJSONObject("probablePitcher"));
                 live.homePitcher = pitcherName(homeNode == null ? null : homeNode.optJSONObject("probablePitcher"));
+                live.awayRecord = recordFromNode(awayNode);
+                live.homeRecord = recordFromNode(homeNode);
                 out.add(live);
             }
         }
