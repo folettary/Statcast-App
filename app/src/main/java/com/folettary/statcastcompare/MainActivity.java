@@ -752,7 +752,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v301", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v302", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -18985,13 +18985,25 @@ private View liveGameCard(LiveGame game) {
             StrikeZoneView zone = new StrikeZoneView(this, ab.pitches, strikeZoneBoundsForFeed(feed));
             LinearLayout.LayoutParams zLp = new LinearLayout.LayoutParams(0, zoneH, 1f);
             zoneRow.addView(zone, zLp);
-            // pitch list: newest first, scrollable within the fixed zone height. Keep it a true
-            // right-side rail instead of letting it eat half the card and squeeze the plot.
+            // pitch list: newest first, in a fixed-height window that scrolls independently of the
+            // page. A nested same-direction ScrollView won't reliably clip/scroll on its own, so we
+            // (a) host it in a clipping FrameLayout of exactly zoneH, and (b) hand it the vertical
+            // gesture by disallowing the parent scroll from intercepting while the finger is on it.
+            FrameLayout legendClip = new FrameLayout(this);
+            legendClip.setClipChildren(true);
             ScrollView legendScroll = new ScrollView(this);
             legendScroll.setVerticalScrollBarEnabled(false);
             legendScroll.setFillViewport(false);
-            legendScroll.setClipToPadding(false);
+            legendScroll.setClipToPadding(true);
             legendScroll.setPadding(0, 0, dp(2), 0);
+            legendScroll.setOnTouchListener((v, ev) -> {
+                v.getParent().requestDisallowInterceptTouchEvent(true);
+                if (ev.getAction() == android.view.MotionEvent.ACTION_UP
+                        || ev.getAction() == android.view.MotionEvent.ACTION_CANCEL) {
+                    v.getParent().requestDisallowInterceptTouchEvent(false);
+                }
+                return false;
+            });
             LinearLayout legend = new LinearLayout(this);
             legend.setOrientation(LinearLayout.VERTICAL);
             legend.setPadding(0, 0, dp(4), 0);
@@ -19003,10 +19015,11 @@ private View liveGameCard(LiveGame game) {
                 for (int pi = ab.pitches.size() - 1; pi >= 0; pi--) legend.addView(pitchLegendRow(ab.pitches.get(pi)), matchWrap());
             }
             legendScroll.addView(legend, new ScrollView.LayoutParams(-1, -2));
+            legendClip.addView(legendScroll, new FrameLayout.LayoutParams(-1, zoneH));
             int screenW = getResources().getDisplayMetrics().widthPixels;
             int railW = Math.min(dp(98), Math.max(dp(84), screenW * 24 / 100));
             LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(railW, zoneH); lgLp.setMargins(dp(4), 0, 0, 0);
-            zoneRow.addView(legendScroll, lgLp);
+            zoneRow.addView(legendClip, lgLp);
             card.addView(zoneRow, zrLp);
 
             // ---- PA RESULT BANNER — big and unmistakable once the at-bat is complete ----
