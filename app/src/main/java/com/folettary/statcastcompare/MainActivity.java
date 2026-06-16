@@ -765,7 +765,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v333", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v334", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20303,24 +20303,32 @@ private View liveGameCard(LiveGame game) {
             }
             @Override public void onDrag(float dx) {
                 float t = dx;
-                // rubber-band when dragging toward a side with no neighbour
-                if (t < 0 && !hasNext) t *= 0.3f;
-                if (t > 0 && !hasPrev) t *= 0.3f;
+                // softer rubber-band at edges so an intentional overscroll into the next sub-tab is
+                // still reachable (0.3 made the live-edge tab switch nearly impossible to trigger).
+                if (t < 0 && !hasNext) t *= 0.5f;
+                if (t > 0 && !hasPrev) t *= 0.5f;
                 place(t);
             }
             @Override public void onRelease(float dx) {
                 float moved = currentCard.getTranslationX();
-                // v333: TAB OVERSCROLL. When following the live AB (no newer AB to reveal), a left
-                // overscroll switches to the next sub-tab (Tracker→Win Prob→Box Score). A right
-                // overscroll from the live AB with no older-AB pull switches toward the previous tab.
-                // Only triggers at the live edge so it never fights the AB carousel.
-                boolean atLiveEdge = !hasNext; // center == last AB
-                if (atLiveEdge && moved < -screenW * 0.30f) {
-                    if (advanceLiveSubTab(game, +1)) return; // moved to next tab; this view is replaced
+                // TAB OVERSCROLL — decide on the RAW finger distance (dx), not the damped translation,
+                // so a deliberate left-drag at the live AB reliably opens Win Prob. Only at the edges
+                // so it never fights the AB carousel.
+                boolean atLiveEdge = !hasNext; // center == last/live AB
+                if (atLiveEdge && dx < -screenW * 0.22f) {
+                    currentCard.animate().translationX(-screenW).setDuration(200)
+                            .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                            .withEndAction(() -> advanceLiveSubTab(game, +1)).start();
+                    return;
                 }
                 boolean atOldestEdge = !hasPrev;
-                if (atOldestEdge && moved > screenW * 0.30f) {
-                    if (advanceLiveSubTab(game, -1)) return;
+                if (atOldestEdge && dx > screenW * 0.22f) {
+                    // (no sub-tab to the left of Tracker; advanceLiveSubTab will no-op safely)
+                    if (advanceLiveSubTab(game, -1)) {
+                        currentCard.animate().translationX(screenW).setDuration(200)
+                                .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
+                        return;
+                    }
                 }
                 int target = center;
                 if (moved < -screenW * 0.28f && hasNext) target = center + 1;
@@ -20344,23 +20352,40 @@ private View liveGameCard(LiveGame game) {
         return host;
     }
 
-    // v333: wrap a static sub-tab's content (Win Prob, Box Score) so a horizontal swipe switches
-    // sub-tabs, mirroring the Tracker's overscroll. Left = toward Box Score, right = toward Tracker.
-    private SwipePagerFrame wrapInSubTabSwiper(LiveGame game, View content) {
+    // v334: wrap a static sub-tab (Win Prob / Box Score) so a horizontal drag slides the content
+    // with the finger and, past a threshold, carousels to the adjacent sub-tab. Direction map:
+    //   Tracker(0) ← → Win Prob(1) ← → Box Score(2)
+    //   drag LEFT  = advance toward Box Score;  drag RIGHT = back toward Tracker.
+    // The tab switch is deferred (see advanceLiveSubTab) so it never crashes mid-dispatch.
+    private SwipePagerFrame wrapInSubTabSwiper(LiveGame game, View content, boolean canGoLeft, boolean canGoRight) {
         final SwipePagerFrame frame = new SwipePagerFrame(this);
+        frame.setClipChildren(false);
         frame.addView(content, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT));
         final int screenW = getResources().getDisplayMetrics().widthPixels;
         frame.setPager(new TrackerPagerCb() {
             @Override public void onDrag(float dx) {
-                // light follow with rubber-banding (these tabs don't reveal neighbours)
-                content.setTranslationX(dx * 0.4f);
+                // follow the finger; rubber-band when there's no tab in that direction
+                float t = dx;
+                if (t < 0 && !canGoRight) t *= 0.3f;   // dragging left advances (toward Box) 
+                if (t > 0 && !canGoLeft) t *= 0.3f;    // dragging right goes back (toward Tracker)
+                content.setTranslationX(t);
             }
             @Override public void onRelease(float dx) {
-                content.animate().translationX(0f).setDuration(180)
-                        .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
-                if (dx < -screenW * 0.22f) advanceLiveSubTab(game, +1);      // toward Box Score
-                else if (dx > screenW * 0.22f) advanceLiveSubTab(game, -1);  // toward Tracker
+                boolean advance = dx < -screenW * 0.26f && canGoRight; // left → next tab
+                boolean back = dx > screenW * 0.26f && canGoLeft;      // right → prev tab
+                if (advance) {
+                    content.animate().translationX(-screenW).setDuration(200)
+                            .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                            .withEndAction(() -> advanceLiveSubTab(game, +1)).start();
+                } else if (back) {
+                    content.animate().translationX(screenW).setDuration(200)
+                            .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                            .withEndAction(() -> advanceLiveSubTab(game, -1)).start();
+                } else {
+                    content.animate().translationX(0f).setDuration(180)
+                            .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
+                }
             }
         });
         return frame;
@@ -20368,15 +20393,54 @@ private View liveGameCard(LiveGame game) {
 
     // v333: move between the live sub-tabs (Tracker ↔ Win Prob ↔ Box Score) via carousel overscroll.
     // dir +1 = toward Box Score, -1 = toward Tracker. Returns true if it switched.
+    // v334: from a live game's MATCHUPS view, dragging right slides over to the LIVE tab. One-way:
+    // LIVE owns its own horizontal carousel (ABs + sub-tabs), so it doesn't drag back to MATCHUPS.
+    private SwipePagerFrame wrapMatchupsToLive(LiveGame game, View content) {
+        final SwipePagerFrame frame = new SwipePagerFrame(this);
+        frame.setClipChildren(false);
+        frame.addView(content, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT));
+        final int screenW = getResources().getDisplayMetrics().widthPixels;
+        frame.setPager(new TrackerPagerCb() {
+            @Override public void onDrag(float dx) {
+                float t = dx;
+                if (t < 0) t *= 0.3f; // only rightward drag does anything (toward LIVE)
+                content.setTranslationX(t);
+            }
+            @Override public void onRelease(float dx) {
+                if (dx > screenW * 0.26f) {
+                    content.animate().translationX(screenW).setDuration(200)
+                            .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                            .withEndAction(() -> main.post(() -> {
+                                gameHubTab = "live";
+                                gameHubLiveSub = "tracker";
+                                game.viewAtBatIndex = -1;
+                                switchGameHubView(game);
+                            })).start();
+                } else {
+                    content.animate().translationX(0f).setDuration(180)
+                            .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
+                }
+            }
+        });
+        return frame;
+    }
+
     private boolean advanceLiveSubTab(LiveGame game, int dir) {
         String[] order = { "tracker", "prob", "box" };
         int cur = 0;
         for (int i = 0; i < order.length; i++) if (order[i].equals(gameHubLiveSub)) { cur = i; break; }
         int next = cur + dir;
         if (next < 0 || next >= order.length) return false; // at an end — nothing to switch to
-        if (!"tracker".equals(order[next])) stopLiveTrackerPolling();
-        gameHubLiveSub = order[next];
-        switchGameHubView(game);
+        final String target = order[next];
+        // CRITICAL: never rebuild the view tree synchronously from inside a touch handler — that
+        // destroys the view whose gesture is still being dispatched and crashes. Defer to next frame.
+        main.post(() -> {
+            if (!"tracker".equals(target)) stopLiveTrackerPolling();
+            gameHubLiveSub = target;
+            if ("tracker".equals(target)) game.viewAtBatIndex = -1; // returning to tracker → live AB
+            switchGameHubView(game);
+        });
         return true;
     }
 
@@ -21809,7 +21873,17 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         }
 
         if ("matchups".equals(gameHubTab)) {
-            renderMatchupCards(panel, game, awayPalette, homePalette, accent);
+            if (game.isLive()) {
+                // v334: on a live game's MATCHUPS view, dragging RIGHT carousels to the LIVE tab.
+                // (Live → Matchups is NOT a drag — Live owns its own AB/sub-tab carousel.)
+                LinearLayout mHost = new LinearLayout(this);
+                mHost.setOrientation(LinearLayout.VERTICAL);
+                renderMatchupCards(mHost, game, awayPalette, homePalette, accent);
+                SwipePagerFrame mWrap = wrapMatchupsToLive(game, mHost);
+                panel.addView(mWrap, matchWrap());
+            } else {
+                renderMatchupCards(panel, game, awayPalette, homePalette, accent);
+            }
         } else {
             renderLiveTab(panel, game, awayPalette, homePalette, false); // sub-bar now lives in the live card header
         }
@@ -21906,14 +21980,14 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
             LinearLayout wpHost = new LinearLayout(this);
             wpHost.setOrientation(LinearLayout.VERTICAL);
             loadWinProbability(game, wpHost, awayPalette, homePalette);
-            SwipePagerFrame swipeWrap = wrapInSubTabSwiper(game, wpHost);
+            SwipePagerFrame swipeWrap = wrapInSubTabSwiper(game, wpHost, true, true); // ←Tracker  Box→
             LinearLayout.LayoutParams wpLp = matchWrap(); wpLp.setMargins(dp(12), 0, dp(12), dp(6));
             panel.addView(swipeWrap, wpLp);
         } else if ("box".equals(gameHubLiveSub)) {
             LinearLayout boxHost = new LinearLayout(this);
             boxHost.setOrientation(LinearLayout.VERTICAL);
             renderBoxTab(boxHost, game, awayPalette, homePalette);
-            SwipePagerFrame swipeWrap = wrapInSubTabSwiper(game, boxHost);
+            SwipePagerFrame swipeWrap = wrapInSubTabSwiper(game, boxHost, true, false); // ←Win Prob only
             panel.addView(swipeWrap, matchWrap()); // renderBoxTab already insets its own host
         } else {
             LinearLayout trackerHost = new LinearLayout(this);
