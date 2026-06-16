@@ -754,7 +754,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v323", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v324", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -19444,6 +19444,15 @@ private View liveGameCard(LiveGame game) {
     // horizontal strip; the finger drags the strip, and on release it snaps to the nearest page and
     // commits the new at-bat index. Vertical drags fall through to the page ScrollView.
     private View buildTrackerPager(LiveGame game) {
+        try {
+            return buildTrackerPagerImpl(game);
+        } catch (Throwable t) {
+            // never let paging blank the tracker — fall back to the plain card
+            return liveTrackerCard(game, activeLiveTrackerAwayPal, activeLiveTrackerHomePal);
+        }
+    }
+
+    private View buildTrackerPagerImpl(LiveGame game) {
         LiveFeed feed = game.liveFeed;
         // Resolve the current absolute index the card is showing.
         int curIdx;
@@ -19458,37 +19467,44 @@ private View liveGameCard(LiveGame game) {
         final int center = curIdx;
         final boolean hasPrev = center > 0;
         final boolean hasNext = center < count - 1;
-
         final int screenW = getResources().getDisplayMetrics().widthPixels;
 
-        // Horizontal strip holding up to 3 panels (prev, current, next), each screen-width.
-        final LinearLayout strip = new LinearLayout(this);
-        strip.setOrientation(LinearLayout.HORIZONTAL);
+        // OVERLAY architecture (v324): the CURRENT card is a normal MATCH_PARENT child so it drives
+        // the host's height correctly (this is what a translated wrap-content strip failed to do,
+        // blanking the tracker). Neighbour cards are added as overlays parked one screen-width to the
+        // side; clipChildren(false) lets them slide into view during a drag without affecting the
+        // host's measured size.
+        final FrameLayout host = new FrameLayout(this);
+        host.setClipChildren(false);
 
-        final int firstIdx = hasPrev ? center - 1 : center;
-        // panel index of the "current" card within the strip (0 if no prev, else 1)
-        final int currentPanel = hasPrev ? 1 : 0;
-        for (int i = firstIdx; i <= (hasNext ? center + 1 : center); i++) {
-            LinearLayout panel = new LinearLayout(this);
-            panel.setOrientation(LinearLayout.VERTICAL);
-            panel.addView(trackerCardForIndex(game, i), matchWrap());
-            strip.addView(panel, new LinearLayout.LayoutParams(screenW, LinearLayout.LayoutParams.WRAP_CONTENT));
+        final View currentCard = trackerCardForIndex(game, center);
+        host.addView(currentCard, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT));
+
+        final View prevCard = hasPrev ? trackerCardForIndex(game, center - 1) : null;
+        if (prevCard != null) {
+            host.addView(prevCard, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT));
+            prevCard.setTranslationX(-screenW);
+        }
+        final View nextCard = hasNext ? trackerCardForIndex(game, center + 1) : null;
+        if (nextCard != null) {
+            host.addView(nextCard, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT));
+            nextCard.setTranslationX(screenW);
         }
 
-        // Host clips the strip to one screen width; strip is offset so the current panel is shown.
-        final FrameLayout host = new FrameLayout(this);
-        host.setClipChildren(true);
-        host.addView(strip, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT));
-        final float restX = -currentPanel * (float) screenW;
-        strip.setTranslationX(restX);
-
         host.setOnTouchListener(new View.OnTouchListener() {
-            float downX, downY, startTrans; boolean decided, horizontal;
+            float downX, downY; boolean decided, horizontal;
+            void place(float dx) {
+                currentCard.setTranslationX(dx);
+                if (prevCard != null) prevCard.setTranslationX(dx - screenW);
+                if (nextCard != null) nextCard.setTranslationX(dx + screenW);
+            }
             @Override public boolean onTouch(View v, android.view.MotionEvent ev) {
                 switch (ev.getActionMasked()) {
                     case android.view.MotionEvent.ACTION_DOWN:
-                        downX = ev.getX(); downY = ev.getY(); startTrans = strip.getTranslationX();
-                        decided = false; horizontal = false;
+                        downX = ev.getX(); downY = ev.getY(); decided = false; horizontal = false;
                         break;
                     case android.view.MotionEvent.ACTION_MOVE: {
                         float dx = ev.getX() - downX, dy = ev.getY() - downY;
@@ -19498,13 +19514,11 @@ private View liveGameCard(LiveGame game) {
                             v.getParent().requestDisallowInterceptTouchEvent(horizontal);
                         }
                         if (decided && horizontal) {
-                            float t = startTrans + dx;
-                            // rubber-band at the ends (no neighbour to reveal)
-                            float minT = restX - (hasNext ? screenW : 0);
-                            float maxT = restX + (hasPrev ? screenW : 0);
-                            if (t < minT) t = minT + (t - minT) * 0.3f;
-                            if (t > maxT) t = maxT + (t - maxT) * 0.3f;
-                            strip.setTranslationX(t);
+                            float t = dx;
+                            // rubber-band when dragging toward a side with no neighbour
+                            if (t < 0 && !hasNext) t *= 0.3f;
+                            if (t > 0 && !hasPrev) t *= 0.3f;
+                            place(t);
                         }
                         break;
                     }
@@ -19512,21 +19526,25 @@ private View liveGameCard(LiveGame game) {
                     case android.view.MotionEvent.ACTION_CANCEL: {
                         v.getParent().requestDisallowInterceptTouchEvent(false);
                         if (decided && horizontal) {
-                            float moved = strip.getTranslationX() - restX;
-                            int target = center; // default: snap back
+                            float moved = currentCard.getTranslationX();
+                            int target = center;
                             if (moved < -screenW * 0.28f && hasNext) target = center + 1;
                             else if (moved > screenW * 0.28f && hasPrev) target = center - 1;
                             final int ft = target;
-                            float dest = restX + (center - ft) * (float) screenW;
-                            strip.animate().translationX(dest).setDuration(220)
+                            // animate the current card to its resting/exit position, then commit
+                            float dest = (ft == center) ? 0f : (ft > center ? -screenW : screenW);
+                            currentCard.animate().translationX(dest).setDuration(220)
                                     .setInterpolator(new android.view.animation.DecelerateInterpolator())
                                     .withEndAction(() -> {
                                         if (ft != center) {
-                                            // commit: -1 if we landed on the live (last) AB
                                             game.viewAtBatIndex = (ft >= count - 1) ? -1 : ft;
                                             rerenderTracker(game);
                                         }
                                     }).start();
+                            if (prevCard != null) prevCard.animate().translationX(dest - screenW).setDuration(220)
+                                    .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
+                            if (nextCard != null) nextCard.animate().translationX(dest + screenW).setDuration(220)
+                                    .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
                             return true;
                         }
                         break;
