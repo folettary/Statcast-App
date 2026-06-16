@@ -182,6 +182,8 @@ public class MainActivity extends Activity {
     private Spinner rankMetricSpinner;
     private LinearLayout seasonChipRow;
     private LinearLayout seasonColView;
+    // v333: last-rendered slate, so a standout fetch can rebuild tiles without a network refetch.
+    private ArrayList<LiveGame> lastRenderedSlate = null;
     private LinearLayout rankMetricChipRow;
     private LinearLayout rankControlContainer;
     private final ArrayList<TextView> seasonChips = new ArrayList<>();
@@ -763,7 +765,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v331", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v333", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -1568,6 +1570,7 @@ public class MainActivity extends Activity {
 
     private void renderHomeLiveMatchupsGames(ArrayList<LiveGame> games) {
         if (homeLiveMatchupsBox == null) return;
+        lastRenderedSlate = games;
         homeLiveMatchupsBox.removeAllViews();
         int count = games == null ? 0 : games.size();
         renderHomeLiveHeader(homeLiveMatchupsBox, count <= 0 ? "See all" : count + " games");
@@ -18252,6 +18255,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
     private void renderLiveMatchupGames(ArrayList<LiveGame> games) {
         if (standingsBox == null || activePrimaryTab != TAB_MATCHUP || matchupPathMode != MATCHUP_PATH_LIVE || matchupResultMode) return;
+        lastRenderedSlate = games;
         standingsBox.removeAllViews();
 
         LinearLayout panel = new LinearLayout(this);
@@ -18329,6 +18333,69 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         standingsBox.addView(panel, matchWrap());
     }
 
+
+    // v333: fetch a final game's standout bat once, cache it, and refresh the tile list so it shows.
+    private final java.util.Set<Integer> finalStandoutInFlight = java.util.Collections.synchronizedSet(new java.util.HashSet<>());
+    private void lazyFetchFinalStandout(LiveGame game) {
+        if (game == null || game.gamePk == 0) return;
+        if (game.finalStandout != null) return;
+        if (!finalStandoutInFlight.add(game.gamePk)) return; // already fetching
+        io.execute(() -> {
+            String standout = "";
+            try {
+                String bx = httpGet("https://statsapi.mlb.com/api/v1/game/" + game.gamePk + "/boxscore");
+                if (bx != null && !bx.trim().isEmpty()) {
+                    JSONObject root = new JSONObject(bx);
+                    JSONObject teams = root.optJSONObject("teams");
+                    int bestScore = -1;
+                    if (teams != null) {
+                        for (String side : new String[] { "away", "home" }) {
+                            JSONObject t = teams.optJSONObject(side);
+                            if (t == null) continue;
+                            JSONObject players = t.optJSONObject("players");
+                            if (players == null) continue;
+                            java.util.Iterator<String> keys = players.keys();
+                            while (keys.hasNext()) {
+                                JSONObject pl = players.optJSONObject(keys.next());
+                                if (pl == null) continue;
+                                JSONObject bat = pl.optJSONObject("stats") == null ? null : pl.optJSONObject("stats").optJSONObject("batting");
+                                if (bat == null) continue;
+                                int ab = bat.optInt("atBats", 0), h = bat.optInt("hits", 0);
+                                if (ab == 0 && h == 0) continue;
+                                int hr = bat.optInt("homeRuns", 0), rbi = bat.optInt("rbi", 0);
+                                int score = hr * 4 + rbi * 2 + h;
+                                if (score > bestScore) {
+                                    bestScore = score;
+                                    JSONObject person = pl.optJSONObject("person");
+                                    String nm = person == null ? "" : lastNameOnly(person.optString("fullName", ""));
+                                    standout = nm + " " + batLineFromStats(bat);
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (Exception ignored) { }
+            game.finalStandout = standout; // "" marks "fetched, nothing notable" so we don't refetch
+            finalStandoutInFlight.remove(game.gamePk);
+            main.post(this::refreshVisibleGameTiles);
+        });
+    }
+
+    private boolean tileRefreshQueued = false;
+    private void refreshVisibleGameTiles() {
+        if (tileRefreshQueued) return;
+        tileRefreshQueued = true;
+        main.postDelayed(() -> {
+            tileRefreshQueued = false;
+            if (lastRenderedSlate == null) return;
+            if (activePrimaryTab == TAB_HOME && homeLiveMatchupsBox != null) {
+                renderHomeLiveMatchupsGames(lastRenderedSlate);
+            } else if (activePrimaryTab == TAB_MATCHUP && activeLiveGameMenu == null
+                    && standingsBox != null && standingsBox.getVisibility() == View.VISIBLE) {
+                renderLiveMatchupGames(lastRenderedSlate);
+            }
+        }, 250);
+    }
 
 private View liveGameCard(LiveGame game) {
     Team away = teamForLiveGame(game.awayTeamId, game.awayName, game.awayAbbr);
@@ -18408,6 +18475,24 @@ private View liveGameCard(LiveGame game) {
             liveRow.addView(basesT, new LinearLayout.LayoutParams(-2, -2));
         }
         content.addView(liveRow, matchWrap());
+    }
+
+    // v333: finished games — show the game's standout bat in the freed space. Fetched lazily and
+    // cached on the game; if not yet available, kick off a background fetch that refreshes the list.
+    boolean isFinalTile = "Final".equals(game.statusLabel());
+    if (isFinalTile) {
+        if (game.finalStandout != null && !game.finalStandout.isEmpty()) {
+            LinearLayout fRow = new LinearLayout(this);
+            fRow.setOrientation(LinearLayout.HORIZONTAL);
+            fRow.setGravity(Gravity.CENTER_VERTICAL);
+            fRow.setPadding(0, dp(9), 0, 0);
+            TextView star = text("★ " + game.finalStandout, 10, Color.argb(230, 247, 197, 77), true);
+            star.setSingleLine(true); star.setEllipsize(TextUtils.TruncateAt.END);
+            fRow.addView(star, matchWrap());
+            content.addView(fRow, matchWrap());
+        } else {
+            lazyFetchFinalStandout(game);
+        }
     }
 
     return card;
@@ -20225,6 +20310,18 @@ private View liveGameCard(LiveGame game) {
             }
             @Override public void onRelease(float dx) {
                 float moved = currentCard.getTranslationX();
+                // v333: TAB OVERSCROLL. When following the live AB (no newer AB to reveal), a left
+                // overscroll switches to the next sub-tab (Tracker→Win Prob→Box Score). A right
+                // overscroll from the live AB with no older-AB pull switches toward the previous tab.
+                // Only triggers at the live edge so it never fights the AB carousel.
+                boolean atLiveEdge = !hasNext; // center == last AB
+                if (atLiveEdge && moved < -screenW * 0.30f) {
+                    if (advanceLiveSubTab(game, +1)) return; // moved to next tab; this view is replaced
+                }
+                boolean atOldestEdge = !hasPrev;
+                if (atOldestEdge && moved > screenW * 0.30f) {
+                    if (advanceLiveSubTab(game, -1)) return;
+                }
                 int target = center;
                 if (moved < -screenW * 0.28f && hasNext) target = center + 1;
                 else if (moved > screenW * 0.28f && hasPrev) target = center - 1;
@@ -20245,6 +20342,42 @@ private View liveGameCard(LiveGame game) {
             }
         });
         return host;
+    }
+
+    // v333: wrap a static sub-tab's content (Win Prob, Box Score) so a horizontal swipe switches
+    // sub-tabs, mirroring the Tracker's overscroll. Left = toward Box Score, right = toward Tracker.
+    private SwipePagerFrame wrapInSubTabSwiper(LiveGame game, View content) {
+        final SwipePagerFrame frame = new SwipePagerFrame(this);
+        frame.addView(content, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT));
+        final int screenW = getResources().getDisplayMetrics().widthPixels;
+        frame.setPager(new TrackerPagerCb() {
+            @Override public void onDrag(float dx) {
+                // light follow with rubber-banding (these tabs don't reveal neighbours)
+                content.setTranslationX(dx * 0.4f);
+            }
+            @Override public void onRelease(float dx) {
+                content.animate().translationX(0f).setDuration(180)
+                        .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
+                if (dx < -screenW * 0.22f) advanceLiveSubTab(game, +1);      // toward Box Score
+                else if (dx > screenW * 0.22f) advanceLiveSubTab(game, -1);  // toward Tracker
+            }
+        });
+        return frame;
+    }
+
+    // v333: move between the live sub-tabs (Tracker ↔ Win Prob ↔ Box Score) via carousel overscroll.
+    // dir +1 = toward Box Score, -1 = toward Tracker. Returns true if it switched.
+    private boolean advanceLiveSubTab(LiveGame game, int dir) {
+        String[] order = { "tracker", "prob", "box" };
+        int cur = 0;
+        for (int i = 0; i < order.length; i++) if (order[i].equals(gameHubLiveSub)) { cur = i; break; }
+        int next = cur + dir;
+        if (next < 0 || next >= order.length) return false; // at an end — nothing to switch to
+        if (!"tracker".equals(order[next])) stopLiveTrackerPolling();
+        gameHubLiveSub = order[next];
+        switchGameHubView(game);
+        return true;
     }
 
     // v317: scroll so the LIVE/MATCHUPS header sits at the top of the viewport — frames the whole
@@ -21772,11 +21905,16 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         if ("prob".equals(gameHubLiveSub)) {
             LinearLayout wpHost = new LinearLayout(this);
             wpHost.setOrientation(LinearLayout.VERTICAL);
-            LinearLayout.LayoutParams wpLp = matchWrap(); wpLp.setMargins(dp(12), 0, dp(12), dp(6));
-            panel.addView(wpHost, wpLp);
             loadWinProbability(game, wpHost, awayPalette, homePalette);
+            SwipePagerFrame swipeWrap = wrapInSubTabSwiper(game, wpHost);
+            LinearLayout.LayoutParams wpLp = matchWrap(); wpLp.setMargins(dp(12), 0, dp(12), dp(6));
+            panel.addView(swipeWrap, wpLp);
         } else if ("box".equals(gameHubLiveSub)) {
-            renderBoxTab(panel, game, awayPalette, homePalette);
+            LinearLayout boxHost = new LinearLayout(this);
+            boxHost.setOrientation(LinearLayout.VERTICAL);
+            renderBoxTab(boxHost, game, awayPalette, homePalette);
+            SwipePagerFrame swipeWrap = wrapInSubTabSwiper(game, boxHost);
+            panel.addView(swipeWrap, matchWrap()); // renderBoxTab already insets its own host
         } else {
             LinearLayout trackerHost = new LinearLayout(this);
             trackerHost.setOrientation(LinearLayout.VERTICAL);
@@ -26055,6 +26193,21 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
                 live.homePitcher = pitcherName(homeNode == null ? null : homeNode.optJSONObject("probablePitcher"));
                 live.awayRecord = recordFromNode(awayNode);
                 live.homeRecord = recordFromNode(homeNode);
+                // v332: capture live state from the hydrated linescore so in-progress tiles can show
+                // inning · outs · baserunners. (This is the parser the tiles actually use — the
+                // separate parseLiveGameScheduleNode is only used by the single-game refresh path.)
+                JSONObject ls = g.optJSONObject("linescore");
+                if (ls != null) {
+                    live.sitInning = ls.optInt("currentInning", 0);
+                    live.sitInningState = ls.optString("inningState", "");
+                    live.sitOuts = ls.optInt("outs", 0);
+                    JSONObject off = ls.optJSONObject("offense");
+                    if (off != null) {
+                        live.onFirst = off.optJSONObject("first") != null;
+                        live.onSecond = off.optJSONObject("second") != null;
+                        live.onThird = off.optJSONObject("third") != null;
+                    }
+                }
                 out.add(live);
             }
         }
@@ -27079,6 +27232,8 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         java.util.HashMap<Integer, String> pitcherGameLines = new java.util.HashMap<>();
         // v329: end-of-game summary for the victory card (filled when final).
         GameSummary summary = null;
+        // v333: cached standout bat for FINAL tiles ("Judge 3-4, 2 HR, 5 RBI"). Lazily fetched.
+        String finalStandout = null;
         LiveFeed liveFeed = new LiveFeed();     // v273: full pitch/play tracker
         int viewAtBatIndex = -1;                // which AB the strike-zone is showing (-1 = current)
         // v249: win probability with frame-of-reference data. Each play keeps home win% plus
