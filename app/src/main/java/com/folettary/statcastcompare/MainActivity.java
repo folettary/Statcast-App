@@ -762,7 +762,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v328", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v329", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -15591,13 +15591,32 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     }
 
     private String httpGet(String urlString) throws Exception {
-        String cached = textCache.get(urlString);
-        if (cached != null) return cached;
-
         String fileKey = "hc_" + Integer.toHexString(urlString.hashCode()) + ".txt";
         File cacheFile = new File(getHttpCacheDir(), fileKey);
         long now = System.currentTimeMillis();
         long ttl = cacheTtlMs(urlString);
+
+        // v329: the in-memory cache now RESPECTS the TTL. Previously a memory hit short-circuited
+        // with no age check, so once a URL was fetched it was served forever — which is why live
+        // data went stale until a manual refresh. We only trust the memory copy if the backing disk
+        // file is still within its TTL (and for very short-TTL live URLs we always re-validate).
+        String cached = textCache.get(urlString);
+        if (cached != null) {
+            boolean freshEnough;
+            if (cacheFile.exists()) {
+                long age = now - cacheFile.lastModified();
+                freshEnough = age < ttl;
+            } else {
+                // no disk file to date it → only trust memory for long-TTL (static) data
+                freshEnough = ttl >= 60L * 1000L * 30L; // 30 min+
+            }
+            if (freshEnough) return cached;
+            // expired in memory: serve stale instantly but refresh in the background (SWR)
+            if (cacheFile.exists()) scheduleHttpRefresh(urlString, cacheFile);
+            else { textCache.remove(urlString); }
+            if (freshEnoughToServeStale(urlString, cacheFile, now, ttl)) return cached;
+        }
+
         if (cacheFile.exists()) {
             long age = now - cacheFile.lastModified();
             if (age < ttl) {
@@ -15607,13 +15626,6 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                     return diskText;
                 }
             } else if (age < ttl * 4 || (ttl >= 6L * 60L * 60L * 1000L && age < ttl + 7L * 24L * 60L * 60L * 1000L)) {
-                // v172: stale-while-revalidate. If the cache is expired but not ancient, serve it
-                // immediately so the screen builds instantly, and refresh disk + memory caches in
-                // the background so the next build of that screen is fresh. Previously an expired
-                // cache meant the user sat on the skeleton waiting for the full network round trip.
-                // v175: the window is extended to expiry+7d for non-live data, so even a user who
-                // opens the app after a week away renders instantly off the last data while it
-                // refreshes. Live (short-TTL) URLs keep the tight 4x window.
                 String staleText = readCacheFile(cacheFile);
                 if (staleText != null && !staleText.isEmpty()) {
                     textCache.put(urlString, staleText);
@@ -15623,18 +15635,25 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             }
         }
 
-        // v175: per-URL in-flight dedup. Parallel comparison branches can request the same URL
-        // (e.g. the recent-seasons branch and the main season branch both needing this season's
-        // team stats); previously both downloaded it because textCache only fills on completion.
         Object lock = httpLocks.computeIfAbsent(urlString, k -> new Object());
         synchronized (lock) {
             String winner = textCache.get(urlString);
-            if (winner != null) return winner;
+            if (winner != null) {
+                // re-check freshness under lock to avoid a racing thread re-serving stale
+                if (cacheFile.exists() && (now - cacheFile.lastModified()) < ttl) return winner;
+            }
             String text = httpFetchNetwork(urlString);
             textCache.put(urlString, text);
             writeCacheFile(cacheFile, text);
             return text;
         }
+    }
+
+    // Whether an expired in-memory copy is recent enough to serve immediately while revalidating.
+    private boolean freshEnoughToServeStale(String urlString, File cacheFile, long now, long ttl) {
+        if (!cacheFile.exists()) return false;
+        long age = now - cacheFile.lastModified();
+        return age < ttl * 4 || (ttl >= 6L * 60L * 60L * 1000L && age < ttl + 7L * 24L * 60L * 60L * 1000L);
     }
 
     private void scheduleHttpRefresh(String urlString, File cacheFile) {
@@ -15853,7 +15872,17 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         String v = safe(s).trim();
         if (v.isEmpty()) return v;
         String[] parts = v.split("\\s+");
-        return parts.length == 0 ? v : parts[parts.length - 1];
+        if (parts.length == 0) return v;
+        int last = parts.length - 1;
+        // Treat a trailing generational suffix as part of the surname so "Fernando Tatis Jr."
+        // becomes "Tatis Jr." not just "Jr.".
+        String tail = parts[last].replace(".", "").toLowerCase(Locale.US);
+        boolean isSuffix = tail.equals("jr") || tail.equals("sr") || tail.equals("ii")
+                || tail.equals("iii") || tail.equals("iv") || tail.equals("v");
+        if (isSuffix && parts.length >= 2) {
+            return parts[last - 1] + " " + parts[last];
+        }
+        return parts[last];
     }
     private Double pick(Map<String, String> row, String... names) {
         for (String n : names) if (row.containsKey(n)) return num(row.get(n));
@@ -18213,10 +18242,6 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         titleRow.addView(count);
         panel.addView(titleRow, matchWrap());
 
-        TextView sub = text("Pick any matchup to see team edges, starters, bullpens, and key hitters.", 11, INK_DIM, false);
-        sub.setPadding(0, dp(5), 0, dp(7));
-        panel.addView(sub, matchWrap());
-
         panel.addView(buildLiveDayNav(), matchWrap());
 
         if (games == null || games.isEmpty()) {
@@ -18609,7 +18634,107 @@ private View liveGameCard(LiveGame game) {
             // fails or is unavailable, the cards simply omit xBA (EV/LA still show).
             try { attachSavantXba(game, feed); } catch (Exception ignored) { }
             try { attachDueUpLines(game); } catch (Exception ignored) { }
+            try { if ("Final".equals(game.statusLabel())) buildGameSummary(game, liveData); } catch (Exception ignored) { }
         } catch (Exception ignored) { }
+    }
+
+    // v329: assemble the end-of-game key players for the victory card from the feed's decisions
+    // (winning/losing/save pitcher) and boxscore (their lines + each side's top bat).
+    private void buildGameSummary(LiveGame game, JSONObject liveData) throws Exception {
+        if (game == null || liveData == null) return;
+        JSONObject decisions = liveData.optJSONObject("decisions");
+        JSONObject boxscore = liveData.optJSONObject("boxscore");
+        if (boxscore == null) {
+            String bx = httpGetFresh("https://statsapi.mlb.com/api/v1/game/" + game.gamePk + "/boxscore");
+            if (bx != null && !bx.trim().isEmpty()) boxscore = new JSONObject(bx);
+        }
+        if (boxscore == null) return;
+        boolean awayWon = game.awayScore > game.homeScore;
+        GameSummary sum = new GameSummary();
+
+        // index player nodes (id → {name, batting, pitching, side})
+        JSONObject teams = boxscore.optJSONObject("teams");
+        java.util.HashMap<Integer, JSONObject> nodeById = new java.util.HashMap<>();
+        java.util.HashMap<Integer, Boolean> winSideById = new java.util.HashMap<>();
+        if (teams != null) {
+            for (String side : new String[] { "away", "home" }) {
+                JSONObject t = teams.optJSONObject(side);
+                if (t == null) continue;
+                boolean isWinSide = side.equals("away") ? awayWon : !awayWon;
+                JSONObject players = t.optJSONObject("players");
+                if (players == null) continue;
+                java.util.Iterator<String> keys = players.keys();
+                while (keys.hasNext()) {
+                    JSONObject pl = players.optJSONObject(keys.next());
+                    if (pl == null) continue;
+                    JSONObject person = pl.optJSONObject("person");
+                    int id = person == null ? 0 : person.optInt("id", 0);
+                    if (id == 0) continue;
+                    nodeById.put(id, pl);
+                    winSideById.put(id, isWinSide);
+                }
+            }
+        }
+
+        if (decisions != null) {
+            sum.winPitcher = keyPitcherFrom(decisions.optJSONObject("winner"), "W", nodeById, winSideById);
+            sum.losePitcher = keyPitcherFrom(decisions.optJSONObject("loser"), "L", nodeById, winSideById);
+            sum.savePitcher = keyPitcherFrom(decisions.optJSONObject("save"), "SV", nodeById, winSideById);
+        }
+        // top bat per side by a simple score (HR*4 + RBI*2 + H)
+        sum.winBat = topBatFromNodes(nodeById, winSideById, true);
+        sum.loseBat = topBatFromNodes(nodeById, winSideById, false);
+        game.summary = sum;
+    }
+
+    private KeyPlayer keyPitcherFrom(JSONObject personNode, String role,
+            java.util.HashMap<Integer, JSONObject> nodeById, java.util.HashMap<Integer, Boolean> winSideById) {
+        if (personNode == null) return null;
+        int id = personNode.optInt("id", 0);
+        if (id == 0) return null;
+        KeyPlayer kp = new KeyPlayer();
+        kp.id = id; kp.role = role;
+        kp.name = lastNameOnly(personNode.optString("fullName", ""));
+        Boolean ws = winSideById.get(id); kp.winningSide = ws != null && ws;
+        JSONObject node = nodeById.get(id);
+        if (node != null) {
+            JSONObject pit = node.optJSONObject("stats") == null ? null : node.optJSONObject("stats").optJSONObject("pitching");
+            kp.line = pitcherLineFromStats(pit);
+        }
+        return kp;
+    }
+
+    private KeyPlayer topBatFromNodes(java.util.HashMap<Integer, JSONObject> nodeById,
+            java.util.HashMap<Integer, Boolean> winSideById, boolean wantWinSide) {
+        KeyPlayer best = null; int bestScore = -1;
+        for (java.util.Map.Entry<Integer, JSONObject> e : nodeById.entrySet()) {
+            Boolean ws = winSideById.get(e.getKey());
+            if (ws == null || ws != wantWinSide) continue;
+            JSONObject node = e.getValue();
+            JSONObject bat = node.optJSONObject("stats") == null ? null : node.optJSONObject("stats").optJSONObject("batting");
+            if (bat == null) continue;
+            int ab = bat.optInt("atBats", 0), h = bat.optInt("hits", 0);
+            if (ab == 0 && h == 0) continue; // didn't bat
+            int hr = bat.optInt("homeRuns", 0), rbi = bat.optInt("rbi", 0);
+            int score = hr * 4 + rbi * 2 + h;
+            if (score > bestScore) {
+                bestScore = score;
+                KeyPlayer kp = new KeyPlayer();
+                kp.id = e.getKey(); kp.winningSide = wantWinSide;
+                JSONObject person = node.optJSONObject("person");
+                kp.name = person == null ? "" : lastNameOnly(person.optString("fullName", ""));
+                kp.role = "BAT"; kp.line = batLineFromStats(bat);
+                best = kp;
+            }
+        }
+        // for losing side, only return if truly notable (HR or 3+ RBI or 3+ hits)
+        if (best != null && !wantWinSide) {
+            String l = safe(best.line).toLowerCase(Locale.US);
+            boolean notable = l.contains("hr") || l.contains("3 rbi") || l.contains("4 rbi")
+                    || l.contains("3-") || l.contains("4-") || l.contains("5-");
+            if (!notable) return null;
+        }
+        return (best != null && bestScore > 0) ? best : null;
     }
 
     // v328: fill each due-up batter's today's line (e.g. "1-3, BB, RBI") from the live boxscore.
@@ -18635,12 +18760,33 @@ private View liveGameCard(LiveGame game) {
                 if (id == 0) continue;
                 JSONObject bat = pl.optJSONObject("stats") == null ? null : pl.optJSONObject("stats").optJSONObject("batting");
                 lineById.put(id, batLineFromStats(bat));
+                JSONObject pit = pl.optJSONObject("stats") == null ? null : pl.optJSONObject("stats").optJSONObject("pitching");
+                if (pit != null && pit.has("inningsPitched")) {
+                    game.pitcherGameLines.put(id, pitcherLineFromStats(pit));
+                }
             }
         }
         for (DueUpBatter db : game.dueUp) {
             String line = lineById.get(db.id);
             if (line != null) db.line = line;
         }
+    }
+
+    // Compact pitcher game line from a boxscore pitching stats node.
+    private String pitcherLineFromStats(JSONObject pit) {
+        if (pit == null) return "";
+        String ip = pit.optString("inningsPitched", "0.0");
+        int k = pit.optInt("strikeOuts", 0);
+        int h = pit.optInt("hits", 0);
+        int er = pit.optInt("earnedRuns", 0);
+        int bb = pit.optInt("baseOnBalls", 0);
+        StringBuilder sb = new StringBuilder();
+        sb.append(ip).append(" IP");
+        sb.append(" · ").append(k).append(" K");
+        sb.append(" · ").append(h).append(" H");
+        sb.append(" · ").append(er).append(" ER");
+        if (bb > 0) sb.append(" · ").append(bb).append(" BB");
+        return sb.toString();
     }
 
     // Compact today's line from a boxscore batting stats node.
@@ -19199,12 +19345,19 @@ private View liveGameCard(LiveGame game) {
             abNav.setGravity(Gravity.CENTER_HORIZONTAL);
             LinearLayout.LayoutParams abLp = matchWrap(); abLp.setMargins(0, 0, 0, dp(1));
             // title row
-            TextView abTitle = text(batterNm + (ab.result.isEmpty() ? "" : " — " + ab.result), 13, INK, true);
-            abTitle.setGravity(Gravity.CENTER);
-            abNav.addView(abTitle, matchWrap());
-            TextView abSub = text((abTopHalf ? "Top " : "Bot ") + ordinalNum(abInning) + " · vs " + pitcherNm, 9, INK_DIM, true);
-            abSub.setGravity(Gravity.CENTER);
-            abNav.addView(abSub, matchWrap());
+            // Under the outs: the current pitcher's game line (IP/K/H/ER) — useful, non-duplicative
+            // info, rather than repeating the batter/result already shown in the hero + result card.
+            String pLine = game.pitcherGameLines.get(pitcherId);
+            if (pLine != null && !pLine.isEmpty()) {
+                TextView pStat = text(lastNameOnly(pitcherNm) + " · " + pLine, 11, INK, true);
+                pStat.setGravity(Gravity.CENTER); pStat.setSingleLine(true); pStat.setEllipsize(TextUtils.TruncateAt.END);
+                abNav.addView(pStat, matchWrap());
+            } else {
+                // fallback before the boxscore arrives: minimal context
+                TextView pStat = text(lastNameOnly(pitcherNm) + " pitching", 11, INK_DIM, true);
+                pStat.setGravity(Gravity.CENTER);
+                abNav.addView(pStat, matchWrap());
+            }
             // dots strip + inline LIVE pill (when browsing a past AB) — kept on ONE row so it never
             // eats into the tracking window below.
             LinearLayout dotsRow = new LinearLayout(this);
@@ -19299,12 +19452,17 @@ private View liveGameCard(LiveGame game) {
             boolean isFinalGame = "Final".equals(game.statusLabel());
             String inState = safe(game.sitInningState).toLowerCase(Locale.US);
             boolean betweenInnings = !isFinalGame && (inState.contains("middle") || inState.contains("end"));
-            if (isFinalGame) {
+            if (isFinalGame && liveAb) {
                 View vc = victoryCard(game, activeLiveTrackerAwayPal, activeLiveTrackerHomePal);
                 animateResultIn(vc, ("final-" + game.gamePk + "-" + game.awayScore + "-" + game.homeScore).hashCode());
                 card.addView(vc, bannerLp());
             } else if (betweenInnings && liveAb && game.dueUp != null && !game.dueUp.isEmpty()) {
-                View bic = betweenInningsCard(game, batColor);
+                // color the due-up card by the team COMING UP (not the one that just batted)
+                boolean topUp = game.dueUp.get(0).topComingUp;
+                TeamPalette upPal = topUp ? activeLiveTrackerAwayPal : activeLiveTrackerHomePal;
+                if (upPal == null) upPal = neutralPalette();
+                int upColor = ensureReadableColor(upPal.primary, 150);
+                View bic = betweenInningsCard(game, upColor);
                 animateResultIn(bic, ("dueup-" + game.sitInning + "-" + inState).hashCode());
                 card.addView(bic, bannerLp());
             } else if (ab != null && ab.complete && !safe(ab.result).isEmpty()) {
@@ -19554,6 +19712,10 @@ private View liveGameCard(LiveGame game) {
 
     // v328: victory card shown when the game is final — winning team color gradient, big logo
     // watermark, FINAL + score + both records, and the game's standout performer.
+    // v329: victory card shown when the game is final AND we're following the last batter. Winning
+    // team color gradient, faint logo watermark, FINAL + score + record, plus key players: winning
+    // & losing pitcher, save (if any), top winning-team bat, and a losing-team standout only if
+    // their game was truly notable.
     private View victoryCard(LiveGame game, TeamPalette awayPalette, TeamPalette homePalette) {
         boolean awayWon = game.awayScore > game.homeScore;
         TeamPalette winPal = awayWon ? awayPalette : homePalette;
@@ -19562,7 +19724,6 @@ private View liveGameCard(LiveGame game) {
         String winName = awayWon ? displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr)
                                  : displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr);
         String winRecord = awayWon ? game.awayRecord : game.homeRecord;
-        String loseRecord = awayWon ? game.homeRecord : game.awayRecord;
 
         FrameLayout wrap = new FrameLayout(this);
         wrap.setBackground(roundedGradientStroke(new int[] {
@@ -19571,7 +19732,6 @@ private View liveGameCard(LiveGame game) {
                 mixColor(winPal.primary, Color.rgb(7, 12, 21), 0.35f)
         }, 18, Color.argb(150, Color.red(accent), Color.green(accent), Color.blue(accent)), 2));
 
-        // logo watermark, faint, right side
         ImageView logo = new ImageView(this);
         logo.setAlpha(0.16f);
         logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
@@ -19595,59 +19755,69 @@ private View liveGameCard(LiveGame game) {
         winLine.setLetterSpacing(0.01f); winLine.setPadding(0, dp(2), 0, 0);
         col.addView(winLine, matchWrap());
 
-        TextView score = text(game.awayScore + " – " + game.homeScore, 15, accent, true);
+        TextView score = text(game.awayScore + " \u2013 " + game.homeScore, 15, accent, true);
         score.setPadding(0, dp(3), 0, 0);
         col.addView(score, matchWrap());
 
-        TextView recs = text(safe(winRecord).isEmpty() ? "" : (winName + " now " + winRecord), 9, INK_DIM, true);
-        if (!safe(winRecord).isEmpty()) { recs.setPadding(0, dp(6), 0, 0); col.addView(recs, matchWrap()); }
+        if (!safe(winRecord).isEmpty()) {
+            TextView recs = text(winName + " now " + winRecord, 9, INK_DIM, true);
+            recs.setPadding(0, dp(5), 0, 0);
+            col.addView(recs, matchWrap());
+        }
 
-        // standout performer of the game
-        DueUpBatter star = gameTopPerformer(game);
-        if (star != null) {
-            LinearLayout starRow = new LinearLayout(this);
-            starRow.setOrientation(LinearLayout.HORIZONTAL);
-            starRow.setGravity(Gravity.CENTER_VERTICAL);
-            starRow.setPadding(0, dp(10), 0, 0);
-            FrameLayout ring = new FrameLayout(this);
-            ImageView img = new ImageView(this);
-            img.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            GradientDrawable rb = new GradientDrawable(); rb.setShape(GradientDrawable.OVAL);
-            rb.setColor(Color.argb(40, 255, 255, 255));
-            rb.setStroke(dp(2), Color.argb(160, Color.red(accent), Color.green(accent), Color.blue(accent)));
-            ring.setBackground(rb);
-            ring.addView(img, new FrameLayout.LayoutParams(dp(34), dp(34)));
-            loadPlayerImage(star.id, img);
-            starRow.addView(ring, new LinearLayout.LayoutParams(dp(38), dp(38)));
-            LinearLayout sc = new LinearLayout(this); sc.setOrientation(LinearLayout.VERTICAL);
-            sc.setPadding(dp(8), 0, 0, 0);
-            TextView sn = text(star.name, 11, INK, true); sc.addView(sn, matchWrap());
-            TextView sl = text(star.line, 9, accent, true); sc.addView(sl, matchWrap());
-            starRow.addView(sc, new LinearLayout.LayoutParams(-2, -2));
-            col.addView(starRow, matchWrap());
+        GameSummary s = game.summary;
+        if (s != null) {
+            addKeyPlayerRow(col, s.winPitcher, accent);
+            if (s.savePitcher != null) addKeyPlayerRow(col, s.savePitcher, accent);
+            addKeyPlayerRow(col, s.losePitcher, accent);
+            addKeyPlayerRow(col, s.winBat, accent);
+            addKeyPlayerRow(col, s.loseBat, accent); // null unless notable
         }
 
         wrap.addView(col, new FrameLayout.LayoutParams(-1, -2));
         return wrap;
     }
 
-    // Pick a standout performer from the due-up lines we already pulled (best line by HR/RBI/hits).
-    // Lightweight heuristic — a fuller "player of the game" would need the full boxscore scan.
-    private DueUpBatter gameTopPerformer(LiveGame game) {
-        DueUpBatter best = null; int bestScore = -1;
-        if (game.dueUp != null) {
-            for (DueUpBatter db : game.dueUp) {
-                String l = safe(db.line).toLowerCase(Locale.US);
-                int sc = 0;
-                if (l.contains("hr")) sc += 10;
-                if (l.contains("rbi")) sc += 5;
-                // leading digit of "H-AB" as a rough hit count
-                if (l.length() > 0 && Character.isDigit(l.charAt(0))) sc += (l.charAt(0) - '0');
-                if (sc > bestScore) { bestScore = sc; best = db; }
-            }
+    // One compact key-player row: portrait + role badge + name + line.
+    private void addKeyPlayerRow(LinearLayout col, KeyPlayer kp, int accent) {
+        if (kp == null) return;
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0, dp(8), 0, 0);
+
+        FrameLayout ring = new FrameLayout(this);
+        ImageView img = new ImageView(this);
+        img.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        GradientDrawable rb = new GradientDrawable(); rb.setShape(GradientDrawable.OVAL);
+        rb.setColor(Color.argb(40, 255, 255, 255));
+        rb.setStroke(dp(2), Color.argb(160, Color.red(accent), Color.green(accent), Color.blue(accent)));
+        ring.setBackground(rb);
+        ring.addView(img, new FrameLayout.LayoutParams(dp(32), dp(32)));
+        loadPlayerImage(kp.id, img);
+        row.addView(ring, new LinearLayout.LayoutParams(dp(36), dp(36)));
+
+        // role badge (W / L / SV / BAT)
+        TextView badge = text(kp.role, 8, accent, true);
+        badge.setLetterSpacing(0.06f);
+        badge.setPadding(dp(7), dp(2), dp(7), dp(2));
+        badge.setBackground(roundedStroke(Color.argb(30, Color.red(accent), Color.green(accent), Color.blue(accent)),
+                Color.argb(120, Color.red(accent), Color.green(accent), Color.blue(accent)), 999, 1));
+        LinearLayout.LayoutParams bLp = new LinearLayout.LayoutParams(-2, -2);
+        bLp.setMargins(dp(8), 0, dp(8), 0);
+        row.addView(badge, bLp);
+
+        LinearLayout txt = new LinearLayout(this); txt.setOrientation(LinearLayout.VERTICAL);
+        TextView nm = text(kp.name, 11, INK, true); nm.setSingleLine(true); nm.setEllipsize(TextUtils.TruncateAt.END);
+        txt.addView(nm, matchWrap());
+        if (!safe(kp.line).isEmpty()) {
+            TextView ln = text(kp.line, 8, INK_DIM, true); ln.setSingleLine(true); ln.setEllipsize(TextUtils.TruncateAt.END);
+            txt.addView(ln, matchWrap());
         }
-        return (best != null && bestScore > 0) ? best : null;
+        row.addView(txt, new LinearLayout.LayoutParams(0, -2, 1f));
+        col.addView(row, matchWrap());
     }
+
 
     private View resultCard(LiveAtBat ab, LivePitch pitch, int batColor) {
         boolean pitchMode = pitch != null;
@@ -21527,6 +21697,12 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
                 if (host.getParent() == null) return;
                 host.removeAllViews();
                 if (fbox == null) { host.addView(text("Box score unavailable.", 11, INK_DIM, false), matchWrap()); return; }
+                // Line score at the top of the Box Score tab — the inning-by-inning R/H/E grid.
+                if (game.lineInnings != null && !game.lineInnings.isEmpty()) {
+                    View ls = compactLineScoreCard(game, awayPalette, homePalette);
+                    LinearLayout.LayoutParams lsLp = matchWrap(); lsLp.setMargins(0, 0, 0, dp(8));
+                    host.addView(ls, lsLp);
+                }
                 host.addView(buildBoxScoreSheet(game, fbox, awayPalette, homePalette), matchWrap());
             });
         });
@@ -25748,7 +25924,25 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
                 out.add(live);
             }
         }
+        sortGamesByStatus(out);
         return out;
+    }
+
+    // v329: order the slate so live action is always on top:
+    //   1 in progress / delayed, 2 not started, 3 final, 4 postponed. Ties keep schedule order.
+    private void sortGamesByStatus(ArrayList<LiveGame> games) {
+        if (games == null) return;
+        java.util.Collections.sort(games, (a, b) -> Integer.compare(gameStatusRank(a), gameStatusRank(b)));
+    }
+    private int gameStatusRank(LiveGame g) {
+        if (g == null) return 5;
+        String s = safe(g.detailedState).toLowerCase(Locale.US);
+        if (s.isEmpty()) s = safe(g.abstractState).toLowerCase(Locale.US);
+        if (s.contains("postpone")) return 4;
+        if (s.contains("final") || s.contains("game over") || s.contains("completed")) return 3;
+        if (s.contains("in progress") || s.contains("live") || s.contains("delay") || s.contains("warmup")) return 1;
+        // scheduled / pre-game / everything else not-yet-started
+        return 2;
     }
 
     private String pitcherName(JSONObject obj) {
@@ -26698,6 +26892,12 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         int currentAtBatIndex = -1;  // index into atBats of the live/most-recent AB
     }
 
+    static class KeyPlayer {
+        int id; String name = ""; String role = ""; String line = ""; boolean winningSide;
+    }
+    static class GameSummary {
+        KeyPlayer winPitcher, losePitcher, savePitcher, winBat, loseBat;
+    }
     static class DueUpBatter {
         int id;
         String name = "";
@@ -26738,6 +26938,10 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         int sitBatterId = 0, sitPitcherId = 0; // v273: ids for portraits
         // v328: next 3 batters due up (shown between innings), each with today's batting line.
         java.util.ArrayList<DueUpBatter> dueUp = new java.util.ArrayList<>();
+        // v329: current pitcher's game line (e.g. "5.1 IP · 7 K · 3 H · 1 ER"), id-keyed cache.
+        java.util.HashMap<Integer, String> pitcherGameLines = new java.util.HashMap<>();
+        // v329: end-of-game summary for the victory card (filled when final).
+        GameSummary summary = null;
         LiveFeed liveFeed = new LiveFeed();     // v273: full pitch/play tracker
         int viewAtBatIndex = -1;                // which AB the strike-zone is showing (-1 = current)
         // v249: win probability with frame-of-reference data. Each play keeps home win% plus
