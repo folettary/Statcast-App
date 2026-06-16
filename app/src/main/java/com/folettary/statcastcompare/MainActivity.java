@@ -770,7 +770,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v345", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v346", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -18302,15 +18302,15 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 rowLp.setMargins(0, dp(6), 0, 0);
                 panel.addView(row, rowLp);
 
-                LinearLayout.LayoutParams leftLp = new LinearLayout.LayoutParams(0, dp(126), 1);
-                row.addView(liveGameCard(games.get(i)), leftLp);
+                LinearLayout.LayoutParams leftLp = new LinearLayout.LayoutParams(0, dp(140), 1);
+                row.addView(liveGameCard(games.get(i), i), leftLp);
                 if (i + 1 < games.size()) {
-                    LinearLayout.LayoutParams rightLp = new LinearLayout.LayoutParams(0, dp(126), 1);
+                    LinearLayout.LayoutParams rightLp = new LinearLayout.LayoutParams(0, dp(140), 1);
                     rightLp.setMargins(dp(7), 0, 0, 0);
-                    row.addView(liveGameCard(games.get(i + 1)), rightLp);
+                    row.addView(liveGameCard(games.get(i + 1), i + 1), rightLp);
                 } else {
                     Space spacer = new Space(this);
-                    LinearLayout.LayoutParams rightLp = new LinearLayout.LayoutParams(0, dp(126), 1);
+                    LinearLayout.LayoutParams rightLp = new LinearLayout.LayoutParams(0, dp(140), 1);
                     rightLp.setMargins(dp(7), 0, 0, 0);
                     row.addView(spacer, rightLp);
                 }
@@ -18403,6 +18403,10 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     }
 
 private View liveGameCard(LiveGame game) {
+    return liveGameCard(game, 0);
+}
+
+private View liveGameCard(LiveGame game, int slateIndex) {
     Team away = teamForLiveGame(game.awayTeamId, game.awayName, game.awayAbbr);
     Team home = teamForLiveGame(game.homeTeamId, game.homeName, game.homeAbbr);
     TeamPalette awayPalette = away == null ? paletteForAbbr(game.awayAbbr) : paletteForTeam(away);
@@ -18498,6 +18502,24 @@ private View liveGameCard(LiveGame game) {
         } else {
             lazyFetchFinalStandout(game);
         }
+    }
+
+    if (game.isPregame()) {
+        scheduleSlateGameEdgePreviewLoad(game, slateIndex);
+        LiveMatchupEdgePreview edge = liveGameEdgePreview(game);
+        LinearLayout eRow = new LinearLayout(this);
+        eRow.setOrientation(LinearLayout.HORIZONTAL);
+        eRow.setGravity(Gravity.CENTER_VERTICAL);
+        eRow.setPadding(0, dp(8), 0, 0);
+        TextView edgeLabel = text(edge != null && edge.available ? "Game edge" : "Pregame edge", 9,
+                edge != null && edge.available ? Color.argb(232, 247, 249, 252) : INK_DIM, true);
+        edgeLabel.setSingleLine(true);
+        edgeLabel.setEllipsize(TextUtils.TruncateAt.END);
+        eRow.addView(edgeLabel, new LinearLayout.LayoutParams(0, -2, 1));
+        if (edge != null && edge.available && !safe(edge.chip).isEmpty()) {
+            eRow.addView(gameEdgeChipView(edge.chip, edge.accent));
+        }
+        content.addView(eRow, matchWrap());
     }
 
     return card;
@@ -22332,6 +22354,11 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         LiveMatchupEdgePreview ovs = liveEdgePreview(game, "ovs");
         LiveMatchupEdgePreview keyHitters = liveEdgePreview(game, "keyhitters");
         LiveMatchupEdgePreview hotBats = liveEdgePreview(game, "hotbats");
+        LiveMatchupEdgePreview gameEdge = liveGameEdgePreview(game);
+
+        LinearLayout.LayoutParams gameEdgeLp = new LinearLayout.LayoutParams(-1, -2);
+        gameEdgeLp.setMargins(dp(12), 0, dp(12), dp(8));
+        panel.addView(gameEdgeSummaryCard(game, gameEdge, awayPalette, homePalette, accent), gameEdgeLp);
 
         addMatchupHubSection(panel, "GAME READ", "Quick edge summary");
         LinearLayout.LayoutParams overallLp = new LinearLayout.LayoutParams(-1, dp(86));
@@ -22437,13 +22464,22 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         final String caption;
         final String chip;
         final int accent;
+        final int pctA;
+        final int winner;
+        final String strength;
         LiveMatchupEdgePreview(String cacheKey, boolean available, String value, String caption, String chip, int accent) {
+            this(cacheKey, available, value, caption, chip, accent, 50, 0, "even");
+        }
+        LiveMatchupEdgePreview(String cacheKey, boolean available, String value, String caption, String chip, int accent, int pctA, int winner, String strength) {
             this.cacheKey = cacheKey;
             this.available = available;
             this.value = value;
             this.caption = caption;
             this.chip = chip;
             this.accent = accent;
+            this.pctA = pctA;
+            this.winner = winner;
+            this.strength = strength;
         }
     }
 
@@ -22471,6 +22507,120 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
 
     private String liveEdgeCacheKey(LiveGame game, String tileKey) {
         return liveEdgeBaseKey(game) + ":" + safe(tileKey).toLowerCase(Locale.US);
+    }
+
+    private void scheduleSlateGameEdgePreviewLoad(LiveGame game, int slateIndex) {
+        if (game == null || !game.isPregame()) return;
+        LiveMatchupEdgePreview edge = liveGameEdgePreview(game);
+        if (edge != null && edge.available) return;
+        final int delay = Math.min(9000, Math.max(0, slateIndex) * 450);
+        main.postDelayed(() -> {
+            if (activePrimaryTab != TAB_MATCHUP || activeLiveGameMenu != null || matchupPathMode != MATCHUP_PATH_LIVE || matchupResultMode) return;
+            startLiveMatchupEdgePreviewLoad(game);
+        }, delay);
+    }
+
+    private LiveMatchupEdgePreview liveGameEdgePreview(LiveGame game) {
+        if (game == null) return new LiveMatchupEdgePreview(liveEdgeCacheKey(game, "gameedge"), false, "", "", "", Color.rgb(146, 164, 188));
+        String cacheKey = liveEdgeCacheKey(game, "gameedge");
+        String[] keys = new String[] { "ovs", "starters", "overall", "bullpen" };
+        double[] weights = new double[] { 0.35d, 0.25d, 0.20d, 0.20d };
+        double scoreA = 0d;
+        double totalW = 0d;
+        int used = 0;
+        boolean hasDaily = false;
+        int accent = Color.rgb(146, 164, 188);
+        StringBuilder source = new StringBuilder();
+        for (int i = 0; i < keys.length; i++) {
+            LiveMatchupEdgePreview p = liveEdgePreview(game, keys[i]);
+            if (p == null || !p.available) continue;
+            scoreA += p.pctA * weights[i];
+            totalW += weights[i];
+            used++;
+            if ("ovs".equals(keys[i]) || "starters".equals(keys[i]) || "bullpen".equals(keys[i])) hasDaily = true;
+            accent = p.accent;
+            String label = liveGameEdgeSourceName(keys[i]);
+            if (!label.isEmpty()) {
+                if (source.length() > 0) source.append(" + ");
+                source.append(label);
+            }
+        }
+        if (totalW <= 0d || (!hasDaily && used < 3)) {
+            return new LiveMatchupEdgePreview(cacheKey, false, "Pregame matchup read", "Combines team, starter, bullpen, and matchup fit", "", accent);
+        }
+        int pctA = (int)Math.round(scoreA / totalW);
+        if (pctA < 0) pctA = 0;
+        if (pctA > 100) pctA = 100;
+        int winner = Math.abs(pctA - 50) <= 1 ? 0 : (pctA > 50 ? -1 : 1);
+        int winnerPct = winner == 0 ? 50 : Math.max(pctA, 100 - pctA);
+        String strength = livePreviewStrength(winnerPct);
+        if ("even".equals(strength)) winner = 0;
+        String awayAbbr = displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr);
+        String homeAbbr = displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr);
+        String sideAbbr = winner < 0 ? awayAbbr : (winner > 0 ? homeAbbr : "");
+        String chip = winner == 0 ? "EVEN" : sideAbbr + " " + strength.toUpperCase(Locale.US);
+        TeamPalette pal = winner < 0 ? paletteForAbbr(game.awayAbbr) : (winner > 0 ? paletteForAbbr(game.homeAbbr) : null);
+        if (pal != null) accent = pal.primary;
+        String value = winner == 0 ? "No clear pregame lean" : "Pregame matchup read";
+        String caption = source.length() == 0 ? "Combines available matchup reads" : "Combines " + source.toString();
+        return new LiveMatchupEdgePreview(cacheKey, true, value, caption, chip, accent, pctA, winner, strength);
+    }
+
+    private String liveGameEdgeSourceName(String key) {
+        String k = safe(key).toLowerCase(Locale.US);
+        if ("ovs".equals(k)) return "lineup fit";
+        if ("starters".equals(k)) return "starters";
+        if ("overall".equals(k)) return "team profile";
+        if ("bullpen".equals(k)) return "bullpen";
+        return "";
+    }
+
+    private TextView gameEdgeChipView(String chipText, int accent) {
+        TextView chip = text(chipText, 8, Color.WHITE, true);
+        chip.setGravity(Gravity.CENTER);
+        chip.setSingleLine(true);
+        chip.setPadding(dp(6), dp(2), dp(6), dp(2));
+        chip.setBackground(roundedGradientStroke(new int[] {
+                mixColor(accent, Color.rgb(8, 13, 22), 0.18f),
+                mixColor(accent, Color.rgb(8, 13, 22), 0.36f)
+        }, 999, Color.argb(118, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
+        return chip;
+    }
+
+    private View gameEdgeSummaryCard(LiveGame game, LiveMatchupEdgePreview edge, TeamPalette awayPalette, TeamPalette homePalette, int fallbackAccent) {
+        int accent = edge != null && edge.available ? edge.accent : fallbackAccent;
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(12), dp(10), dp(12), dp(10));
+        card.setBackground(roundedGradientStroke(new int[] {
+                Color.argb(232, 5, 10, 18),
+                mixColor(accent, Color.rgb(6, 10, 18), 0.80f),
+                Color.argb(236, 6, 11, 20)
+        }, 20, Color.argb(130, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
+
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        TextView label = text("GAME EDGE", 9, Color.rgb(214, 226, 240), true);
+        label.setLetterSpacing(0.12f);
+        top.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
+        if (edge != null && edge.available && !safe(edge.chip).isEmpty()) top.addView(gameEdgeChipView(edge.chip, accent));
+        card.addView(top, matchWrap());
+
+        TextView value = text(edge != null && edge.available ? safe(edge.value) : "Pregame matchup read", 14, Color.WHITE, true);
+        value.setPadding(0, dp(6), 0, 0);
+        value.setSingleLine(true);
+        value.setEllipsize(TextUtils.TruncateAt.END);
+        card.addView(value, matchWrap());
+
+        String cap = edge != null && edge.available ? safe(edge.caption) : "Combines team profile, starters, bullpen, and matchup fit as reads load";
+        TextView c = text(cap, 10, INK_SOFT, false);
+        c.setPadding(0, dp(3), 0, 0);
+        c.setSingleLine(false);
+        c.setMaxLines(2);
+        c.setEllipsize(TextUtils.TruncateAt.END);
+        card.addView(c, matchWrap());
+        return card;
     }
 
     private LiveMatchupEdgePreview liveEdgePreview(LiveGame game, String tileKey) {
@@ -22640,6 +22790,9 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
             renderLiveGameMenu(targetGame);
             if (mainScroll != null) mainScroll.post(() -> mainScroll.scrollTo(0, keepY));
         }
+        // v346: slate cards can also show the pregame Game Edge, so refresh the visible slate
+        // after previews land. This is throttled and only runs when the slate is visible.
+        refreshVisibleGameTiles();
     }
 
     private HeadToHeadComparison buildLiveTeamPreviewComparison(Team a, Team b, int season, String mode) throws Exception {
@@ -22724,7 +22877,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         String caption = livePreviewLensCaption(build.mode);
         int accent = winner < 0 ? livePreviewSideColor(build.h, true, build.fallbackAccent)
                 : (winner > 0 ? livePreviewSideColor(build.h, false, build.fallbackAccent) : build.fallbackAccent);
-        return new LiveMatchupEdgePreview(cacheKey, true, value, caption, chip, accent);
+        return new LiveMatchupEdgePreview(cacheKey, true, value, caption, chip, accent, pctA, winner, strength);
     }
 
     private StatScoreSummary summarizeLivePreviewEdges(HeadToHeadComparison h, ArrayList<Metric> metricList, String mode) {
