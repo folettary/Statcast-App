@@ -769,7 +769,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v340", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v341", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -22481,20 +22481,19 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
     }
 
     private String liveTileValue(LiveGame game, LiveMatchupEdgePreview p, String fallback) {
+        // v341: never blank the hub into a full-card loading state. Show the normal menu copy
+        // immediately, then quietly upgrade cards when an edge preview is ready.
         if (p != null && p.available && !safe(p.value).isEmpty()) return p.value;
-        if (liveEdgeLoading(game)) return "Calculating edge…";
         return fallback;
     }
 
     private String liveTileCaption(LiveGame game, LiveMatchupEdgePreview p, String fallback) {
         if (p != null && p.available && !safe(p.caption).isEmpty()) return p.caption;
-        if (liveEdgeLoading(game)) return "Preview model loading";
         return fallback;
     }
 
     private String liveTileChip(LiveGame game, LiveMatchupEdgePreview p) {
         if (p != null && p.available && !safe(p.chip).isEmpty()) return p.chip;
-        if (liveEdgeLoading(game)) return "CALC";
         return null;
     }
 
@@ -22529,7 +22528,12 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
     private void startLiveMatchupEdgePreviewLoad(LiveGame game) {
         if (game == null) return;
         final String baseKey = liveEdgeBaseKey(game);
-        String[] tileKeys = new String[] { "overall", "offense", "pitching", "bullpen", "starters", "ovs", "keyhitters", "hotbats" };
+
+        // v341: auto-preview only the cheap shared team-read cards. v340 tried to calculate
+        // every tile (bullpen, starters, OVS, key hitters, hot bats) on page open, which could
+        // take 1+ minutes because it triggered multiple network-heavy models. The slow cards
+        // remain tap-through; the hub should feel usable immediately.
+        String[] tileKeys = new String[] { "overall", "offense", "pitching" };
         boolean allKnown = true;
         for (String k : tileKeys) {
             if (!liveMatchupEdgePreviewCache.containsKey(liveEdgeCacheKey(game, k))) { allKnown = false; break; }
@@ -22550,61 +22554,11 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
                 Team awayTeam = teamForLiveGame(targetGame.awayTeamId, targetGame.awayName, targetGame.awayAbbr);
                 Team homeTeam = teamForLiveGame(targetGame.homeTeamId, targetGame.homeName, targetGame.homeAbbr);
                 if (awayTeam != null && homeTeam != null) {
-                    try {
-                        HeadToHeadComparison overall = buildLiveTeamPreviewComparison(awayTeam, homeTeam, season, "overall");
-                        builds.add(new LiveMatchupEdgeBuild("overall", overall, liveTeamPreviewMetrics("overall"), "Overall", "overall", mixColor(awayFallback, homeFallback, 0.50f)));
-                    } catch (Exception ignored) { }
-                    try {
-                        HeadToHeadComparison offense = buildLiveTeamPreviewComparison(awayTeam, homeTeam, season, "offense");
-                        builds.add(new LiveMatchupEdgeBuild("offense", offense, liveTeamPreviewMetrics("offense"), "Offense", "offense", Color.rgb(99, 166, 255)));
-                    } catch (Exception ignored) { }
-                    try {
-                        HeadToHeadComparison pitching = buildLiveTeamPreviewComparison(awayTeam, homeTeam, season, "pitching");
-                        builds.add(new LiveMatchupEdgeBuild("pitching", pitching, liveTeamPreviewMetrics("pitching"), "Pitching/Defense", "pitching", Color.rgb(120, 220, 207)));
-                    } catch (Exception ignored) { }
-                    try {
-                        Future<BullpenReport> awayFuture = fanout.submit(() -> fetchBullpenReport(awayTeam, season, targetGame.gamePk));
-                        BullpenReport homeReport = fetchBullpenReport(homeTeam, season, targetGame.gamePk);
-                        BullpenReport awayReport = awayFuture.get();
-                        HeadToHeadComparison bullpenH = bullpenHeadToHeadComparison(awayReport, homeReport);
-                        builds.add(new LiveMatchupEdgeBuild("bullpen", bullpenH, new ArrayList<>(bullpenH.keyEdgeMetricsSnapshot), "Bullpen", "bullpen", Color.rgb(120, 220, 207)));
-                    } catch (Exception ignored) { }
-
-                    boolean probablesKnown = !safe(targetGame.awayPitcher).isEmpty() && !safe(targetGame.homePitcher).isEmpty();
-                    Player awayStarter = probablesKnown ? findPlayerByName(targetGame.awayPitcher) : null;
-                    Player homeStarter = probablesKnown ? findPlayerByName(targetGame.homePitcher) : null;
-                    if (awayStarter != null && homeStarter != null) {
-                        try {
-                            HeadToHeadComparison starters = buildLivePlayerPreviewComparison(awayStarter, homeStarter, season, StatScope.PITCH_ONLY, livePitcherPreviewMetrics());
-                            builds.add(new LiveMatchupEdgeBuild("starters", starters, livePitcherPreviewMetrics(), "Starting Pitchers", "pitcher", Color.rgb(247, 197, 77)));
-                        } catch (Exception ignored) { }
-                        try {
-                            HeadToHeadComparison ovs = buildOffenseVsStarterComparison(targetGame, awayTeam, homeTeam, awayStarter, homeStarter, season);
-                            builds.add(new LiveMatchupEdgeBuild("ovs", ovs, new ArrayList<>(ovs.keyEdgeMetricsSnapshot), "Offense vs SP", "ovs", Color.rgb(255, 155, 92)));
-                        } catch (Exception ignored) { }
-                    }
-
-                    try {
-                        ArrayList<LeaderboardEntry> entries = eligiblePlayerEntries(fetchLeaderboardForScope(season, StatScope.HIT_ONLY), season, metricByKey("ops"));
-                        LeaderboardEntry awayEntry = topHitterForTeam(entries, awayTeam);
-                        LeaderboardEntry homeEntry = topHitterForTeam(entries, homeTeam);
-                        Player away = playerFromEntry(awayEntry);
-                        Player home = playerFromEntry(homeEntry);
-                        if (away != null && home != null) {
-                            HeadToHeadComparison key = buildLivePlayerPreviewComparison(away, home, season, StatScope.HIT_ONLY, liveHitterPreviewMetrics());
-                            builds.add(new LiveMatchupEdgeBuild("keyhitters", key, liveHitterPreviewMetrics(), "Key Hitters", "hitter", Color.rgb(99, 166, 255)));
-                        }
-                    } catch (Exception ignored) { }
-
-                    try {
-                        ArrayList<LeaderboardEntry> entries = eligiblePlayerEntries(fetchLeaderboardForScope(season, StatScope.HIT_ONLY), season, metricByKey("ops"));
-                        HotHitterPick awayPick = hottestHitterForTeam(entries, awayTeam, season);
-                        HotHitterPick homePick = hottestHitterForTeam(entries, homeTeam, season);
-                        if (awayPick != null && homePick != null && awayPick.player != null && homePick.player != null) {
-                            HeadToHeadComparison hot = buildHotBatsComparison(awayPick, homePick, season);
-                            builds.add(new LiveMatchupEdgeBuild("hotbats", hot, new ArrayList<>(hot.keyEdgeMetricsSnapshot), "Hot Bats", "hotbats", Color.rgb(255, 109, 131)));
-                        }
-                    } catch (Exception ignored) { }
+                    // One team data fetch, reused for the three hub previews.
+                    HeadToHeadComparison teamH = buildLiveTeamPreviewComparison(awayTeam, homeTeam, season, "overall");
+                    builds.add(new LiveMatchupEdgeBuild("overall", teamH, liveTeamPreviewMetrics("overall"), "Overall", "overall", mixColor(awayFallback, homeFallback, 0.50f)));
+                    builds.add(new LiveMatchupEdgeBuild("offense", teamH, liveTeamPreviewMetrics("offense"), "Offense", "offense", Color.rgb(99, 166, 255)));
+                    builds.add(new LiveMatchupEdgeBuild("pitching", teamH, liveTeamPreviewMetrics("pitching"), "Pitching/Defense", "pitching", Color.rgb(120, 220, 207)));
                 }
             } catch (Exception ignored) { }
 
@@ -22686,9 +22640,12 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         String sideName = winner < 0 ? livePreviewSideName(build.h, true) : (winner > 0 ? livePreviewSideName(build.h, false) : "");
         String strength = livePreviewStrength(winnerPct);
         String chip = winner == 0 ? "EVEN" : sideAbbr + " " + strength.toUpperCase(Locale.US);
-        String value = winner == 0 ? "Even matchup" : sideName + " " + strength.toLowerCase(Locale.US) + " edge";
+        String value;
+        if (winner == 0) value = "No clear edge";
+        else if (build.h != null && !build.h.isTeam) value = sideName + " leads";
+        else value = sideName + " " + strength.toLowerCase(Locale.US) + " edge";
         EdgeContribution top = topLivePreviewContribution(summary, winner);
-        String caption = top == null ? "Tap for full breakdown" : "Top driver: " + top.label;
+        String caption = top == null ? "Tap for full breakdown" : "Driver: " + livePreviewDriverLabel(top.label);
         int accent = winner < 0 ? livePreviewSideColor(build.h, true, build.fallbackAccent)
                 : (winner > 0 ? livePreviewSideColor(build.h, false, build.fallbackAccent) : build.fallbackAccent);
         return new LiveMatchupEdgePreview(cacheKey, true, value, caption, chip, accent);
@@ -22793,6 +22750,28 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
             }
         }
         return best;
+    }
+
+    private String livePreviewDriverLabel(String label) {
+        String s = safe(label);
+        if (s.isEmpty()) return "full breakdown";
+        String low = s.toLowerCase(Locale.US);
+        if (low.contains("win %") || low.contains("win pct")) return "team record";
+        if (low.contains("run differential")) return "run differential";
+        if (low.contains("runs/game") || low.contains("r/g")) return "runs per game";
+        if (low.contains("ra/game") || low.contains("runs allowed/game")) return "run prevention";
+        if (low.contains("xwoba allowed") || low.contains("xwoba allowed")) return "expected contact allowed";
+        if (low.contains("xwoba")) return "expected production";
+        if (low.contains("matchup score")) return "matchup fit";
+        if (low.contains("quality score")) return "bullpen quality";
+        if (low.contains("freshness score")) return "bullpen freshness";
+        if (low.contains("barrel")) return "barrel contact";
+        if (low.contains("hard-hit") || low.contains("hard hit")) return "hard contact";
+        if (low.contains("k-bb")) return "K-BB profile";
+        if (low.contains("ops")) return "OPS";
+        if (low.contains("whip")) return "WHIP";
+        if (low.contains("era")) return "ERA";
+        return s.length() > 22 ? s.substring(0, 21).trim() + "…" : s;
     }
 
     private String livePreviewStrength(int winnerPct) {
@@ -23119,7 +23098,8 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
 
         TextView c = text(enabled || disabledNote == null ? caption : disabledNote, 9,
                 enabled ? Color.rgb(146, 164, 188) : Color.rgb(244, 192, 54), false);
-        c.setSingleLine(true);
+        c.setSingleLine(false);
+        c.setMaxLines(2);
         c.setEllipsize(TextUtils.TruncateAt.END);
         c.setPadding(0, dp(3), 0, 0);
         tile.addView(c, matchWrap());
