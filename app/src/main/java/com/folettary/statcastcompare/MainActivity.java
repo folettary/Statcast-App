@@ -765,7 +765,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v338", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v339", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20066,7 +20066,7 @@ private View liveGameCard(LiveGame game) {
         // 1) Win-probability moment
         if (game.wpHomeSeries != null && !game.wpHomeSeries.isEmpty()) {
             float homeWp = game.wpHomeSeries.get(game.wpHomeSeries.size() - 1);
-            int homePct = Math.round(homeWp * 100f);
+            int homePct = Math.round(homeWp); // wpHomeSeries is already 0–100
             String fav = homePct >= 50 ? displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr)
                                        : displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr);
             int favPct = homePct >= 50 ? homePct : (100 - homePct);
@@ -20600,7 +20600,7 @@ private View liveGameCard(LiveGame game) {
                 }, 14, Color.argb(96, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
                 TextView eb = text("BIGGEST MOMENT", 8, accent, true);
                 eb.setLetterSpacing(0.2f); dm.addView(eb, matchWrap());
-                TextView swingT = text("+" + Math.round(bestSwing * 100f) + "% win probability swing", 12, INK, true);
+                TextView swingT = text("+" + Math.round(bestSwing) + "% win probability swing", 12, INK, true);
                 swingT.setPadding(0, dp(3), 0, 0); dm.addView(swingT, matchWrap());
                 TextView descT = text(safe(game.wpDescriptions.get(bestIdx)), 10, INK_DIM, false);
                 descT.setPadding(0, dp(2), 0, 0); dm.addView(descT, matchWrap());
@@ -20609,27 +20609,42 @@ private View liveGameCard(LiveGame game) {
             }
         }
 
-        // 4) Team totals — runs / hits / errors side by side
-        if (game.awayHits >= 0 && game.homeHits >= 0) {
-            String aA = displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr);
-            String hA = displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr);
-            int accent = ensureReadableColor((awayPalette != null ? awayPalette : neutralPalette()).primary, 150);
-            LinearLayout tt = new LinearLayout(this);
-            tt.setOrientation(LinearLayout.VERTICAL);
-            tt.setPadding(dp(14), dp(12), dp(14), dp(12));
-            tt.setBackground(roundedGradientStroke(new int[] {
-                    Color.argb(30, 255, 255, 255), Color.argb(10, 255, 255, 255)
-            }, 14, Color.argb(70, 255, 255, 255), 1));
-            TextView eb = text("TEAM TOTALS", 8, accent, true);
-            eb.setLetterSpacing(0.2f); tt.addView(eb, matchWrap());
-            String away = aA + ":  " + game.awayScore + " R · " + game.awayHits + " H"
-                    + (game.awayErrors >= 0 ? " · " + game.awayErrors + " E" : "");
-            String home = hA + ":  " + game.homeScore + " R · " + game.homeHits + " H"
-                    + (game.homeErrors >= 0 ? " · " + game.homeErrors + " E" : "");
-            TextView aT = text(away, 11, INK, true); aT.setPadding(0, dp(4), 0, 0); tt.addView(aT, matchWrap());
-            TextView hT = text(home, 11, INK, true); hT.setPadding(0, dp(2), 0, 0); tt.addView(hT, matchWrap());
-            LinearLayout.LayoutParams ttLp = matchWrap(); ttLp.setMargins(0, dp(10), 0, 0);
-            page.addView(tt, ttLp);
+        // 4) Decisive inning — the single inning that produced the most runs for the winner. This
+        //    tells a story the box-score grid doesn't surface ("STL broke it open in the 4th").
+        if (game.lineInnings != null && !game.lineInnings.isEmpty()) {
+            boolean awayWon = game.awayScore > game.homeScore;
+            java.util.ArrayList<Integer> winnerRuns = awayWon ? game.awayLineRuns : game.homeLineRuns;
+            String winName = awayWon ? displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr)
+                                     : displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr);
+            if (winnerRuns != null && !winnerRuns.isEmpty()) {
+                int bigInningIdx = -1, bigRuns = 0;
+                for (int i = 0; i < winnerRuns.size(); i++) {
+                    Integer r = winnerRuns.get(i);
+                    if (r != null && r > bigRuns) { bigRuns = r; bigInningIdx = i; }
+                }
+                if (bigInningIdx >= 0 && bigRuns > 0) {
+                    int inningNum = (bigInningIdx < game.lineInnings.size()) ? game.lineInnings.get(bigInningIdx) : (bigInningIdx + 1);
+                    int accent = ensureReadableColor((awayWon ? (awayPalette != null ? awayPalette : neutralPalette())
+                                                              : (homePalette != null ? homePalette : neutralPalette())).primary, 150);
+                    LinearLayout di = new LinearLayout(this);
+                    di.setOrientation(LinearLayout.VERTICAL);
+                    di.setPadding(dp(14), dp(12), dp(14), dp(12));
+                    di.setBackground(roundedGradientStroke(new int[] {
+                            Color.argb(34, Color.red(accent), Color.green(accent), Color.blue(accent)),
+                            Color.argb(12, Color.red(accent), Color.green(accent), Color.blue(accent))
+                    }, 14, Color.argb(96, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
+                    TextView eb = text("DECISIVE INNING", 8, accent, true);
+                    eb.setLetterSpacing(0.2f); di.addView(eb, matchWrap());
+                    TextView big = text(winName + " scored " + bigRuns + " in the " + ordinalNum(inningNum), 12, INK, true);
+                    big.setPadding(0, dp(3), 0, 0); di.addView(big, matchWrap());
+                    // winning margin as a supporting line
+                    int margin = Math.abs(game.awayScore - game.homeScore);
+                    TextView sub = text("Final margin: " + margin + " run" + (margin == 1 ? "" : "s"), 9, INK_DIM, true);
+                    sub.setPadding(0, dp(2), 0, 0); di.addView(sub, matchWrap());
+                    LinearLayout.LayoutParams diLp = matchWrap(); diLp.setMargins(0, dp(10), 0, 0);
+                    page.addView(di, diLp);
+                }
+            }
         }
 
         TextView hint = text("‹ swipe back for Box Score · Win Prob · Tracker", 9, INK_DIM, true);
