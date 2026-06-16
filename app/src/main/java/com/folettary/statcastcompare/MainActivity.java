@@ -181,6 +181,7 @@ public class MainActivity extends Activity {
     private Spinner seasonSpinner;
     private Spinner rankMetricSpinner;
     private LinearLayout seasonChipRow;
+    private LinearLayout seasonColView;
     private LinearLayout rankMetricChipRow;
     private LinearLayout rankControlContainer;
     private final ArrayList<TextView> seasonChips = new ArrayList<>();
@@ -762,7 +763,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v330", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v331", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -981,7 +982,9 @@ public class MainActivity extends Activity {
         form.addView(controlsCard, controlsLp);
 
         LinearLayout seasonCol = new LinearLayout(this);
+        seasonColView = seasonCol;
         seasonCol.setOrientation(LinearLayout.VERTICAL);
+        seasonCol.setVisibility(View.GONE); // hidden until a player/team is selected (shown on profiles)
         seasonCol.addView(sectionEyebrow("SEASON"));
         seasonSpinner = new Spinner(this);
         seasonSpinner.setVisibility(View.GONE);
@@ -1483,11 +1486,35 @@ public class MainActivity extends Activity {
         io.execute(() -> {
             try {
                 ArrayList<LiveGame> games = fetchTodayLiveGames();
-                main.post(() -> renderHomeLiveMatchupsGames(games));
+                main.post(() -> {
+                    renderHomeLiveMatchupsGames(games);
+                    seedRandomMatchupFromGames(games);
+                });
             } catch (Exception e) {
                 main.post(() -> renderHomeLiveMatchupsError(e.getMessage()));
             }
         });
+    }
+
+    // v331: default the Create-a-Matchup preview to a random team matchup drawn from the day's
+    // games, so the section is never empty. Re-randomizes each load. Only seeds if the user hasn't
+    // already picked something.
+    private void seedRandomMatchupFromGames(ArrayList<LiveGame> games) {
+        if (games == null || games.isEmpty()) return;
+        if (homeTeamA != null || homeTeamB != null || homePlayerA != null) return; // user already chose
+        try {
+            // prefer a game that's in progress for relevance; else any game
+            ArrayList<LiveGame> pool = new ArrayList<>();
+            for (LiveGame g : games) if (gameStatusRank(g) == 1) pool.add(g);
+            if (pool.isEmpty()) pool.addAll(games);
+            LiveGame pick = pool.get(new java.util.Random().nextInt(pool.size()));
+            Team a = teamForLiveGame(pick.awayTeamId, pick.awayName, pick.awayAbbr);
+            Team b = teamForLiveGame(pick.homeTeamId, pick.homeName, pick.homeAbbr);
+            if (a == null || b == null) return;
+            homeInlineTeamMode = true;
+            homeTeamA = a; homeTeamB = b;
+            updateHomeMatchupPreview();
+        } catch (Exception ignored) { }
     }
 
     // v251: prev/next day stepper for the live slate. "‹" always steps back; "›" returns toward
@@ -4039,6 +4066,11 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         if (controlsCard == null) return;
         boolean hasSelection = (teamMode && selectedTeam != null) || (!teamMode && selectedPlayer != null);
         controlsCard.setVisibility((activePrimaryTab != TAB_HOME && (hasSelection || rankingsModeActive || (!headToHeadMode && !rankingsModeActive))) ? View.VISIBLE : View.GONE);
+        // Season selector only appears once there's something to scope to a season — a selected
+        // player/team profile, or rankings mode. No need to pick a season before selecting anything.
+        if (seasonColView != null) {
+            seasonColView.setVisibility((hasSelection || rankingsModeActive) ? View.VISIBLE : View.GONE);
+        }
     }
 
     private void updateTeamPickerButtons() {
@@ -18348,6 +18380,36 @@ private View liveGameCard(LiveGame game) {
             new LinearLayout.LayoutParams(0, -2, 1));
     content.addView(scoreRow, matchWrap());
 
+    // v331: for in-progress games, fill the space (freed by removing the CTA) with live state:
+    // inning · outs · a compact bases indicator.
+    boolean inProgress = gameStatusRank(game) == 1 && !game.isPregame() && !"Final".equals(game.statusLabel());
+    if (inProgress && game.sitInning > 0) {
+        LinearLayout liveRow = new LinearLayout(this);
+        liveRow.setOrientation(LinearLayout.HORIZONTAL);
+        liveRow.setGravity(Gravity.CENTER_VERTICAL);
+        liveRow.setPadding(0, dp(9), 0, 0);
+
+        String half = safe(game.sitInningState).toLowerCase(Locale.US);
+        String arrow = half.contains("top") ? "▲" : (half.contains("bot") ? "▼" : "•");
+        String inningTxt = arrow + " " + ordinalNum(game.sitInning);
+        TextView inn = text(inningTxt, 10, Color.rgb(82, 226, 176), true);
+        liveRow.addView(inn, new LinearLayout.LayoutParams(-2, -2));
+
+        TextView outs = text("  ·  " + game.sitOuts + " out" + (game.sitOuts == 1 ? "" : "s"), 10, Color.argb(220, 236, 242, 248), true);
+        liveRow.addView(outs, new LinearLayout.LayoutParams(-2, -2));
+
+        // tiny bases indicator (filled diamonds for occupied bases)
+        boolean anyOn = game.onFirst || game.onSecond || game.onThird;
+        if (anyOn) {
+            String bases = "  ·  ";
+            // order: 1B 2B 3B as ◆ filled / ◇ empty
+            bases += (game.onFirst ? "◆" : "◇") + (game.onSecond ? "◆" : "◇") + (game.onThird ? "◆" : "◇");
+            TextView basesT = text(bases, 10, Color.rgb(247, 197, 77), true);
+            liveRow.addView(basesT, new LinearLayout.LayoutParams(-2, -2));
+        }
+        content.addView(liveRow, matchWrap());
+    }
+
     return card;
 }
 
@@ -19318,7 +19380,14 @@ private View liveGameCard(LiveGame game) {
                 countStr = game.sitBalls + "-" + game.sitStrikes;
             }
         } else {
-            countStr = "—";
+            // Past AB: show the count when the at-bat ended (the last pitch's balls/strikes — the
+            // count that produced the result), giving a frame of reference for how the PA finished.
+            if (ab != null && !ab.pitches.isEmpty()) {
+                LivePitch lastP = ab.pitches.get(ab.pitches.size() - 1);
+                countStr = lastP.balls + "-" + lastP.strikes;
+            } else {
+                countStr = "—";
+            }
         }
         TextView bigCount = text(countStr, 30, Color.WHITE, true);
         bigCount.setGravity(Gravity.CENTER);
@@ -21438,6 +21507,20 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         live.homePitcher = pitcherName(homeNode == null ? null : homeNode.optJSONObject("probablePitcher"));
         live.awayRecord = recordFromNode(awayNode);
         live.homeRecord = recordFromNode(homeNode);
+        // v331: capture live state from the hydrated linescore so the matchup tiles can show
+        // inning · outs · baserunners for in-progress games.
+        JSONObject ls = g.optJSONObject("linescore");
+        if (ls != null) {
+            live.sitInning = ls.optInt("currentInning", 0);
+            live.sitInningState = ls.optString("inningState", "");
+            live.sitOuts = ls.optInt("outs", 0);
+            JSONObject off = ls.optJSONObject("offense");
+            if (off != null) {
+                live.onFirst = off.optJSONObject("first") != null;
+                live.onSecond = off.optJSONObject("second") != null;
+                live.onThird = off.optJSONObject("third") != null;
+            }
+        }
         return live;
     }
 
@@ -21458,6 +21541,12 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         target.homeScore = fresh.homeScore;
         target.abstractState = fresh.abstractState;
         target.detailedState = fresh.detailedState;
+        target.sitInning = fresh.sitInning;
+        target.sitInningState = fresh.sitInningState;
+        target.sitOuts = fresh.sitOuts;
+        target.onFirst = fresh.onFirst;
+        target.onSecond = fresh.onSecond;
+        target.onThird = fresh.onThird;
     }
 
 
