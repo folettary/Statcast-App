@@ -765,7 +765,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v336", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v337", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20094,7 +20094,7 @@ private View liveGameCard(LiveGame game) {
             cards.add(insightCard("DUE UP", names.toString(), "next to bat", accentP));
         }
         // 5) Game pulse (line score totals)
-        if (game.awayHits != null && game.homeHits != null) {
+        if (game.awayHits >= 0 && game.homeHits >= 0) {
             String aA = displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr);
             String hA = displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr);
             String hits = aA + " " + game.awayHits + " H · " + hA + " " + game.homeHits + " H";
