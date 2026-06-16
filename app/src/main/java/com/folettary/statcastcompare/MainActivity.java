@@ -769,7 +769,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v341", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v342", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -22605,10 +22605,19 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         }
         Stats leagueStats = computeLeagueAverageFromTeams(teams);
         ArrayList<Metric> displayed = liveTeamPreviewMetrics(mode);
+        // v342: previews need the same rank/percentile context as the real matchup card.
+        // v341 passed empty percentile maps, so statQualityScore() fell back to a one-value
+        // domain for each side and returned 50/50 for almost every stat. Result: every hub
+        // chip said EVEN. These maps make the hub preview use real league-relative edges.
+        ArrayList<Metric> rankMetrics = metricsForRankScope(scope, true);
+        HashMap<String, Integer> ranksA = computeTeamRankMap(teams, a.key(), rankMetrics);
+        HashMap<String, Integer> ranksB = computeTeamRankMap(teams, b.key(), rankMetrics);
+        HashMap<String, Integer> totals = computeTeamRankTotalMap(teams, rankMetrics);
         return new HeadToHeadComparison(true, a.name, b.name, a.abbr, b.abbr, 0, 0, season,
                 statsA, statsB, leagueStats, null, null, a, b,
-                new HashMap<>(), new HashMap<>(), new HashMap<>(), new HashMap<>(),
-                new HashMap<>(), new HashMap<>(), scope, new ArrayList<>(displayed), new ArrayList<>(displayed));
+                ranksA, ranksB, totals, totals,
+                percentileMap(ranksA, totals), percentileMap(ranksB, totals),
+                scope, new ArrayList<>(displayed), new ArrayList<>(displayed));
     }
 
     private HeadToHeadComparison buildLivePlayerPreviewComparison(Player a, Player b, int season, StatScope scope, ArrayList<Metric> displayed) throws Exception {
@@ -22621,10 +22630,15 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         ensureDirectPlayerStatsForScope(b, season, statsB, scope);
         try { directA.get(); } catch (Exception ignored) {}
         Stats leagueStats = computeLeagueAverage(entries);
+        ArrayList<Metric> rankMetrics = metricsForRankScope(scope, false);
+        HashMap<String, Integer> ranksA = computePlayerRankMap(entries, season, a.id, rankMetrics);
+        HashMap<String, Integer> ranksB = computePlayerRankMap(entries, season, b.id, rankMetrics);
+        HashMap<String, Integer> totals = computePlayerRankTotalMap(entries, season, rankMetrics);
         return new HeadToHeadComparison(false, a.fullName, b.fullName, a.teamAbbr + " · " + a.position, b.teamAbbr + " · " + b.position,
                 a.id, b.id, season, statsA, statsB, leagueStats, a, b, null, null,
-                new HashMap<>(), new HashMap<>(), new HashMap<>(), new HashMap<>(),
-                new HashMap<>(), new HashMap<>(), scope, new ArrayList<>(displayed), new ArrayList<>(displayed));
+                ranksA, ranksB, totals, totals,
+                percentileMap(ranksA, totals), percentileMap(ranksB, totals),
+                scope, new ArrayList<>(displayed), new ArrayList<>(displayed));
     }
 
     private LiveMatchupEdgePreview livePreviewFromBuild(String cacheKey, LiveMatchupEdgeBuild build) {
@@ -22634,7 +22648,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         if (summary == null || summary.scoredRows <= 0) return new LiveMatchupEdgePreview(cacheKey, false, "", "", "", build.fallbackAccent);
 
         int pctA = summary.edgePctA();
-        int winner = Math.abs(pctA - 50) <= 2 ? 0 : (pctA > 50 ? -1 : 1);
+        int winner = Math.abs(pctA - 50) <= 1 ? 0 : (pctA > 50 ? -1 : 1);
         int winnerPct = winner == 0 ? 50 : Math.max(pctA, 100 - pctA);
         String sideAbbr = winner < 0 ? livePreviewSideAbbr(build.h, true) : (winner > 0 ? livePreviewSideAbbr(build.h, false) : "");
         String sideName = winner < 0 ? livePreviewSideName(build.h, true) : (winner > 0 ? livePreviewSideName(build.h, false) : "");
