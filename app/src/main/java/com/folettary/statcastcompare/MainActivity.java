@@ -770,7 +770,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v346", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v347", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -22523,8 +22523,11 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
     private LiveMatchupEdgePreview liveGameEdgePreview(LiveGame game) {
         if (game == null) return new LiveMatchupEdgePreview(liveEdgeCacheKey(game, "gameedge"), false, "", "", "", Color.rgb(146, 164, 188));
         String cacheKey = liveEdgeCacheKey(game, "gameedge");
-        String[] keys = new String[] { "ovs", "starters", "overall", "bullpen" };
-        double[] weights = new double[] { 0.35d, 0.25d, 0.20d, 0.20d };
+        // v347: Game Edge should be today's game, not generic pitching. Use the actual
+        // offense-vs-starter read, today's probable starters, today's bullpen state, and only
+        // a light team baseline that avoids broad staff-pitching stats.
+        String[] keys = new String[] { "ovs", "starters", "bullpen", "baseline" };
+        double[] weights = new double[] { 0.40d, 0.30d, 0.20d, 0.10d };
         double scoreA = 0d;
         double totalW = 0d;
         int used = 0;
@@ -22546,7 +22549,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
             }
         }
         if (totalW <= 0d || (!hasDaily && used < 3)) {
-            return new LiveMatchupEdgePreview(cacheKey, false, "Pregame matchup read", "Combines team, starter, bullpen, and matchup fit", "", accent);
+            return new LiveMatchupEdgePreview(cacheKey, false, "Pregame matchup read", "Combines lineup fit + starters + bullpen + team baseline", "", accent);
         }
         int pctA = (int)Math.round(scoreA / totalW);
         if (pctA < 0) pctA = 0;
@@ -22561,7 +22564,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         String chip = winner == 0 ? "EVEN" : sideAbbr + " " + strength.toUpperCase(Locale.US);
         TeamPalette pal = winner < 0 ? paletteForAbbr(game.awayAbbr) : (winner > 0 ? paletteForAbbr(game.homeAbbr) : null);
         if (pal != null) accent = pal.primary;
-        String value = winner == 0 ? "No clear pregame lean" : "Pregame matchup read";
+        String value = winner == 0 ? "Edges split pregame" : "Pregame matchup read";
         String caption = source.length() == 0 ? "Combines available matchup reads" : "Combines " + source.toString();
         return new LiveMatchupEdgePreview(cacheKey, true, value, caption, chip, accent, pctA, winner, strength);
     }
@@ -22570,8 +22573,8 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         String k = safe(key).toLowerCase(Locale.US);
         if ("ovs".equals(k)) return "lineup fit";
         if ("starters".equals(k)) return "starters";
-        if ("overall".equals(k)) return "team profile";
         if ("bullpen".equals(k)) return "bullpen";
+        if ("baseline".equals(k)) return "team baseline";
         return "";
     }
 
@@ -22664,6 +22667,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
     private ArrayList<Metric> liveTeamPreviewMetrics(String mode) {
         if ("offense".equals(mode)) return livePreviewMetrics("teamRPG", "teamOPS", "teamXWOBA", "teamBBMinusKPct", "teamBarrelPct", "teamHardHitPct", "teamSLG", "teamOBP");
         if ("pitching".equals(mode)) return livePreviewMetrics("teamRAPG", "teamERA", "teamWHIP", "teamOppOps", "teamPXWOBA", "teamPitchKMinusBBPct", "teamPBarrelPct", "teamPHardHitPct");
+        if ("baseline".equals(mode)) return livePreviewMetrics("teamWinPct", "teamRPG", "teamOPS", "teamXWOBA", "teamOBP", "teamSLG", "teamBBMinusKPct");
         return livePreviewMetrics("teamWinPct", "teamRunDiff", "teamRPG", "teamRAPG", "teamOPS", "teamOppOps", "teamERA", "teamWHIP");
     }
 
@@ -22686,7 +22690,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
     private void startLiveMatchupFastEdgePreviewLoad(LiveGame game) {
         if (game == null) return;
         final String baseKey = liveEdgeBaseKey(game);
-        String[] tileKeys = new String[] { "overall", "offense", "pitching" };
+        String[] tileKeys = new String[] { "overall", "offense", "pitching", "baseline" };
         boolean allKnown = true;
         for (String k : tileKeys) {
             if (!liveMatchupEdgePreviewCache.containsKey(liveEdgeCacheKey(game, k))) { allKnown = false; break; }
@@ -22711,6 +22715,10 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
                     builds.add(new LiveMatchupEdgeBuild("overall", teamH, liveTeamPreviewMetrics("overall"), "Overall", "overall", mixColor(awayFallback, homeFallback, 0.50f)));
                     builds.add(new LiveMatchupEdgeBuild("offense", teamH, liveTeamPreviewMetrics("offense"), "Offense", "offense", Color.rgb(99, 166, 255)));
                     builds.add(new LiveMatchupEdgeBuild("pitching", teamH, liveTeamPreviewMetrics("pitching"), "Pitching", "pitching", Color.rgb(120, 220, 207)));
+                    // v347: hidden Game Edge baseline. This is not the visible Team Overall card and
+                    // intentionally avoids generic staff-pitching metrics, because today's starter
+                    // and bullpen cards should own the pitching portion of the game read.
+                    builds.add(new LiveMatchupEdgeBuild("baseline", teamH, liveTeamPreviewMetrics("baseline"), "Team Baseline", "baseline", mixColor(awayFallback, homeFallback, 0.50f)));
                 }
             } catch (Exception ignored) { }
 
@@ -22986,6 +22994,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         if ("overall".equals(m)) return "Based on overall team profile";
         if ("offense".equals(m)) return "Based on scoring profile + discipline";
         if ("pitching".equals(m)) return "Based on run prevention + contact allowed";
+        if ("baseline".equals(m)) return "Based on team baseline";
         if ("bullpen".equals(m)) return "Based on relief quality + recent usage";
         if ("pitcher".equals(m)) return "Based on starter command + contact allowed";
         if ("ovs".equals(m)) return "Based on lineup fit vs starter profile";
