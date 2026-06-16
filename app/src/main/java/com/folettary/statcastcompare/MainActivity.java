@@ -754,7 +754,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v325", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v326", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -19447,12 +19447,14 @@ private View liveGameCard(LiveGame game) {
     // clickable plays) can consume them, while letting taps and vertical scrolls pass through. A
     // plain OnTouchListener can't do this because children grab the touch first; intercepting at the
     // ViewGroup level is the only reliable way to drive a finger-tracking pager over interactive cards.
+    // Pager callback for the swipe frame. Declared at MainActivity level (not nested inside the
+    // inner SwipePagerFrame class) because Java forbids implicitly-static interfaces in inner classes.
+    private interface TrackerPagerCb {
+        void onDrag(float dx);
+        void onRelease(float dx);
+    }
     private class SwipePagerFrame extends FrameLayout {
-        interface Pager {
-            void onDrag(float dx);
-            void onRelease(float dx);
-        }
-        private Pager pager;
+        private TrackerPagerCb pager;
         private float downX, downY;
         private boolean dragging;
         private final int touchSlop;
@@ -19460,7 +19462,7 @@ private View liveGameCard(LiveGame game) {
             super(c);
             touchSlop = android.view.ViewConfiguration.get(c).getScaledTouchSlop();
         }
-        void setPager(Pager p) { this.pager = p; }
+        void setPager(TrackerPagerCb p) { this.pager = p; }
 
         @Override public boolean onInterceptTouchEvent(android.view.MotionEvent ev) {
             switch (ev.getActionMasked()) {
@@ -19558,7 +19560,7 @@ private View liveGameCard(LiveGame game) {
             nextCard.setTranslationX(screenW);
         }
 
-        host.setPager(new SwipePagerFrame.Pager() {
+        host.setPager(new TrackerPagerCb() {
             void place(float dx) {
                 currentCard.setTranslationX(dx);
                 if (prevCard != null) prevCard.setTranslationX(dx - screenW);
