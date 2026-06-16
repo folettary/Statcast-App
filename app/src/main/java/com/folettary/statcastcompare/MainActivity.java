@@ -770,7 +770,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v347", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v348", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -4435,6 +4435,10 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         return "Focused stat group";
     }
 
+    private String[] recommendedPitcherLensKeys() {
+        return new String[] { "pxwOBA", "pitchKMinusBBPct", "pWhiffPct", "pBarrelPct", "pHardHitPct", "era", "whip" };
+    }
+
     private String[] recommendedKeysForRole(String role) {
         boolean team = isTeamMetricContext();
         if (team) {
@@ -4443,7 +4447,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             if ("pitching".equals(mode)) return teamPitchingPresetKeys("recommended");
             return new String[] { "teamWinPct", "teamRunDiff", "teamRPG", "teamRAPG", "teamOPS", "teamOppOps", "teamERA", "teamWHIP", "teamXWOBA", "teamPXWOBA" };
         }
-        if ("pitch".equals(role)) return new String[] { "pxwOBA", "pitchKMinusBBPct", "pWhiffPct", "pBarrelPct", "pHardHitPct", "era", "whip" };
+        if ("pitch".equals(role)) return recommendedPitcherLensKeys();
         // v217: reordered so the scored eight lead with one production story (OPS/wOBA/xwOBA)
         // plus contact quality and discipline. OBP and SLG stay as display rows but no longer
         // give the slash-line family five of eight scored votes.
@@ -22671,8 +22675,20 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         return livePreviewMetrics("teamWinPct", "teamRunDiff", "teamRPG", "teamRAPG", "teamOPS", "teamOppOps", "teamERA", "teamWHIP");
     }
 
+    private ArrayList<Metric> livePreviewMetricsFromKeys(String[] keys) {
+        ArrayList<Metric> out = new ArrayList<>();
+        if (keys == null) return out;
+        for (String key : keys) {
+            Metric m = findMetricByKey(key);
+            if (m != null && !out.contains(m)) out.add(m);
+        }
+        return out;
+    }
+
     private ArrayList<Metric> livePitcherPreviewMetrics() {
-        return livePreviewMetrics("pxwOBA", "pitchKMinusBBPct", "pWhiffPct", "pBarrelPct", "pHardHitPct", "era", "whip");
+        // v348: the hub chip and Game Edge use the same existing Recommended pitcher lens
+        // that the full Starting Pitchers card opens with.
+        return livePreviewMetricsFromKeys(recommendedPitcherLensKeys());
     }
 
     private ArrayList<Metric> liveHitterPreviewMetrics() {
@@ -26619,7 +26635,11 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         expectedMode = false;
         selectedPlayer = away;
         comparePlayer = home;
-        constrainSelectedMetricsToPlayerRole("pitch", true);
+        // v348: Starting Pitchers is not a custom/default view. Force the existing
+        // Recommended pitcher lens so the opened card, the hub chip, and Game Edge agree.
+        lastComparison = null;
+        lastHeadToHead = null;
+        applyMetricsForRoleAndPreset("pitch", "recommended", true);
         applyHeadToHeadVisibility();
         updateAnalysisModeButtons();
         updateViewModeButtons();
