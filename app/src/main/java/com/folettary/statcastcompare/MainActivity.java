@@ -770,7 +770,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v343", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v344", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -22709,13 +22709,19 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         String sideAbbr = winner < 0 ? livePreviewSideAbbr(build.h, true) : (winner > 0 ? livePreviewSideAbbr(build.h, false) : "");
         String sideName = winner < 0 ? livePreviewSideName(build.h, true) : (winner > 0 ? livePreviewSideName(build.h, false) : "");
         String strength = livePreviewStrength(winnerPct);
+        if ("even".equals(strength)) {
+            winner = 0;
+            sideAbbr = "";
+            sideName = "";
+        }
         String chip = winner == 0 ? "EVEN" : sideAbbr + " " + strength.toUpperCase(Locale.US);
         String value;
         if (winner == 0) value = "No clear edge";
         else if (build.h != null && !build.h.isTeam) value = sideName + " leads";
         else value = sideName + " " + strength.toLowerCase(Locale.US) + " edge";
-        EdgeContribution top = topLivePreviewContribution(summary, winner);
-        String caption = top == null ? "Tap for full breakdown" : "Based on " + livePreviewDriverLabel(top.label);
+        // v344: hub copy should describe the lens/model, not expose whichever single stat
+        // happened to sort first. The chip is the answer; this line explains the matchup read.
+        String caption = livePreviewLensCaption(build.mode);
         int accent = winner < 0 ? livePreviewSideColor(build.h, true, build.fallbackAccent)
                 : (winner > 0 ? livePreviewSideColor(build.h, false, build.fallbackAccent) : build.fallbackAccent);
         return new LiveMatchupEdgePreview(cacheKey, true, value, caption, chip, accent);
@@ -22820,6 +22826,19 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
             }
         }
         return best;
+    }
+
+    private String livePreviewLensCaption(String mode) {
+        String m = safe(mode).toLowerCase(Locale.US);
+        if ("overall".equals(m)) return "Based on overall team profile";
+        if ("offense".equals(m)) return "Based on lineup production + discipline";
+        if ("pitching".equals(m)) return "Based on run prevention + contact allowed";
+        if ("bullpen".equals(m)) return "Based on quality + freshness";
+        if ("pitcher".equals(m)) return "Based on starter command + contact";
+        if ("ovs".equals(m)) return "Based on lineup fit vs starter profile";
+        if ("hitter".equals(m)) return "Based on hitter profile";
+        if ("hotbats".equals(m)) return "Based on recent form + contact";
+        return "Tap for full breakdown";
     }
 
     private String livePreviewDriverLabel(String label) {
@@ -23132,32 +23151,39 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         t.setSingleLine(true);
         top.addView(t, new LinearLayout.LayoutParams(0, -2, 1));
 
+        // v344: keep the chevron, but move the edge chip into a compact right-side action
+        // cluster so the title gets the left side and the badge lives closer to the card edge.
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        actions.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+
         if (enabled && !safe(edgeChip).isEmpty()) {
             TextView chip = text(edgeChip, 7, Color.WHITE, true);
             chip.setGravity(Gravity.CENTER);
             chip.setSingleLine(true);
-            chip.setPadding(dp(5), dp(2), dp(5), dp(2));
+            chip.setPadding(dp(4), dp(2), dp(4), dp(2));
             chip.setBackground(roundedGradientStroke(new int[] {
                     mixColor(edgeColor, Color.rgb(8, 13, 22), 0.18f),
                     mixColor(edgeColor, Color.rgb(8, 13, 22), 0.36f)
             }, 999, Color.argb(118, Color.red(edgeColor), Color.green(edgeColor), Color.blue(edgeColor)), 1));
             LinearLayout.LayoutParams chipLp = new LinearLayout.LayoutParams(-2, -2);
-            chipLp.setMargins(dp(4), 0, dp(1), 0);
-            top.addView(chip, chipLp);
+            chipLp.setMargins(dp(3), 0, 0, 0);
+            actions.addView(chip, chipLp);
         }
 
         if (enabled) {
             TextView arrow = text("›", 16, softColor(accent, 0.08f), true);
             arrow.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
-            top.addView(arrow, new LinearLayout.LayoutParams(dp(18), -2));
+            actions.addView(arrow, new LinearLayout.LayoutParams(dp(13), -2));
         } else {
             // A small "TBD" pill in place of the chevron signals the locked state at a glance.
             TextView lock = text("TBD", 8, Color.rgb(176, 190, 212), true);
             lock.setGravity(Gravity.CENTER);
             lock.setPadding(dp(6), dp(2), dp(6), dp(2));
             lock.setBackground(roundedStroke(Color.argb(60, 8, 13, 22), Color.argb(80, 200, 214, 236), 999, 1));
-            top.addView(lock);
+            actions.addView(lock);
         }
+        top.addView(actions, new LinearLayout.LayoutParams(-2, -2));
         tile.addView(top, matchWrap());
 
         TextView v = text(value, 10, INK, true);
