@@ -754,7 +754,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v324", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v325", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -19443,6 +19443,70 @@ private View liveGameCard(LiveGame game) {
     // v323: a drag-to-slide carousel. Renders the current AB plus its left/right neighbours in a
     // horizontal strip; the finger drags the strip, and on release it snaps to the nearest page and
     // commits the new at-bat index. Vertical drags fall through to the page ScrollView.
+    // v325: a FrameLayout that intercepts HORIZONTAL drags before its children (cards, pitch list,
+    // clickable plays) can consume them, while letting taps and vertical scrolls pass through. A
+    // plain OnTouchListener can't do this because children grab the touch first; intercepting at the
+    // ViewGroup level is the only reliable way to drive a finger-tracking pager over interactive cards.
+    private class SwipePagerFrame extends FrameLayout {
+        interface Pager {
+            void onDrag(float dx);
+            void onRelease(float dx);
+        }
+        private Pager pager;
+        private float downX, downY;
+        private boolean dragging;
+        private final int touchSlop;
+        SwipePagerFrame(android.content.Context c) {
+            super(c);
+            touchSlop = android.view.ViewConfiguration.get(c).getScaledTouchSlop();
+        }
+        void setPager(Pager p) { this.pager = p; }
+
+        @Override public boolean onInterceptTouchEvent(android.view.MotionEvent ev) {
+            switch (ev.getActionMasked()) {
+                case android.view.MotionEvent.ACTION_DOWN:
+                    downX = ev.getX(); downY = ev.getY(); dragging = false;
+                    break;
+                case android.view.MotionEvent.ACTION_MOVE:
+                    float dx = ev.getX() - downX, dy = ev.getY() - downY;
+                    if (!dragging && Math.abs(dx) > touchSlop && Math.abs(dx) > Math.abs(dy) * 1.3f) {
+                        // clearly horizontal → claim the gesture from children
+                        dragging = true;
+                        getParent().requestDisallowInterceptTouchEvent(true);
+                        return true;
+                    }
+                    break;
+            }
+            return false;
+        }
+        @Override public boolean onTouchEvent(android.view.MotionEvent ev) {
+            if (pager == null) return false;
+            switch (ev.getActionMasked()) {
+                case android.view.MotionEvent.ACTION_DOWN:
+                    downX = ev.getX(); downY = ev.getY();
+                    return true;
+                case android.view.MotionEvent.ACTION_MOVE: {
+                    float dx = ev.getX() - downX;
+                    if (!dragging) {
+                        float dy = ev.getY() - downY;
+                        if (Math.abs(dx) > touchSlop && Math.abs(dx) > Math.abs(dy) * 1.3f) {
+                            dragging = true;
+                            getParent().requestDisallowInterceptTouchEvent(true);
+                        }
+                    }
+                    if (dragging) pager.onDrag(dx);
+                    return true;
+                }
+                case android.view.MotionEvent.ACTION_UP:
+                case android.view.MotionEvent.ACTION_CANCEL:
+                    getParent().requestDisallowInterceptTouchEvent(false);
+                    if (dragging) { pager.onRelease(ev.getX() - downX); dragging = false; }
+                    return true;
+            }
+            return false;
+        }
+    }
+
     private View buildTrackerPager(LiveGame game) {
         try {
             return buildTrackerPagerImpl(game);
@@ -19474,7 +19538,7 @@ private View liveGameCard(LiveGame game) {
         // blanking the tracker). Neighbour cards are added as overlays parked one screen-width to the
         // side; clipChildren(false) lets them slide into view during a drag without affecting the
         // host's measured size.
-        final FrameLayout host = new FrameLayout(this);
+        final SwipePagerFrame host = new SwipePagerFrame(this);
         host.setClipChildren(false);
 
         final View currentCard = trackerCardForIndex(game, center);
@@ -19494,63 +19558,38 @@ private View liveGameCard(LiveGame game) {
             nextCard.setTranslationX(screenW);
         }
 
-        host.setOnTouchListener(new View.OnTouchListener() {
-            float downX, downY; boolean decided, horizontal;
+        host.setPager(new SwipePagerFrame.Pager() {
             void place(float dx) {
                 currentCard.setTranslationX(dx);
                 if (prevCard != null) prevCard.setTranslationX(dx - screenW);
                 if (nextCard != null) nextCard.setTranslationX(dx + screenW);
             }
-            @Override public boolean onTouch(View v, android.view.MotionEvent ev) {
-                switch (ev.getActionMasked()) {
-                    case android.view.MotionEvent.ACTION_DOWN:
-                        downX = ev.getX(); downY = ev.getY(); decided = false; horizontal = false;
-                        break;
-                    case android.view.MotionEvent.ACTION_MOVE: {
-                        float dx = ev.getX() - downX, dy = ev.getY() - downY;
-                        if (!decided && (Math.abs(dx) > dp(10) || Math.abs(dy) > dp(10))) {
-                            decided = true;
-                            horizontal = Math.abs(dx) > Math.abs(dy) * 1.3f;
-                            v.getParent().requestDisallowInterceptTouchEvent(horizontal);
-                        }
-                        if (decided && horizontal) {
-                            float t = dx;
-                            // rubber-band when dragging toward a side with no neighbour
-                            if (t < 0 && !hasNext) t *= 0.3f;
-                            if (t > 0 && !hasPrev) t *= 0.3f;
-                            place(t);
-                        }
-                        break;
-                    }
-                    case android.view.MotionEvent.ACTION_UP:
-                    case android.view.MotionEvent.ACTION_CANCEL: {
-                        v.getParent().requestDisallowInterceptTouchEvent(false);
-                        if (decided && horizontal) {
-                            float moved = currentCard.getTranslationX();
-                            int target = center;
-                            if (moved < -screenW * 0.28f && hasNext) target = center + 1;
-                            else if (moved > screenW * 0.28f && hasPrev) target = center - 1;
-                            final int ft = target;
-                            // animate the current card to its resting/exit position, then commit
-                            float dest = (ft == center) ? 0f : (ft > center ? -screenW : screenW);
-                            currentCard.animate().translationX(dest).setDuration(220)
-                                    .setInterpolator(new android.view.animation.DecelerateInterpolator())
-                                    .withEndAction(() -> {
-                                        if (ft != center) {
-                                            game.viewAtBatIndex = (ft >= count - 1) ? -1 : ft;
-                                            rerenderTracker(game);
-                                        }
-                                    }).start();
-                            if (prevCard != null) prevCard.animate().translationX(dest - screenW).setDuration(220)
-                                    .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
-                            if (nextCard != null) nextCard.animate().translationX(dest + screenW).setDuration(220)
-                                    .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
-                            return true;
-                        }
-                        break;
-                    }
-                }
-                return decided && horizontal;
+            @Override public void onDrag(float dx) {
+                float t = dx;
+                // rubber-band when dragging toward a side with no neighbour
+                if (t < 0 && !hasNext) t *= 0.3f;
+                if (t > 0 && !hasPrev) t *= 0.3f;
+                place(t);
+            }
+            @Override public void onRelease(float dx) {
+                float moved = currentCard.getTranslationX();
+                int target = center;
+                if (moved < -screenW * 0.28f && hasNext) target = center + 1;
+                else if (moved > screenW * 0.28f && hasPrev) target = center - 1;
+                final int ft = target;
+                float dest = (ft == center) ? 0f : (ft > center ? -screenW : screenW);
+                currentCard.animate().translationX(dest).setDuration(220)
+                        .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                        .withEndAction(() -> {
+                            if (ft != center) {
+                                game.viewAtBatIndex = (ft >= count - 1) ? -1 : ft;
+                                rerenderTracker(game);
+                            }
+                        }).start();
+                if (prevCard != null) prevCard.animate().translationX(dest - screenW).setDuration(220)
+                        .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
+                if (nextCard != null) nextCard.animate().translationX(dest + screenW).setDuration(220)
+                        .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
             }
         });
         return host;
