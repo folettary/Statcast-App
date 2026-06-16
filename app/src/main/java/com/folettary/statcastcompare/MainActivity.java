@@ -770,7 +770,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v344", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v345", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -22831,10 +22831,10 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
     private String livePreviewLensCaption(String mode) {
         String m = safe(mode).toLowerCase(Locale.US);
         if ("overall".equals(m)) return "Based on overall team profile";
-        if ("offense".equals(m)) return "Based on lineup production + discipline";
+        if ("offense".equals(m)) return "Based on scoring profile + discipline";
         if ("pitching".equals(m)) return "Based on run prevention + contact allowed";
-        if ("bullpen".equals(m)) return "Based on quality + freshness";
-        if ("pitcher".equals(m)) return "Based on starter command + contact";
+        if ("bullpen".equals(m)) return "Based on relief quality + recent usage";
+        if ("pitcher".equals(m)) return "Based on starter command + contact allowed";
         if ("ovs".equals(m)) return "Based on lineup fit vs starter profile";
         if ("hitter".equals(m)) return "Based on hitter profile";
         if ("hotbats".equals(m)) return "Based on recent form + contact";
@@ -23125,11 +23125,14 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
     // v340: edge-aware variant. Optional edgeChip turns the hub from a menu into a quick
     // scouting dashboard: each card can show SD EDGE / STL SLIGHT / EVEN before tap-through.
     private LinearLayout gameMenuTile(String title, String value, String caption, int accent, View.OnClickListener click, boolean enabled, String disabledNote, String edgeChip, int edgeColor) {
+        boolean hasEdgeChip = enabled && !safe(edgeChip).isEmpty();
         LinearLayout tile = new LinearLayout(this);
         tile.setOrientation(LinearLayout.VERTICAL);
         tile.setGravity(Gravity.CENTER_VERTICAL);
         tile.setMinimumHeight(0);
-        tile.setPadding(dp(9), dp(7), dp(9), dp(7));
+        // v345: when a chip exists, let the chip/chevron live closer to the right edge rather
+        // than stealing title room from the middle of the card.
+        tile.setPadding(dp(9), dp(7), hasEdgeChip ? dp(4) : dp(9), dp(7));
         if (enabled) {
             tile.setClickable(true);
             tile.setForeground(ripple(true, 20f));
@@ -23144,37 +23147,38 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
                 Color.argb(232, 6, 11, 20)
         }, 20, Color.argb(128, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
 
-        LinearLayout top = new LinearLayout(this);
-        top.setOrientation(LinearLayout.HORIZONTAL);
-        top.setGravity(Gravity.CENTER_VERTICAL);
-        TextView t = text(title, 12, Color.WHITE, true);
+        // v345: overlay title and action cluster instead of laying them out as competing
+        // siblings. The title owns the left side; the chip is pinned to the far right with
+        // the chevron still present.
+        FrameLayout top = new FrameLayout(this);
+        TextView t = text(title, hasEdgeChip ? 11 : 12, Color.WHITE, true);
         t.setSingleLine(true);
-        top.addView(t, new LinearLayout.LayoutParams(0, -2, 1));
+        t.setEllipsize(TextUtils.TruncateAt.END);
+        FrameLayout.LayoutParams titleLp = new FrameLayout.LayoutParams(-1, -2, Gravity.LEFT | Gravity.CENTER_VERTICAL);
+        top.addView(t, titleLp);
 
-        // v344: keep the chevron, but move the edge chip into a compact right-side action
-        // cluster so the title gets the left side and the badge lives closer to the card edge.
         LinearLayout actions = new LinearLayout(this);
         actions.setOrientation(LinearLayout.HORIZONTAL);
         actions.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
 
-        if (enabled && !safe(edgeChip).isEmpty()) {
+        if (hasEdgeChip) {
             TextView chip = text(edgeChip, 7, Color.WHITE, true);
             chip.setGravity(Gravity.CENTER);
             chip.setSingleLine(true);
-            chip.setPadding(dp(4), dp(2), dp(4), dp(2));
+            chip.setPadding(dp(3), dp(2), dp(3), dp(2));
             chip.setBackground(roundedGradientStroke(new int[] {
                     mixColor(edgeColor, Color.rgb(8, 13, 22), 0.18f),
                     mixColor(edgeColor, Color.rgb(8, 13, 22), 0.36f)
             }, 999, Color.argb(118, Color.red(edgeColor), Color.green(edgeColor), Color.blue(edgeColor)), 1));
             LinearLayout.LayoutParams chipLp = new LinearLayout.LayoutParams(-2, -2);
-            chipLp.setMargins(dp(3), 0, 0, 0);
+            chipLp.setMargins(0, 0, dp(1), 0);
             actions.addView(chip, chipLp);
         }
 
         if (enabled) {
             TextView arrow = text("›", 16, softColor(accent, 0.08f), true);
             arrow.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
-            actions.addView(arrow, new LinearLayout.LayoutParams(dp(13), -2));
+            actions.addView(arrow, new LinearLayout.LayoutParams(dp(10), -2));
         } else {
             // A small "TBD" pill in place of the chevron signals the locked state at a glance.
             TextView lock = text("TBD", 8, Color.rgb(176, 190, 212), true);
@@ -23183,7 +23187,8 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
             lock.setBackground(roundedStroke(Color.argb(60, 8, 13, 22), Color.argb(80, 200, 214, 236), 999, 1));
             actions.addView(lock);
         }
-        top.addView(actions, new LinearLayout.LayoutParams(-2, -2));
+        FrameLayout.LayoutParams actionsLp = new FrameLayout.LayoutParams(-2, -2, Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        top.addView(actions, actionsLp);
         tile.addView(top, matchWrap());
 
         TextView v = text(value, 10, INK, true);
