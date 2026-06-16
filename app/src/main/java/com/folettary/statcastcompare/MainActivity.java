@@ -765,7 +765,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v337", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v338", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20570,21 +20570,77 @@ private View liveGameCard(LiveGame game) {
     // v335: the dedicated FINAL page — a fuller celebration than the old inline card. Winning team
     // gradient + big logo, FINAL score, both records, and the full key-players breakdown.
     private View finalGamePage(LiveGame game, TeamPalette awayPalette, TeamPalette homePalette) {
-        // reuse the rich victory card content; the page just gives it room to breathe.
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
-        View vc = victoryCard(game, awayPalette, homePalette);
-        page.addView(vc, matchWrap());
-        // hint that there's more to swipe to
-        TextView hint = text("‹ swipe for Tracker · Win Prob · Box Score", 9, INK_DIM, true);
-        hint.setGravity(Gravity.CENTER); hint.setPadding(0, dp(10), 0, dp(2));
+
+        // 1) Victory hero (winner, score, records, key players)
+        page.addView(victoryCard(game, awayPalette, homePalette), matchWrap());
+
+        // 2) Line score — inning-by-inning R/H/E
+        if (game.lineInnings != null && !game.lineInnings.isEmpty()) {
+            LinearLayout.LayoutParams lsLp = matchWrap(); lsLp.setMargins(0, dp(10), 0, 0);
+            page.addView(compactLineScoreCard(game, awayPalette, homePalette), lsLp);
+        }
+
+        // 3) Decisive moment — the single biggest win-probability swing of the game
+        if (game.wpSwings != null && !game.wpSwings.isEmpty() && game.wpDescriptions != null && !game.wpDescriptions.isEmpty()) {
+            int bestIdx = -1; float bestSwing = 0f;
+            for (int i = 0; i < game.wpSwings.size() && i < game.wpDescriptions.size(); i++) {
+                float s = Math.abs(game.wpSwings.get(i));
+                if (s > bestSwing) { bestSwing = s; bestIdx = i; }
+            }
+            if (bestIdx >= 0 && bestSwing > 0f) {
+                int accent = ensureReadableColor((homePalette != null ? homePalette : neutralPalette()).primary, 150);
+                LinearLayout dm = new LinearLayout(this);
+                dm.setOrientation(LinearLayout.VERTICAL);
+                dm.setPadding(dp(14), dp(12), dp(14), dp(12));
+                dm.setBackground(roundedGradientStroke(new int[] {
+                        Color.argb(34, Color.red(accent), Color.green(accent), Color.blue(accent)),
+                        Color.argb(12, Color.red(accent), Color.green(accent), Color.blue(accent))
+                }, 14, Color.argb(96, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
+                TextView eb = text("BIGGEST MOMENT", 8, accent, true);
+                eb.setLetterSpacing(0.2f); dm.addView(eb, matchWrap());
+                TextView swingT = text("+" + Math.round(bestSwing * 100f) + "% win probability swing", 12, INK, true);
+                swingT.setPadding(0, dp(3), 0, 0); dm.addView(swingT, matchWrap());
+                TextView descT = text(safe(game.wpDescriptions.get(bestIdx)), 10, INK_DIM, false);
+                descT.setPadding(0, dp(2), 0, 0); dm.addView(descT, matchWrap());
+                LinearLayout.LayoutParams dmLp = matchWrap(); dmLp.setMargins(0, dp(10), 0, 0);
+                page.addView(dm, dmLp);
+            }
+        }
+
+        // 4) Team totals — runs / hits / errors side by side
+        if (game.awayHits >= 0 && game.homeHits >= 0) {
+            String aA = displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr);
+            String hA = displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr);
+            int accent = ensureReadableColor((awayPalette != null ? awayPalette : neutralPalette()).primary, 150);
+            LinearLayout tt = new LinearLayout(this);
+            tt.setOrientation(LinearLayout.VERTICAL);
+            tt.setPadding(dp(14), dp(12), dp(14), dp(12));
+            tt.setBackground(roundedGradientStroke(new int[] {
+                    Color.argb(30, 255, 255, 255), Color.argb(10, 255, 255, 255)
+            }, 14, Color.argb(70, 255, 255, 255), 1));
+            TextView eb = text("TEAM TOTALS", 8, accent, true);
+            eb.setLetterSpacing(0.2f); tt.addView(eb, matchWrap());
+            String away = aA + ":  " + game.awayScore + " R · " + game.awayHits + " H"
+                    + (game.awayErrors >= 0 ? " · " + game.awayErrors + " E" : "");
+            String home = hA + ":  " + game.homeScore + " R · " + game.homeHits + " H"
+                    + (game.homeErrors >= 0 ? " · " + game.homeErrors + " E" : "");
+            TextView aT = text(away, 11, INK, true); aT.setPadding(0, dp(4), 0, 0); tt.addView(aT, matchWrap());
+            TextView hT = text(home, 11, INK, true); hT.setPadding(0, dp(2), 0, 0); tt.addView(hT, matchWrap());
+            LinearLayout.LayoutParams ttLp = matchWrap(); ttLp.setMargins(0, dp(10), 0, 0);
+            page.addView(tt, ttLp);
+        }
+
+        TextView hint = text("‹ swipe back for Box Score · Win Prob · Tracker", 9, INK_DIM, true);
+        hint.setGravity(Gravity.CENTER); hint.setPadding(0, dp(12), 0, dp(2));
         page.addView(hint, matchWrap());
         return page;
     }
 
     private boolean advanceLiveSubTab(LiveGame game, int dir) {
         boolean isFinal = "Final".equals(game.statusLabel());
-        String[] order = isFinal ? new String[] { "final", "tracker", "prob", "box" }
+        String[] order = isFinal ? new String[] { "tracker", "prob", "box", "final" }
                                   : new String[] { "tracker", "prob", "box" };
         int cur = 0;
         for (int i = 0; i < order.length; i++) if (order[i].equals(gameHubLiveSub)) { cur = i; break; }
@@ -22129,10 +22185,10 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         sub.setOrientation(LinearLayout.HORIZONTAL);
         sub.setPadding(dp(3), dp(3), dp(3), dp(3));
         sub.setBackground(roundedStroke(Color.argb(120, 6, 11, 20), Color.argb(44, 255, 255, 255), 999, 1));
-        if ("Final".equals(game.statusLabel())) sub.addView(liveSubButton("Final", "final", game));
         sub.addView(liveSubButton("Tracker", "tracker", game));
         sub.addView(liveSubButton("Win Prob", "prob", game));
         sub.addView(liveSubButton("Box Score", "box", game));
+        if ("Final".equals(game.statusLabel())) sub.addView(liveSubButton("Final", "final", game));
         return sub;
     }
 
@@ -22146,9 +22202,22 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
             LinearLayout finalHost = new LinearLayout(this);
             finalHost.setOrientation(LinearLayout.VERTICAL);
             finalHost.addView(finalGamePage(game, awayPalette, homePalette), matchWrap());
-            SwipePagerFrame swipeWrap = wrapInSubTabSwiper(game, finalHost, false, true); // Tracker→
+            SwipePagerFrame swipeWrap = wrapInSubTabSwiper(game, finalHost, true, false); // ←Box Score
             LinearLayout.LayoutParams fLp = matchWrap(); fLp.setMargins(dp(12), 0, dp(12), dp(6));
             panel.addView(swipeWrap, fLp);
+            // ensure win-prob + line score data is present so "Biggest Moment" / line score populate;
+            // if it wasn't loaded yet, fetch in the background and rebuild the page once.
+            if (game.wpSwings == null || game.wpSwings.isEmpty() || game.lineInnings == null || game.lineInnings.isEmpty()) {
+                io.execute(() -> {
+                    try { fetchWinProbabilityInto(game); } catch (Exception ignored) { }
+                    try { fetchCompactLineScoreInto(game); } catch (Exception ignored) { }
+                    main.post(() -> {
+                        if (!"final".equals(gameHubLiveSub) || activeLiveGameMenu != game) return;
+                        finalHost.removeAllViews();
+                        finalHost.addView(finalGamePage(game, awayPalette, homePalette), matchWrap());
+                    });
+                });
+            }
         } else if ("prob".equals(gameHubLiveSub)) {
             LinearLayout wpHost = new LinearLayout(this);
             wpHost.setOrientation(LinearLayout.VERTICAL);
@@ -22160,7 +22229,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
             LinearLayout boxHost = new LinearLayout(this);
             boxHost.setOrientation(LinearLayout.VERTICAL);
             renderBoxTab(boxHost, game, awayPalette, homePalette);
-            SwipePagerFrame swipeWrap = wrapInSubTabSwiper(game, boxHost, true, false); // ←Win Prob only
+            SwipePagerFrame swipeWrap = wrapInSubTabSwiper(game, boxHost, true, "Final".equals(game.statusLabel())); // ←Win Prob, Final→ if over
             panel.addView(swipeWrap, matchWrap()); // renderBoxTab already insets its own host
         } else {
             LinearLayout trackerHost = new LinearLayout(this);
