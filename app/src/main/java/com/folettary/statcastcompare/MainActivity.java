@@ -770,7 +770,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v348", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v349", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -6316,6 +6316,57 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                     if (!isCurrentScreenRequest(requestToken) || activePrimaryTab != TAB_MATCHUP) return;
                     setBusy(false, null);
                     showError("Could not load side-by-side player comparison. " + e.getMessage());
+                });
+            }
+        });
+    }
+
+
+    private void compareLivePitchersSideBySide(Player a, Player b, int season) {
+        lastComparison = null;
+        lastHeadToHead = null;
+        resetTrendDefaults();
+        StatScope scope = StatScope.PITCH_ONLY;
+        applyMetricsForRoleAndPreset("pitch", "recommended", true);
+        showProfileSkeleton();
+        setBusy(true, "Loading starting pitcher comparison…");
+        final int requestToken = nextScreenRequestToken();
+        io.execute(() -> {
+            try {
+                ArrayList<LeaderboardEntry> entries = fetchLeaderboardForScope(season, scope);
+                LeaderboardEntry entryA = findPlayerEntry(entries, a);
+                LeaderboardEntry entryB = findPlayerEntry(entries, b);
+                Stats statsA = entryA == null ? new Stats() : copyStats(entryA.stats);
+                Stats statsB = entryB == null ? new Stats() : copyStats(entryB.stats);
+                Future<?> directA = fanout.submit(() -> ensureDirectPlayerStatsForScope(a, season, statsA, scope));
+                ensureDirectPlayerStatsForScope(b, season, statsB, scope);
+                try { directA.get(); } catch (Exception ignored) {}
+                Stats leagueStats = computeLeagueAverage(entries);
+                ArrayList<Metric> displayed = livePitcherPreviewMetrics();
+                ArrayList<Metric> rankMetrics = metricsForRankScope(scope, false);
+                HashMap<String, Integer> ranksA = computePlayerRankMap(entries, season, a.id, rankMetrics);
+                HashMap<String, Integer> ranksB = computePlayerRankMap(entries, season, b.id, rankMetrics);
+                HashMap<String, Integer> totals = computePlayerRankTotalMap(entries, season, rankMetrics);
+                HeadToHeadComparison h = new HeadToHeadComparison(false, a.fullName, b.fullName,
+                        a.teamAbbr + " · " + a.position, b.teamAbbr + " · " + b.position,
+                        a.id, b.id, season, statsA, statsB, leagueStats, a, b, null, null,
+                        ranksA, ranksB, totals, totals,
+                        percentileMap(ranksA, totals), percentileMap(ranksB, totals),
+                        scope, new ArrayList<>(displayed), keyEdgeMetricsForScope(scope));
+                main.post(() -> {
+                    if (!isCurrentScreenRequest(requestToken) || activePrimaryTab != TAB_MATCHUP || !headToHeadMode) return;
+                    lastComparison = null;
+                    lastHeadToHead = h;
+                    applyMetricsForRoleAndPreset("pitch", "recommended", true);
+                    renderHeadToHead(h);
+                    setBusy(false, "Loaded starting pitcher comparison for " + season);
+                    enterMatchupResultMode();
+                });
+            } catch (Exception e) {
+                main.post(() -> {
+                    if (!isCurrentScreenRequest(requestToken) || activePrimaryTab != TAB_MATCHUP) return;
+                    setBusy(false, null);
+                    showError("Could not load starting pitcher comparison. " + e.getMessage());
                 });
             }
         });
@@ -26648,7 +26699,11 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         if (standingsBox != null) standingsBox.removeAllViews();
         if (resultsBox != null) resultsBox.setVisibility(View.VISIBLE);
         statusView.setText("Live SP matchup · " + lastNameOnly(game.awayPitcher) + " vs " + lastNameOnly(game.homePitcher) + ".");
-        comparePlayersSideBySide(away, home, currentSeason());
+        // v349: do not use the generic player comparator here. Some probable-starter records
+        // resolve as two-way/ambiguous, which makes the generic comparator choose BOTH scope;
+        // the selected pitch-only Recommended keys then look like a Custom mixed lens. Force
+        // this live card to true PITCH_ONLY scope so the UI opens on Recommended.
+        compareLivePitchersSideBySide(away, home, currentSeason());
     }
 
     private void openLiveTopHitterMatchup(LiveGame game) {
