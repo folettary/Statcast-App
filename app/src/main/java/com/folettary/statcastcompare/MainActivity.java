@@ -783,7 +783,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v365", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v366", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -23049,7 +23049,9 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
 
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(0, dp(2), 0, dp(4));
+        panel.setClipChildren(true);
+        panel.setClipToPadding(true);
+        panel.setPadding(0, dp(2), 0, dp(2));
         panel.setBackground(roundedGradientStroke(
                 guardedDuelGradient(awayPalette, homePalette, true),
                 22,
@@ -23063,42 +23065,59 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         activeLiveScoreHeroHost = new FrameLayout(this);
         activeLiveScoreHeroHost.addView(hero, new FrameLayout.LayoutParams(-1, -2));
         LinearLayout.LayoutParams heroLp = matchWrap();
-        heroLp.setMargins(dp(12), dp(2), dp(12), dp(2));
+        heroLp.setMargins(dp(12), dp(2), dp(12), dp(1));
         panel.addView(activeLiveScoreHeroHost, heroLp);
 
         LinearLayout hint = (LinearLayout) liveFocusHintRow();
         LinearLayout.LayoutParams hintLp = matchWrap();
-        hintLp.setMargins(dp(12), 0, dp(12), dp(2));
+        hintLp.setMargins(dp(12), 0, dp(12), dp(1));
         panel.addView(hint, hintLp);
 
-        final int pageW = Math.max(1, getResources().getDisplayMetrics().widthPixels - dp(24));
+        final int screenW = Math.max(1, getResources().getDisplayMetrics().widthPixels);
+        final int screenH = Math.max(1, getResources().getDisplayMetrics().heightPixels);
+        final int pageW = Math.max(1, screenW - dp(24));
+        // v366: fixed viewport prevents the Box/Win Prob page heights from creating dead vertical
+        // scroll space on Tracker. Keep the tracker full-size, then clip secondary pages to the
+        // same no-scroll focus viewport.
+        final int focusPagerH = Math.max(dp(430), Math.min(dp(620), screenH - dp(248)));
         final int[] pageIndex = new int[] { liveFocusPageIndex() };
 
         SwipePagerFrame pager = new SwipePagerFrame(this);
-        pager.setClipChildren(false);
-        pager.setClipToPadding(false);
+        pager.setClipChildren(true);
+        pager.setClipToPadding(true);
+        pager.setPadding(0, 0, 0, 0);
 
         LinearLayout strip = new LinearLayout(this);
         strip.setOrientation(LinearLayout.HORIZONTAL);
-        strip.setClipChildren(false);
-        strip.setClipToPadding(false);
+        strip.setClipChildren(true);
+        strip.setClipToPadding(true);
 
         // Build all three pages up front so focus mode is a true horizontal carousel instead of
-        // "swipe → rebuild the whole screen."
+        // "swipe → rebuild the whole screen." Each page is fixed to the viewport and centered.
         LinearLayout trackerPage = new LinearLayout(this);
         trackerPage.setOrientation(LinearLayout.VERTICAL);
-        trackerPage.setVisibility(View.VISIBLE);
+        trackerPage.setGravity(Gravity.CENTER_HORIZONTAL);
+        trackerPage.setClipChildren(true);
+        trackerPage.setClipToPadding(true);
+
         LinearLayout trackerHost = new LinearLayout(this);
         trackerHost.setOrientation(LinearLayout.VERTICAL);
+        trackerHost.setGravity(Gravity.CENTER_HORIZONTAL);
         trackerHost.setVisibility(View.GONE);
-        trackerPage.addView(trackerHost, matchWrap());
+        trackerPage.addView(trackerHost, new LinearLayout.LayoutParams(-1, -2));
 
         LinearLayout wpPage = new LinearLayout(this);
         wpPage.setOrientation(LinearLayout.VERTICAL);
+        wpPage.setGravity(Gravity.CENTER_HORIZONTAL);
+        wpPage.setClipChildren(true);
+        wpPage.setClipToPadding(true);
         loadWinProbability(game, wpPage, awayPalette, homePalette);
 
         LinearLayout boxPage = new LinearLayout(this);
         boxPage.setOrientation(LinearLayout.VERTICAL);
+        boxPage.setGravity(Gravity.CENTER_HORIZONTAL);
+        boxPage.setClipChildren(true);
+        boxPage.setClipToPadding(true);
         renderBoxTab(boxPage, game, awayPalette, homePalette);
 
         activeLiveTrackerHost = trackerHost;
@@ -23107,11 +23126,11 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         activeLiveTrackerGame = game;
         loadLiveTracker(game, trackerHost, awayPalette, homePalette);
 
-        strip.addView(trackerPage, new LinearLayout.LayoutParams(pageW, -2));
-        strip.addView(wpPage, new LinearLayout.LayoutParams(pageW, -2));
-        strip.addView(boxPage, new LinearLayout.LayoutParams(pageW, -2));
+        strip.addView(trackerPage, new LinearLayout.LayoutParams(pageW, focusPagerH));
+        strip.addView(wpPage, new LinearLayout.LayoutParams(pageW, focusPagerH));
+        strip.addView(boxPage, new LinearLayout.LayoutParams(pageW, focusPagerH));
         strip.setTranslationX(-pageIndex[0] * pageW);
-        pager.addView(strip, new FrameLayout.LayoutParams(pageW * 3, -2));
+        pager.addView(strip, new FrameLayout.LayoutParams(pageW * 3, focusPagerH));
 
         final TextView d0 = text("●", 9, INK_DIM, true);
         final TextView d1 = text("●", 9, INK_DIM, true);
@@ -23119,6 +23138,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         updateLiveFocusDots(d0, d1, d2, pageIndex[0]);
         LinearLayout dots = new LinearLayout(this);
         dots.setGravity(Gravity.CENTER);
+        dots.setPadding(0, 0, 0, 0);
         dots.addView(d0);
         TextView gap1 = text("  ", 9, INK_DIM, false); dots.addView(gap1);
         dots.addView(d1);
@@ -23153,12 +23173,13 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
             }
         });
 
-        LinearLayout.LayoutParams pagerLp = new LinearLayout.LayoutParams(pageW, -2);
+        LinearLayout.LayoutParams pagerLp = new LinearLayout.LayoutParams(pageW, focusPagerH);
+        pagerLp.gravity = Gravity.CENTER_HORIZONTAL;
         pagerLp.setMargins(dp(12), 0, dp(12), 0);
         panel.addView(pager, pagerLp);
 
         LinearLayout.LayoutParams dotsLp = matchWrap();
-        dotsLp.setMargins(0, dp(2), 0, 0);
+        dotsLp.setMargins(0, dp(1), 0, 0);
         panel.addView(dots, dotsLp);
 
         if (pageIndex[0] == 0) startLiveTrackerPolling(game);
