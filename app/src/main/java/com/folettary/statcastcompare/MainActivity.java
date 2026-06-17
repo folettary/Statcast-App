@@ -339,6 +339,8 @@ public class MainActivity extends Activity {
     private String liveResultHoldKey = "";             // v369: keep terminal PA result visible briefly
     private long liveResultHoldUntilMs = 0L;
     private int liveResultHoldGamePk = -1;
+    private String liveBetweenResultHoldKey = "";      // v371: inning-end must show last play before Due Up
+    private long liveBetweenResultHoldUntilMs = 0L;
     private long liveResumeRefreshMs = 0L;             // v369: refresh stale live feed immediately on resume
     // v167: Matchups tab is now a two-path hub: compact live games or manual create.
     private static final int MATCHUP_PATH_LIVE = 0;
@@ -795,7 +797,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v370", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v371", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -19817,9 +19819,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 refreshActiveLiveScoreHero(game);
                 host.removeAllViews();
                 liveUpdateRebuild = true;
-                View tracker = buildTrackerPager(game);
-                if (liveFocusMode) host.addView(tracker, new LinearLayout.LayoutParams(-1, -1));
-                else host.addView(tracker, matchWrap());
+                host.addView(buildTrackerPager(game), matchWrap());
                 liveUpdateRebuild = false;
                 host.setVisibility(View.VISIBLE);
                 host.setAlpha(0f);
@@ -20091,17 +20091,26 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             View eventChild = null;
             int eventKey = 0;
             if (betweenInnings && liveAb && game.dueUp != null && !game.dueUp.isEmpty()) {
-                // v370: on inning end, keep the LAST PLAY visible for the same timed hold window we
-                // use elsewhere instead of jumping straight to Due Up. Once that hold expires, swap
-                // to Due Up automatically.
+                // v371: on inning end, independently hold the LAST PLAY when the inning-break state
+                // first appears. The regular result hold may have expired before MLB flips linescore
+                // to Middle/End, which is what made Due Up pop immediately.
                 boolean topUp = game.dueUp.get(0).topComingUp;
                 TeamPalette upPal = topUp ? activeLiveTrackerAwayPal : activeLiveTrackerHomePal;
                 if (upPal == null) upPal = neutralPalette();
                 int upColor = ensureReadableColor(upPal.primary, 150);
 
                 boolean hasLastPlay = ab != null && ab.complete && !safe(ab.result).isEmpty();
-                int heldIdxNow = heldLiveResultIndex(game, feed);
-                boolean holdLastPlay = hasLastPlay && heldIdxNow == fidx;
+                boolean holdLastPlay = false;
+                if (hasLastPlay) {
+                    String betweenResultKey = game.gamePk + ":" + game.sitInning + ":" + inState + ":" + fidx
+                            + ":" + safe(ab.result) + ":" + safe(ab.description);
+                    long now = System.currentTimeMillis();
+                    if (!betweenResultKey.equals(liveBetweenResultHoldKey)) {
+                        liveBetweenResultHoldKey = betweenResultKey;
+                        liveBetweenResultHoldUntilMs = now + Math.max(4200L, terminalResultHoldMs(ab));
+                    }
+                    holdLastPlay = now < liveBetweenResultHoldUntilMs;
+                }
                 if (holdLastPlay) {
                     eventChild = resultCard(ab, null, batColor);
                     eventKey = ("res-between-" + fidx + "-" + ab.result).hashCode();
@@ -20128,11 +20137,6 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         }
 
         // ---- Game Context carousel (core tracker section; always above Play Feed) ----
-        // v369: in Focus Mode, this becomes the bottom-anchored insight row inside the no-scroll page.
-        if (liveFocusMode) {
-            Space bottomFlex = new Space(this);
-            card.addView(bottomFlex, new LinearLayout.LayoutParams(-1, 0, 1f));
-        }
         if (!"Final".equals(game.statusLabel())) {
             View sc = situationalCarousel(game, ab, activeLiveTrackerAwayPal, activeLiveTrackerHomePal);
             if (sc != null) {
@@ -20619,18 +20623,15 @@ private View liveGameCard(LiveGame game, int slateIndex) {
     }
 
     private int gameContextCardWidth(GameContextCard c) {
-        if (c == null) return liveFocusMode ? dp(220) : dp(132);
+        if (c == null) return dp(132);
         String eb = safe(c.eyebrow);
         String head = safe(c.headline);
         String sub = safe(c.subline);
         int maxLine = Math.max(eb.length(), Math.max(head.length(), sub.length()));
-        // v369: compact ticker cards in normal mode; larger, readable insight cards in Focus Mode.
-        int base = liveFocusMode ? dp(156) : dp(82);
-        int cap = liveFocusMode ? dp(180) : dp(124);
-        int min = liveFocusMode ? dp(220) : dp(118);
-        int max = liveFocusMode ? dp(318) : dp(232);
-        int w = base + Math.min(cap, Math.max(0, maxLine) * dp(liveFocusMode ? 5 : 4));
-        return Math.max(min, Math.min(max, w));
+        // v371: Focus Mode uses the same compact context-card sizing as normal mode; the win is
+        // removing nav/chrome and clipping, not inventing a second oversized layout.
+        int w = dp(82) + Math.min(dp(124), Math.max(0, maxLine) * dp(4));
+        return Math.max(dp(118), Math.min(dp(232), w));
     }
 
     private java.util.ArrayList<GameContextCard> stableGameContextCards(LiveGame game, java.util.ArrayList<GameContextCard> fresh) {
@@ -20707,7 +20708,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 GameContextCard c = data.get(i);
                 int cardW = gameContextCardWidth(c);
                 int leftMargin = (loop == 0 && i == 0) ? 0 : dp(8);
-                LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(cardW, liveFocusMode ? dp(126) : -2);
+                LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(cardW, -2);
                 clp.setMargins(leftMargin, 0, 0, 0);
                 strip.addView(insightCard(c.eyebrow, c.headline, c.subline, c.accent), clp);
                 if (loop == 0) cycleWidthPx[0] += leftMargin + cardW;
@@ -21076,27 +21077,26 @@ private View liveGameCard(LiveGame game, int slateIndex) {
     private View insightCard(String eyebrow, String headline, String subline, int accent) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setGravity(liveFocusMode ? Gravity.CENTER_VERTICAL : Gravity.NO_GRAVITY);
-        card.setPadding(dp(liveFocusMode ? 13 : 10), dp(liveFocusMode ? 11 : 9), dp(liveFocusMode ? 13 : 10), dp(liveFocusMode ? 11 : 9));
-        card.setMinimumHeight(dp(liveFocusMode ? 118 : 78));
+        card.setPadding(dp(10), dp(9), dp(10), dp(9));
+        card.setMinimumHeight(dp(78));
         card.setBackground(roundedGradientStroke(new int[] {
-                Color.argb(liveFocusMode ? 58 : 46, Color.red(accent), Color.green(accent), Color.blue(accent)),
-                Color.argb(liveFocusMode ? 20 : 14, Color.red(accent), Color.green(accent), Color.blue(accent))
-        }, liveFocusMode ? 18 : 14, Color.argb(liveFocusMode ? 132 : 112, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
-        TextView eb = text(eyebrow, liveFocusMode ? 8 : 7, accent, true);
+                Color.argb(46, Color.red(accent), Color.green(accent), Color.blue(accent)),
+                Color.argb(14, Color.red(accent), Color.green(accent), Color.blue(accent))
+        }, 14, Color.argb(112, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
+        TextView eb = text(eyebrow, 7, accent, true);
         eb.setSingleLine(true);
         eb.setLetterSpacing(0.18f);
         card.addView(eb, matchWrap());
-        TextView hl = text(safe(headline), liveFocusMode ? 15 : 13, INK, true);
+        TextView hl = text(safe(headline), 13, INK, true);
         hl.setSingleLine(true);
         hl.setEllipsize(TextUtils.TruncateAt.END);
-        hl.setPadding(0, dp(liveFocusMode ? 5 : 3), 0, 0);
+        hl.setPadding(0, dp(3), 0, 0);
         card.addView(hl, matchWrap());
-        TextView sl = text(safe(subline), liveFocusMode ? 11 : 9, INK_DIM, true);
+        TextView sl = text(safe(subline), 9, INK_DIM, true);
         sl.setSingleLine(false);
-        sl.setMaxLines(liveFocusMode ? 3 : 2);
+        sl.setMaxLines(2);
         sl.setEllipsize(TextUtils.TruncateAt.END);
-        sl.setPadding(0, dp(liveFocusMode ? 4 : 2), 0, 0);
+        sl.setPadding(0, dp(2), 0, 0);
         card.addView(sl, matchWrap());
         return card;
     }
@@ -21375,18 +21375,18 @@ private View liveGameCard(LiveGame game, int slateIndex) {
 
         final View currentCard = trackerCardForIndex(game, center, true);
         host.addView(currentCard, new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, liveFocusMode ? FrameLayout.LayoutParams.MATCH_PARENT : FrameLayout.LayoutParams.WRAP_CONTENT));
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT));
 
         final View prevCard = hasPrev ? trackerCardForIndex(game, center - 1) : null;
         if (prevCard != null) {
             host.addView(prevCard, new FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT, liveFocusMode ? FrameLayout.LayoutParams.MATCH_PARENT : FrameLayout.LayoutParams.WRAP_CONTENT));
+                    FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT));
             prevCard.setTranslationX(-screenW);
         }
         final View nextCard = hasNext ? trackerCardForIndex(game, center + 1) : null;
         if (nextCard != null) {
             host.addView(nextCard, new FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT, liveFocusMode ? FrameLayout.LayoutParams.MATCH_PARENT : FrameLayout.LayoutParams.WRAP_CONTENT));
+                    FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT));
             nextCard.setTranslationX(screenW);
         }
 
@@ -23130,34 +23130,32 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         if (matchupHubBox != null) matchupHubBox.setVisibility(View.GONE);
         standingsBox.setVisibility(View.VISIBLE);
         standingsBox.removeAllViews();
+        standingsBox.setPadding(0, 0, 0, 0);
 
         Team away = teamForLiveGame(game.awayTeamId, game.awayName, game.awayAbbr);
         Team home = teamForLiveGame(game.homeTeamId, game.homeName, game.homeAbbr);
         TeamPalette awayPalette = away == null ? paletteForAbbr(game.awayAbbr) : paletteForTeam(away);
         TeamPalette homePalette = home == null ? paletteForAbbr(game.homeAbbr) : paletteForTeam(home);
 
-        final int screenW = Math.max(1, getResources().getDisplayMetrics().widthPixels);
-        final int screenH = Math.max(1, getResources().getDisplayMetrics().heightPixels);
         android.graphics.Rect visFrame = new android.graphics.Rect();
         getWindow().getDecorView().getWindowVisibleDisplayFrame(visFrame);
-        final int visibleH = Math.max(dp(720), Math.max(mainScroll != null ? mainScroll.getHeight() : 0, visFrame.height()));
-        final int pageW = Math.max(1, screenW - dp(12));
-        // v370: Focus Mode should use the FULL usable viewport — up near the status area and all
-        // the way down to the nav bar — so the tracker, fixed event slot, and context carousel all fit.
-        final int focusRootH = Math.max(dp(720), visibleH - dp(1));
-        final int[] pageIndex = new int[] { liveFocusPageIndex() };
+        int visibleH = Math.max(dp(680), Math.max(mainScroll != null ? mainScroll.getHeight() : 0, visFrame.height()));
 
+        // v371: Focus Mode is no longer a separate clipped layout system. It reuses the normal live
+        // tracker flow, removes chrome/nav, and lets the exact same tracker/result/context stack lay
+        // itself out naturally. This keeps home plate and context cards from being cut off.
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setClipChildren(true);
-        panel.setClipToPadding(true);
-        panel.setPadding(0, 0, 0, 0);
+        panel.setPadding(0, 0, 0, dp(2));
+        panel.setMinimumHeight(visibleH);
+        panel.setClipChildren(false);
+        panel.setClipToPadding(false);
         panel.setBackground(roundedGradientStroke(
                 guardedDuelGradient(awayPalette, homePalette, true),
                 22,
                 guardedDuelStroke(awayPalette, homePalette, 128),
                 1));
-        LinearLayout.LayoutParams panelLp = new LinearLayout.LayoutParams(-1, focusRootH);
+        LinearLayout.LayoutParams panelLp = matchWrap();
         panelLp.setMargins(0, 0, 0, 0);
         standingsBox.addView(panel, panelLp);
 
@@ -23173,107 +23171,11 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         hintLp.setMargins(dp(8), 0, dp(8), 0);
         panel.addView(hint, hintLp);
 
-        SwipePagerFrame pager = new SwipePagerFrame(this);
-        pager.setClipChildren(true);
-        pager.setClipToPadding(true);
-        pager.setPadding(0, 0, 0, 0);
+        // Same live-tab content as normal mode. Horizontal navigation still comes from the normal
+        // tracker/sub-tab swipers; no extra fixed-height page wrapper and no Focus-only dots.
+        renderLiveTab(panel, game, awayPalette, homePalette, false);
 
-        LinearLayout strip = new LinearLayout(this);
-        strip.setOrientation(LinearLayout.HORIZONTAL);
-        strip.setClipChildren(true);
-        strip.setClipToPadding(true);
-
-        // Build all three pages up front so focus mode is a true horizontal carousel instead of
-        // "swipe → rebuild the whole screen." Pages fill the fixed viewport and stay centered.
-        LinearLayout trackerPage = new LinearLayout(this);
-        trackerPage.setOrientation(LinearLayout.VERTICAL);
-        trackerPage.setGravity(Gravity.CENTER_HORIZONTAL);
-        trackerPage.setClipChildren(true);
-        trackerPage.setClipToPadding(true);
-
-        LinearLayout trackerHost = new LinearLayout(this);
-        trackerHost.setOrientation(LinearLayout.VERTICAL);
-        trackerHost.setGravity(Gravity.CENTER_HORIZONTAL);
-        trackerHost.setVisibility(View.GONE);
-        trackerPage.addView(trackerHost, new LinearLayout.LayoutParams(-1, -1));
-
-        LinearLayout wpPage = new LinearLayout(this);
-        wpPage.setOrientation(LinearLayout.VERTICAL);
-        wpPage.setGravity(Gravity.CENTER_HORIZONTAL);
-        wpPage.setClipChildren(true);
-        wpPage.setClipToPadding(true);
-        loadWinProbability(game, wpPage, awayPalette, homePalette);
-
-        LinearLayout boxPage = new LinearLayout(this);
-        boxPage.setOrientation(LinearLayout.VERTICAL);
-        boxPage.setGravity(Gravity.CENTER_HORIZONTAL);
-        boxPage.setClipChildren(true);
-        boxPage.setClipToPadding(true);
-        renderBoxTab(boxPage, game, awayPalette, homePalette);
-
-        activeLiveTrackerHost = trackerHost;
-        activeLiveTrackerAwayPal = awayPalette;
-        activeLiveTrackerHomePal = homePalette;
-        activeLiveTrackerGame = game;
-        loadLiveTracker(game, trackerHost, awayPalette, homePalette);
-
-        strip.addView(trackerPage, new LinearLayout.LayoutParams(pageW, -1));
-        strip.addView(wpPage, new LinearLayout.LayoutParams(pageW, -1));
-        strip.addView(boxPage, new LinearLayout.LayoutParams(pageW, -1));
-        strip.setTranslationX(-pageIndex[0] * pageW);
-        pager.addView(strip, new FrameLayout.LayoutParams(pageW * 3, -1));
-
-        final TextView d0 = text("●", 9, INK_DIM, true);
-        final TextView d1 = text("●", 9, INK_DIM, true);
-        final TextView d2 = text("●", 9, INK_DIM, true);
-        updateLiveFocusDots(d0, d1, d2, pageIndex[0]);
-        LinearLayout dots = new LinearLayout(this);
-        dots.setGravity(Gravity.CENTER);
-        dots.setPadding(0, 0, 0, 0);
-        dots.addView(d0);
-        TextView gap1 = text("  ", 9, INK_DIM, false); dots.addView(gap1);
-        dots.addView(d1);
-        TextView gap2 = text("  ", 9, INK_DIM, false); dots.addView(gap2);
-        dots.addView(d2);
-
-        pager.setPager(new TrackerPagerCb() {
-            @Override public void onDrag(float dx) {
-                float t = -pageIndex[0] * pageW + dx;
-                if ((pageIndex[0] == 0 && dx > 0) || (pageIndex[0] == 2 && dx < 0)) {
-                    t = -pageIndex[0] * pageW + dx * 0.28f;
-                }
-                strip.setTranslationX(t);
-            }
-
-            @Override public void onRelease(float dx) {
-                int next = pageIndex[0];
-                if (dx < -pageW * 0.20f && pageIndex[0] < 2) next++;
-                else if (dx > pageW * 0.20f && pageIndex[0] > 0) next--;
-
-                pageIndex[0] = next;
-                gameHubLiveSub = liveFocusSubForIndex(next);
-                if (next == 0) {
-                    game.viewAtBatIndex = -1;
-                    startLiveTrackerPolling(game);
-                } else {
-                    stopLiveTrackerPolling();
-                }
-                updateLiveFocusDots(d0, d1, d2, next);
-                strip.animate().translationX(-next * pageW).setDuration(220)
-                        .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
-            }
-        });
-
-        LinearLayout.LayoutParams pagerLp = new LinearLayout.LayoutParams(pageW, 0, 1f);
-        pagerLp.gravity = Gravity.CENTER_HORIZONTAL;
-        pagerLp.setMargins(dp(6), 0, dp(6), 0);
-        panel.addView(pager, pagerLp);
-
-        LinearLayout.LayoutParams dotsLp = matchWrap();
-        dotsLp.setMargins(0, 0, 0, 0);
-        panel.addView(dots, dotsLp);
-
-        if (pageIndex[0] == 0) startLiveTrackerPolling(game);
+        if ("tracker".equals(gameHubLiveSub)) startLiveTrackerPolling(game);
         else stopLiveTrackerPolling();
 
         if (mainScroll != null) mainScroll.post(() -> mainScroll.scrollTo(0, 0));
