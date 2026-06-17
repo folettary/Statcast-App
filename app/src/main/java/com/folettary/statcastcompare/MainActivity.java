@@ -825,7 +825,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v373", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v374", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -19497,9 +19497,12 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 int alpha = age == 0 ? 220 : (age <= 3 ? 150 : (count >= 9 ? 72 : 100));
                 float stroke = age == 0 ? dp(3.8f) : (age <= 3 ? dp(2.8f) : dp(2.0f));
                 float dotR = age == 0 ? dp(10.8f) : (age <= 3 ? dp(9.2f) : dp(8.0f));
-                float tInset = dotR + dp(2);
-                float cx = Math.max(drawL + tInset, Math.min(drawL + drawW - tInset, cxRaw));
-                float cy = Math.max(drawT + tInset, Math.min(drawT + drawH - tInset, cyRaw));
+                // v374: reserve marker+chevron runway at all plot edges. v372/v373 made the
+                // visible canvas tighter; a high pinned pitch could put its chevron outside the view.
+                float tInsetX = dotR + dp(7);
+                float tInsetY = dotR + dp(8);
+                float cx = Math.max(drawL + tInsetX, Math.min(drawL + drawW - tInsetX, cxRaw));
+                float cy = Math.max(drawT + tInsetY, Math.min(drawT + drawH - tInsetY, cyRaw));
                 float mx = (originX + cx) / 2f, my = (originY + cy) / 2f;
                 float bendX = Double.isNaN(lp.pfxX) ? 0f : (float) (-lp.pfxX) * dp(2.2f);
                 float bendY = Double.isNaN(lp.pfxZ) ? 0f : (float) (lp.pfxZ) * dp(1.4f);
@@ -19533,9 +19536,13 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 float r = latest ? dp(10.8f) : (recent ? dp(9.2f) : dp(8.0f));
                 // Inset so the whole dot (plus a hair for the glow) stays inside the plot, and clamp
                 // any pitch whose true location is outside the window to the edge — marked pinned.
-                float inset = r + dp(2);
-                float minX = drawL + inset, maxX = drawL + drawW - inset;
-                float minY = drawT + inset, maxY = drawT + drawH - inset;
+                // v374: full tracking-window safety gutter. Keep the entire marker and the
+                // pinned-location chevron visible inside the StrikeZoneView without changing the
+                // zone size or the 264dp tracking-window height.
+                float insetX = r + dp(7);
+                float insetY = r + dp(8);
+                float minX = drawL + insetX, maxX = drawL + drawW - insetX;
+                float minY = drawT + insetY, maxY = drawT + drawH - insetY;
                 float cx = Math.max(minX, Math.min(maxX, cxRaw));
                 float cy = Math.max(minY, Math.min(maxY, cyRaw));
                 boolean pinned = (cx != cxRaw) || (cy != cyRaw);
