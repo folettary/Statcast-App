@@ -783,7 +783,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v366", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v367", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20616,7 +20616,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         LinearLayout strip = new LinearLayout(this);
         strip.setOrientation(LinearLayout.HORIZONTAL);
         int limit = Math.min(8, data.size());
-        boolean autoLoop = limit >= 3;
+        boolean autoLoop = limit >= 2;
         int loops = autoLoop ? 2 : 1; // duplicate once for seamless reset back to the first set
         final int[] cycleWidthPx = new int[] { 0 };
         for (int loop = 0; loop < loops; loop++) {
@@ -23075,11 +23075,12 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
 
         final int screenW = Math.max(1, getResources().getDisplayMetrics().widthPixels);
         final int screenH = Math.max(1, getResources().getDisplayMetrics().heightPixels);
+        final int visibleH = (mainScroll != null && mainScroll.getHeight() > 0) ? mainScroll.getHeight() : screenH;
         final int pageW = Math.max(1, screenW - dp(24));
-        // v366: fixed viewport prevents the Box/Win Prob page heights from creating dead vertical
-        // scroll space on Tracker. Keep the tracker full-size, then clip secondary pages to the
-        // same no-scroll focus viewport.
-        final int focusPagerH = Math.max(dp(430), Math.min(dp(620), screenH - dp(248)));
+        // v367: fill the full remaining Focus Mode screen. v366 fixed the tallest-page dead-scroll
+        // issue, but capped the viewport too short, clipping the context carousel and leaving unused
+        // black space below the dashboard.
+        final int focusPagerH = Math.max(dp(560), visibleH - dp(190));
         final int[] pageIndex = new int[] { liveFocusPageIndex() };
 
         SwipePagerFrame pager = new SwipePagerFrame(this);
