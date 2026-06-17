@@ -795,7 +795,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v369", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v370", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -6486,6 +6486,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         if (standingsBox == null) return;
         standingsBox.setVisibility(View.VISIBLE);
         standingsBox.removeAllViews();
+        standingsBox.setPadding(0, 0, 0, 0);
         LinearLayout card = premiumPanelCard(28);
         card.setPadding(dp(15), dp(15), dp(15), dp(15));
         LinearLayout.LayoutParams lp = matchWrap();
@@ -20090,19 +20091,18 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             View eventChild = null;
             int eventKey = 0;
             if (betweenInnings && liveAb && game.dueUp != null && !game.dueUp.isEmpty()) {
-                // v361: fixed Result/Event slot. The slot is always the same height, so the
-                // carousel below does not jump when we swap result/due-up/event cards.
-                String betweenKey = game.gamePk + ":" + game.sitInning + ":" + inState;
-                boolean seenBetween = betweenInningDueUpSeen.contains(betweenKey);
-                if (!seenBetween) betweenInningDueUpSeen.add(betweenKey);
-
+                // v370: on inning end, keep the LAST PLAY visible for the same timed hold window we
+                // use elsewhere instead of jumping straight to Due Up. Once that hold expires, swap
+                // to Due Up automatically.
                 boolean topUp = game.dueUp.get(0).topComingUp;
                 TeamPalette upPal = topUp ? activeLiveTrackerAwayPal : activeLiveTrackerHomePal;
                 if (upPal == null) upPal = neutralPalette();
                 int upColor = ensureReadableColor(upPal.primary, 150);
 
                 boolean hasLastPlay = ab != null && ab.complete && !safe(ab.result).isEmpty();
-                if (!seenBetween && hasLastPlay) {
+                int heldIdxNow = heldLiveResultIndex(game, feed);
+                boolean holdLastPlay = hasLastPlay && heldIdxNow == fidx;
+                if (holdLastPlay) {
                     eventChild = resultCard(ab, null, batColor);
                     eventKey = ("res-between-" + fidx + "-" + ab.result).hashCode();
                 } else {
@@ -20707,7 +20707,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 GameContextCard c = data.get(i);
                 int cardW = gameContextCardWidth(c);
                 int leftMargin = (loop == 0 && i == 0) ? 0 : dp(8);
-                LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(cardW, liveFocusMode ? dp(112) : -2);
+                LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(cardW, liveFocusMode ? dp(126) : -2);
                 clp.setMargins(leftMargin, 0, 0, 0);
                 strip.addView(insightCard(c.eyebrow, c.headline, c.subline, c.accent), clp);
                 if (loop == 0) cycleWidthPx[0] += leftMargin + cardW;
@@ -21078,7 +21078,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         card.setOrientation(LinearLayout.VERTICAL);
         card.setGravity(liveFocusMode ? Gravity.CENTER_VERTICAL : Gravity.NO_GRAVITY);
         card.setPadding(dp(liveFocusMode ? 13 : 10), dp(liveFocusMode ? 11 : 9), dp(liveFocusMode ? 13 : 10), dp(liveFocusMode ? 11 : 9));
-        card.setMinimumHeight(dp(liveFocusMode ? 104 : 78));
+        card.setMinimumHeight(dp(liveFocusMode ? 118 : 78));
         card.setBackground(roundedGradientStroke(new int[] {
                 Color.argb(liveFocusMode ? 58 : 46, Color.red(accent), Color.green(accent), Color.blue(accent)),
                 Color.argb(liveFocusMode ? 20 : 14, Color.red(accent), Color.green(accent), Color.blue(accent))
@@ -23138,40 +23138,39 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
 
         final int screenW = Math.max(1, getResources().getDisplayMetrics().widthPixels);
         final int screenH = Math.max(1, getResources().getDisplayMetrics().heightPixels);
-        final int visibleH = (mainScroll != null && mainScroll.getHeight() > dp(320))
-                ? mainScroll.getHeight()
-                : Math.max(dp(720), screenH - dp(96));
-        final int pageW = Math.max(1, screenW - dp(24));
-        // v368: Focus Mode owns the whole visible app viewport. The pager is weight-based inside
-        // this fixed-height root, so pages slide inside one no-scroll shell and the context cards
-        // have room to render instead of being squeezed into a clipped strip.
-        final int focusRootH = Math.max(dp(720), visibleH - dp(4));
+        android.graphics.Rect visFrame = new android.graphics.Rect();
+        getWindow().getDecorView().getWindowVisibleDisplayFrame(visFrame);
+        final int visibleH = Math.max(dp(720), Math.max(mainScroll != null ? mainScroll.getHeight() : 0, visFrame.height()));
+        final int pageW = Math.max(1, screenW - dp(12));
+        // v370: Focus Mode should use the FULL usable viewport — up near the status area and all
+        // the way down to the nav bar — so the tracker, fixed event slot, and context carousel all fit.
+        final int focusRootH = Math.max(dp(720), visibleH - dp(1));
         final int[] pageIndex = new int[] { liveFocusPageIndex() };
 
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setClipChildren(true);
         panel.setClipToPadding(true);
-        panel.setPadding(0, dp(2), 0, dp(3));
+        panel.setPadding(0, 0, 0, 0);
         panel.setBackground(roundedGradientStroke(
                 guardedDuelGradient(awayPalette, homePalette, true),
                 22,
                 guardedDuelStroke(awayPalette, homePalette, 128),
                 1));
         LinearLayout.LayoutParams panelLp = new LinearLayout.LayoutParams(-1, focusRootH);
-        panelLp.setMargins(0, dp(5), 0, 0);
+        panelLp.setMargins(0, 0, 0, 0);
         standingsBox.addView(panel, panelLp);
 
         View hero = focusHeroHeader(game, away, home, awayPalette, homePalette);
         activeLiveScoreHeroHost = new FrameLayout(this);
         activeLiveScoreHeroHost.addView(hero, new FrameLayout.LayoutParams(-1, -2));
         LinearLayout.LayoutParams heroLp = matchWrap();
-        heroLp.setMargins(dp(12), dp(2), dp(12), dp(1));
+        heroLp.setMargins(dp(8), 0, dp(8), 0);
         panel.addView(activeLiveScoreHeroHost, heroLp);
 
         LinearLayout hint = (LinearLayout) liveFocusHintRow();
         LinearLayout.LayoutParams hintLp = matchWrap();
-        hintLp.setMargins(dp(12), 0, dp(12), dp(1));
+        hintLp.setMargins(dp(8), 0, dp(8), 0);
         panel.addView(hint, hintLp);
 
         SwipePagerFrame pager = new SwipePagerFrame(this);
@@ -23267,11 +23266,11 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
 
         LinearLayout.LayoutParams pagerLp = new LinearLayout.LayoutParams(pageW, 0, 1f);
         pagerLp.gravity = Gravity.CENTER_HORIZONTAL;
-        pagerLp.setMargins(dp(12), 0, dp(12), 0);
+        pagerLp.setMargins(dp(6), 0, dp(6), 0);
         panel.addView(pager, pagerLp);
 
         LinearLayout.LayoutParams dotsLp = matchWrap();
-        dotsLp.setMargins(0, dp(1), 0, 0);
+        dotsLp.setMargins(0, 0, 0, 0);
         panel.addView(dots, dotsLp);
 
         if (pageIndex[0] == 0) startLiveTrackerPolling(game);
