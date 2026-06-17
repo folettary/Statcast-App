@@ -826,7 +826,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v376", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v377", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -19921,6 +19921,8 @@ private View liveGameCard(LiveGame game, int slateIndex) {
 
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
+        card.setClipChildren(false);
+        card.setClipToPadding(false);
         card.setPadding(dp(8), dp(8), dp(8), dp(8));
         card.setBackground(roundedGradientStroke(new int[] {
                 Color.rgb(7, 12, 21),
@@ -20012,44 +20014,6 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             }
             center.addView(outsRow, matchWrap());
 
-            // v376: AB position dots are only useful when browsing a historical AB. Put the compact
-            // nav in the existing center/portrait area instead of the row above the pitch window,
-            // so the tracking canvas reclaims that vertical space.
-            if (!liveAb && feed != null && feed.loaded && feed.atBats != null && !feed.atBats.isEmpty()) {
-                LinearLayout histRow = new LinearLayout(this);
-                histRow.setOrientation(LinearLayout.HORIZONTAL);
-                histRow.setGravity(Gravity.CENTER);
-
-                int histCount = feed.atBats.size();
-                int firstDot = Math.max(0, Math.min(idx - 4, histCount - 9));
-                int lastDot = Math.min(histCount - 1, firstDot + 8);
-                for (int i = firstDot; i <= lastDot; i++) {
-                    View d = new View(this);
-                    boolean cur = i == idx;
-                    GradientDrawable gd = new GradientDrawable(); gd.setShape(GradientDrawable.OVAL);
-                    gd.setColor(cur ? Color.rgb(82, 226, 176) : Color.argb(70, 255, 255, 255));
-                    d.setBackground(gd);
-                    int sz = cur ? dp(6) : dp(4);
-                    LinearLayout.LayoutParams dl = new LinearLayout.LayoutParams(sz, sz);
-                    dl.setMargins(dp(2), 0, dp(2), 0); dl.gravity = Gravity.CENTER_VERTICAL;
-                    histRow.addView(d, dl);
-                }
-
-                TextView livePill = text("LIVE", 7, Color.rgb(82, 226, 176), true);
-                livePill.setGravity(Gravity.CENTER);
-                livePill.setSingleLine(true);
-                livePill.setPadding(dp(6), dp(2), dp(6), dp(2));
-                livePill.setBackground(roundedStroke(Color.argb(28, 82, 226, 176), Color.argb(130, 82, 226, 176), 999, 1));
-                livePill.setForeground(ripple(true)); livePill.setClickable(true);
-                livePill.setOnClickListener(v -> { game.viewAtBatIndex = -1; rerenderTracker(game); });
-                LinearLayout.LayoutParams lpLp = new LinearLayout.LayoutParams(-2, -2);
-                lpLp.gravity = Gravity.CENTER_VERTICAL; lpLp.setMargins(dp(6), 0, 0, 0);
-                histRow.addView(livePill, lpLp);
-
-                LinearLayout.LayoutParams histLp = matchWrap();
-                histLp.setMargins(0, dp(2), 0, 0);
-                center.addView(histRow, histLp);
-            }
         }
         matchRow.addView(center, new LinearLayout.LayoutParams(0, -2, 1.2f));
         matchRow.addView(playerPortraitColumn(batterId, batterNm, "AT BAT", abBatColor), new LinearLayout.LayoutParams(0, -2, 1f));
@@ -20087,10 +20051,17 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             LinearLayout zoneRow = new LinearLayout(this);
             zoneRow.setOrientation(LinearLayout.HORIZONTAL);
             zoneRow.setGravity(Gravity.TOP);
-            LinearLayout.LayoutParams zrLp = matchWrap(); zrLp.setMargins(-dp(8), 0, -dp(2), 0);
+            zoneRow.setClipChildren(false);
+            zoneRow.setClipToPadding(false);
+            // v377: grow the pitch-tracking runway UPWARD into the reclaimed dots/LIVE space.
+            // The negative top margin is paired with equal extra height, so the bottom edge/result
+            // card position stays stable while the dashed debug window and high-pitch runway expand.
+            int trackingTopRunway = dp(22);
+            LinearLayout.LayoutParams zrLp = matchWrap(); zrLp.setMargins(-dp(8), -trackingTopRunway, -dp(2), 0);
             int zoneH = dp(264);
+            int zoneCanvasH = zoneH + trackingTopRunway;
             StrikeZoneView zone = new StrikeZoneView(this, ab.pitches, ab, strikeZoneBoundsForFeed(feed));
-            LinearLayout.LayoutParams zLp = new LinearLayout.LayoutParams(0, zoneH, 1f);
+            LinearLayout.LayoutParams zLp = new LinearLayout.LayoutParams(0, zoneCanvasH, 1f);
             zoneRow.addView(zone, zLp);
             // pitch list: newest first, in a fixed-height window that scrolls independently of the
             // page. A nested same-direction ScrollView won't reliably clip/scroll on its own, so we
@@ -20122,12 +20093,14 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 for (int pi = ab.pitches.size() - 1; pi >= 0; pi--) legend.addView(pitchLegendRow(ab.pitches.get(pi), ab), matchWrap());
             }
             legendScroll.addView(legend, new ScrollView.LayoutParams(-1, -2));
-            legendClip.addView(legendScroll, new FrameLayout.LayoutParams(-1, zoneH));
+            FrameLayout.LayoutParams legendScrollLp = new FrameLayout.LayoutParams(-1, zoneH);
+            legendScrollLp.topMargin = trackingTopRunway;
+            legendClip.addView(legendScroll, legendScrollLp);
             int screenW = getResources().getDisplayMetrics().widthPixels;
             // Rail hugs the right edge: just wide enough for the dot + "Swinging Strike" on one line,
             // and no more, so the plot gets every other pixel. Flush to the card's right edge.
             int railW = Math.min(dp(104), Math.max(dp(96), screenW * 24 / 100));
-            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(railW, zoneH); lgLp.setMargins(dp(4), 0, -dp(10), 0);
+            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(railW, zoneCanvasH); lgLp.setMargins(dp(4), 0, -dp(10), 0);
             zoneRow.addView(legendClip, lgLp);
             card.addView(zoneRow, zrLp);
 
@@ -21444,6 +21417,40 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             host.addView(nextCard, new FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT));
             nextCard.setTranslationX(screenW);
+        }
+
+        if (center < count - 1) {
+            LinearLayout histOverlay = new LinearLayout(this);
+            histOverlay.setOrientation(LinearLayout.HORIZONTAL);
+            histOverlay.setGravity(Gravity.CENTER);
+            histOverlay.setPadding(dp(7), dp(4), dp(7), dp(4));
+            histOverlay.setBackground(roundedStroke(Color.argb(126, 6, 11, 20), Color.argb(96, 82, 226, 176), 999, 1));
+            int firstDot = Math.max(0, Math.min(center - 4, count - 9));
+            int lastDot = Math.min(count - 1, firstDot + 8);
+            for (int i = firstDot; i <= lastDot; i++) {
+                View d = new View(this);
+                boolean cur = i == center;
+                GradientDrawable gd = new GradientDrawable(); gd.setShape(GradientDrawable.OVAL);
+                gd.setColor(cur ? Color.rgb(82, 226, 176) : Color.argb(86, 255, 255, 255));
+                d.setBackground(gd);
+                int sz = cur ? dp(6) : dp(4);
+                LinearLayout.LayoutParams dl = new LinearLayout.LayoutParams(sz, sz);
+                dl.setMargins(dp(2), 0, dp(2), 0); dl.gravity = Gravity.CENTER_VERTICAL;
+                histOverlay.addView(d, dl);
+            }
+            TextView livePill = text("LIVE", 7, Color.rgb(82, 226, 176), true);
+            livePill.setGravity(Gravity.CENTER);
+            livePill.setSingleLine(true);
+            livePill.setPadding(dp(6), dp(1), dp(6), dp(1));
+            livePill.setForeground(ripple(true)); livePill.setClickable(true);
+            livePill.setOnClickListener(v -> { game.viewAtBatIndex = -1; rerenderTracker(game); });
+            LinearLayout.LayoutParams lpLp = new LinearLayout.LayoutParams(-2, -2);
+            lpLp.gravity = Gravity.CENTER_VERTICAL; lpLp.setMargins(dp(6), 0, 0, 0);
+            histOverlay.addView(livePill, lpLp);
+
+            FrameLayout.LayoutParams hop = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.RIGHT);
+            hop.setMargins(0, dp(118), dp(14), 0);
+            host.addView(histOverlay, hop);
         }
 
         host.setPager(new TrackerPagerCb() {
