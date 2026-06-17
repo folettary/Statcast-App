@@ -77,6 +77,7 @@ public class MainActivity extends Activity {
     // ===== TEMP PREVIEW: treat completed games as live so the live tracker design can be
     // reviewed against real data. Set back to false to restore normal behavior. (v277) =====
     static boolean DEBUG_FORCE_LIVE = true;
+    static boolean DEBUG_TRACKING_WINDOW = true; // v375: show full pitch-tracking window bounds
     private enum StatScope { HIT_ONLY, PITCH_ONLY, BOTH }
     private static final int STATCAST_START_YEAR = 2015;
     private static boolean isDark = false;          // dark mode toggle – static survives recreate()
@@ -825,7 +826,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v374", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v375", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -19427,8 +19428,11 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             float halfX = (plotW * ftPerPx) / 2f;
             float totalSpanZ = plotH * ftPerPx;               // full vertical span the view buys
             float extraZ = Math.max(0f, totalSpanZ - zoneSpanZ2); // room beyond the zone, vertically
-            float aboveFt = extraZ * 0.36f;                   // less sky above…
-            float belowFt = extraZ * 0.64f;                   // …more room below for in-dirt pitches
+            // v375: restore the real tracking runway above the zone. Marker drawing can still be
+            // kept safely inside the canvas, but the coordinate window itself should not end right
+            // above the strike zone.
+            float aboveFt = extraZ * 0.48f;
+            float belowFt = extraZ * 0.52f;
             xMin = zoneCx - halfX; xMax = zoneCx + halfX;
             zMax = zoneTop + aboveFt;
             zMin = zoneBot - belowFt;
@@ -19458,6 +19462,19 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 canvas.drawLine(gx, zoneT, gx, zoneB, p);
                 float gy = zoneT + (zoneB - zoneT) * k / 3f;
                 canvas.drawLine(zoneL, gy, zoneR, gy, p);
+            }
+
+            // v375 debug window: show the full coordinate area used for "in-window" pitches. A
+            // chevron should only fire when the raw pitch is outside this dashed box.
+            if (DEBUG_TRACKING_WINDOW) {
+                p.setShader(null);
+                p.clearShadowLayer();
+                p.setStyle(Paint.Style.STROKE);
+                p.setStrokeWidth(dp(1.1f));
+                p.setColor(Color.argb(128, 82, 226, 176));
+                p.setPathEffect(new android.graphics.DashPathEffect(new float[] { dp(6), dp(5) }, 0));
+                canvas.drawRect(drawL, drawT, drawL + drawW, drawT + drawH, p);
+                p.setPathEffect(null);
             }
 
             // home plate hint under the zone
@@ -19545,7 +19562,11 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 float minY = drawT + insetY, maxY = drawT + drawH - insetY;
                 float cx = Math.max(minX, Math.min(maxX, cxRaw));
                 float cy = Math.max(minY, Math.min(maxY, cyRaw));
-                boolean pinned = (cx != cxRaw) || (cy != cyRaw);
+                // v375: the safety gutter is only for drawing. The chevron should mean "outside
+                // the true tracking window," not merely "inside the gutter needed to show a full
+                // marker." This restores the old behavior where high pitches can sit above the zone
+                // without immediately getting a chevron.
+                boolean pinned = (cxRaw < drawL || cxRaw > drawL + drawW || cyRaw < drawT || cyRaw > drawT + drawH);
                 int kind = pitchOutcomeKind(lp, atBat);
                 boolean diamond = isPitchOutcomeDiamond(kind);
                 p.setStyle(Paint.Style.FILL);
