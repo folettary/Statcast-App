@@ -826,7 +826,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v377", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v378", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -19944,12 +19944,12 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         // ---- Situation board: pitcher portrait | big count | batter portrait ----
         LinearLayout matchRow = new LinearLayout(this);
         matchRow.setOrientation(LinearLayout.HORIZONTAL);
-        matchRow.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams mrLp = matchWrap(); mrLp.setMargins(0, dp(1), 0, 0);
+        matchRow.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        LinearLayout.LayoutParams mrLp = matchWrap(); mrLp.setMargins(0, 0, 0, 0);
         matchRow.addView(playerPortraitColumn(pitcherId, pitcherNm, "PITCHING", abPitchColor, pitcherPitchLine(feed, pitcherId)), new LinearLayout.LayoutParams(0, -2, 1f));
         LinearLayout center = new LinearLayout(this);
         center.setOrientation(LinearLayout.VERTICAL);
-        center.setGravity(Gravity.CENTER_HORIZONTAL);
+        center.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
         int abInning = ab != null ? ab.inning : game.sitInning;
         boolean liveAb = ab != null && idx == feed.atBats.size() - 1;
         // big count. When following the live AB, derive the count from the feed's LATEST pitch
@@ -19979,14 +19979,14 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 countStr = "—";
             }
         }
-        TextView bigCount = text(countStr, liveBetweenInnings ? 16 : 30, Color.WHITE, true);
+        TextView bigCount = text(countStr, liveBetweenInnings ? 15 : 28, Color.WHITE, true);
         bigCount.setGravity(Gravity.CENTER);
         if (liveBetweenInnings) bigCount.setLetterSpacing(0.12f);
         center.addView(bigCount, matchWrap());
         if (liveBetweenInnings) {
             TextView state = text(liveInningHeroLabel(game), 9, INK_DIM, true);
             state.setGravity(Gravity.CENTER);
-            state.setPadding(0, dp(4), 0, 0);
+            state.setPadding(0, dp(1), 0, 0);
             center.addView(state, matchWrap());
         } else {
             // bases diamond — live AB uses the live situation; a past AB uses its captured end-state.
@@ -19994,8 +19994,8 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             boolean bSecond = liveAb ? game.onSecond : (ab != null && ab.onSecond);
             boolean bThird = liveAb ? game.onThird : (ab != null && ab.onThird);
             BaseDiamondView dia = new BaseDiamondView(this, bFirst, bSecond, bThird, abBatColor);
-            LinearLayout.LayoutParams diaLp = new LinearLayout.LayoutParams(dp(44), dp(44));
-            diaLp.gravity = Gravity.CENTER_HORIZONTAL; diaLp.setMargins(0, dp(2), 0, dp(3));
+            LinearLayout.LayoutParams diaLp = new LinearLayout.LayoutParams(dp(38), dp(38));
+            diaLp.gravity = Gravity.CENTER_HORIZONTAL; diaLp.setMargins(0, 0, 0, dp(1));
             center.addView(dia, diaLp);
             // outs — 3 dots
             LinearLayout outsRow = new LinearLayout(this);
@@ -20009,7 +20009,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 gd.setColor(on ? Color.rgb(247, 197, 77) : Color.argb(30, 255, 255, 255));
                 if (!on) gd.setStroke(dp(1), Color.argb(80, 255, 255, 255));
                 dot.setBackground(gd);
-                LinearLayout.LayoutParams dl = new LinearLayout.LayoutParams(dp(8), dp(8)); dl.setMargins(dp(3), 0, dp(3), 0);
+                LinearLayout.LayoutParams dl = new LinearLayout.LayoutParams(dp(6), dp(6)); dl.setMargins(dp(2), 0, dp(2), 0);
                 outsRow.addView(dot, dl);
             }
             center.addView(outsRow, matchWrap());
@@ -20027,18 +20027,18 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             LinearLayout abNav = new LinearLayout(this);
             abNav.setOrientation(LinearLayout.VERTICAL);
             abNav.setGravity(Gravity.CENTER_HORIZONTAL);
-            LinearLayout.LayoutParams abLp = matchWrap(); abLp.setMargins(0, 0, 0, dp(1));
+            LinearLayout.LayoutParams abLp = matchWrap(); abLp.setMargins(0, -dp(2), 0, dp(1));
             // title row
             // v373: remove the historical AB inning/score + batter-vs-pitcher header. It restated
             // information already shown by the scoreboard and portraits, caused a height jump when
             // swiping to previous plays, and created unnecessary vertical scroll.
             String pLine = game.pitcherGameLines.get(pitcherId);
             if (pLine != null && !pLine.isEmpty()) {
-                TextView pStat = text(lastNameOnly(pitcherNm) + " · " + pLine, 11, INK, true);
+                TextView pStat = text(lastNameOnly(pitcherNm) + " · " + pLine, 10, INK, true);
                 pStat.setGravity(Gravity.CENTER); pStat.setSingleLine(true); pStat.setEllipsize(TextUtils.TruncateAt.END);
                 abNav.addView(pStat, matchWrap());
             } else {
-                TextView pStat = text(lastNameOnly(pitcherNm) + " pitching", 11, INK_DIM, true);
+                TextView pStat = text(lastNameOnly(pitcherNm) + " pitching", 10, INK_DIM, true);
                 pStat.setGravity(Gravity.CENTER);
                 abNav.addView(pStat, matchWrap());
             }
@@ -20053,11 +20053,11 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             zoneRow.setGravity(Gravity.TOP);
             zoneRow.setClipChildren(false);
             zoneRow.setClipToPadding(false);
-            // v377: grow the pitch-tracking runway UPWARD into the reclaimed dots/LIVE space.
-            // The negative top margin is paired with equal extra height, so the bottom edge/result
-            // card position stays stable while the dashed debug window and high-pitch runway expand.
-            int trackingTopRunway = dp(22);
-            LinearLayout.LayoutParams zrLp = matchWrap(); zrLp.setMargins(-dp(8), -trackingTopRunway, -dp(2), 0);
+            // v378: preserve the expanded pitch-tracking runway, but keep the count/bases/outs
+            // and pitcher line fully above it. The top metadata is tightened so this extra canvas
+            // does not need to sit underneath the header.
+            int trackingTopRunway = dp(18);
+            LinearLayout.LayoutParams zrLp = matchWrap(); zrLp.setMargins(-dp(8), 0, -dp(2), 0);
             int zoneH = dp(264);
             int zoneCanvasH = zoneH + trackingTopRunway;
             StrikeZoneView zone = new StrikeZoneView(this, ab.pitches, ab, strikeZoneBoundsForFeed(feed));
@@ -21420,36 +21420,17 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         }
 
         if (center < count - 1) {
-            LinearLayout histOverlay = new LinearLayout(this);
-            histOverlay.setOrientation(LinearLayout.HORIZONTAL);
+            TextView histOverlay = text("LIVE", 7, Color.rgb(82, 226, 176), true);
             histOverlay.setGravity(Gravity.CENTER);
-            histOverlay.setPadding(dp(7), dp(4), dp(7), dp(4));
-            histOverlay.setBackground(roundedStroke(Color.argb(126, 6, 11, 20), Color.argb(96, 82, 226, 176), 999, 1));
-            int firstDot = Math.max(0, Math.min(center - 4, count - 9));
-            int lastDot = Math.min(count - 1, firstDot + 8);
-            for (int i = firstDot; i <= lastDot; i++) {
-                View d = new View(this);
-                boolean cur = i == center;
-                GradientDrawable gd = new GradientDrawable(); gd.setShape(GradientDrawable.OVAL);
-                gd.setColor(cur ? Color.rgb(82, 226, 176) : Color.argb(86, 255, 255, 255));
-                d.setBackground(gd);
-                int sz = cur ? dp(6) : dp(4);
-                LinearLayout.LayoutParams dl = new LinearLayout.LayoutParams(sz, sz);
-                dl.setMargins(dp(2), 0, dp(2), 0); dl.gravity = Gravity.CENTER_VERTICAL;
-                histOverlay.addView(d, dl);
-            }
-            TextView livePill = text("LIVE", 7, Color.rgb(82, 226, 176), true);
-            livePill.setGravity(Gravity.CENTER);
-            livePill.setSingleLine(true);
-            livePill.setPadding(dp(6), dp(1), dp(6), dp(1));
-            livePill.setForeground(ripple(true)); livePill.setClickable(true);
-            livePill.setOnClickListener(v -> { game.viewAtBatIndex = -1; rerenderTracker(game); });
-            LinearLayout.LayoutParams lpLp = new LinearLayout.LayoutParams(-2, -2);
-            lpLp.gravity = Gravity.CENTER_VERTICAL; lpLp.setMargins(dp(6), 0, 0, 0);
-            histOverlay.addView(livePill, lpLp);
+            histOverlay.setSingleLine(true);
+            histOverlay.setLetterSpacing(0.08f);
+            histOverlay.setPadding(dp(7), dp(3), dp(7), dp(3));
+            histOverlay.setBackground(roundedStroke(Color.argb(126, 6, 11, 20), Color.argb(116, 82, 226, 176), 999, 1));
+            histOverlay.setForeground(ripple(true)); histOverlay.setClickable(true);
+            histOverlay.setOnClickListener(v -> { game.viewAtBatIndex = -1; rerenderTracker(game); });
 
             FrameLayout.LayoutParams hop = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.RIGHT);
-            hop.setMargins(0, dp(118), dp(14), 0);
+            hop.setMargins(0, dp(8), dp(10), 0);
             host.addView(histOverlay, hop);
         }
 
@@ -21715,7 +21696,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
     private View playerPortraitColumn(int playerId, String name, String role, int ringColor, String subtitle) {
         LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
-        col.setGravity(Gravity.CENTER_HORIZONTAL);
+        col.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
         FrameLayout ring = new FrameLayout(this);
         GradientDrawable ringBg = new GradientDrawable();
         ringBg.setShape(GradientDrawable.OVAL);
@@ -21731,18 +21712,18 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             @Override public void getOutline(View view, android.graphics.Outline outline) { outline.setOval(0, 0, view.getWidth(), view.getHeight()); }
         });
         if (playerId > 0) loadPlayerImage(playerId, img);
-        FrameLayout.LayoutParams imgLp = new FrameLayout.LayoutParams(dp(54), dp(54));
+        FrameLayout.LayoutParams imgLp = new FrameLayout.LayoutParams(dp(50), dp(50));
         imgLp.setMargins(dp(3), dp(3), dp(3), dp(3));
         ring.addView(img, imgLp);
-        col.addView(ring, new LinearLayout.LayoutParams(dp(60), dp(60)));
+        col.addView(ring, new LinearLayout.LayoutParams(dp(56), dp(56)));
         TextView roleT = text(role, 8, ringColor, true);
-        roleT.setGravity(Gravity.CENTER); roleT.setLetterSpacing(0.1f); roleT.setPadding(0, dp(5), 0, 0);
+        roleT.setGravity(Gravity.CENTER); roleT.setLetterSpacing(0.1f); roleT.setPadding(0, dp(2), 0, 0);
         col.addView(roleT, matchWrap());
         TextView nameT = text(safe(name).isEmpty() ? "—" : name, 11, INK, true);
         nameT.setGravity(Gravity.CENTER); nameT.setSingleLine(true);
         col.addView(nameT, matchWrap());
         if (!safe(subtitle).isEmpty()) {
-            TextView sub = text(subtitle, 8, INK_DIM, true);
+            TextView sub = text(subtitle, 7, INK_DIM, true);
             sub.setGravity(Gravity.CENTER); sub.setSingleLine(true);
             col.addView(sub, matchWrap());
         }
