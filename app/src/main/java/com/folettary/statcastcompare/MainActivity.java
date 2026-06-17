@@ -772,12 +772,26 @@ public class MainActivity extends Activity {
         scroll.setFillViewport(true);
         scroll.setBackgroundColor(Color.rgb(4, 8, 15));
         scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        final float[] focusTouchStart = new float[] { 0f, 0f };
         scroll.setOnTouchListener((v, event) -> {
             if (liveFocusMode) {
-                if (event.getAction() == android.view.MotionEvent.ACTION_MOVE
-                        || event.getAction() == android.view.MotionEvent.ACTION_UP
-                        || event.getAction() == android.view.MotionEvent.ACTION_CANCEL) {
-                    main.post(() -> mainScroll.scrollTo(0, 0));
+                int action = event.getAction();
+                if (action == android.view.MotionEvent.ACTION_DOWN) {
+                    focusTouchStart[0] = event.getX();
+                    focusTouchStart[1] = event.getY();
+                    mainScroll.scrollTo(0, 0);
+                    return false; // allow horizontal pager children to own the gesture
+                }
+                if (action == android.view.MotionEvent.ACTION_MOVE) {
+                    float dx = Math.abs(event.getX() - focusTouchStart[0]);
+                    float dy = Math.abs(event.getY() - focusTouchStart[1]);
+                    mainScroll.scrollTo(0, 0);
+                    if (dy > dx && dy > dp(2)) return true; // consume vertical page scroll only
+                    return false;
+                }
+                if (action == android.view.MotionEvent.ACTION_UP
+                        || action == android.view.MotionEvent.ACTION_CANCEL) {
+                    mainScroll.scrollTo(0, 0);
                 }
                 return false;
             }
@@ -811,7 +825,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v372", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v373", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -19447,9 +19461,13 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             }
 
             // home plate hint under the zone
+            // v373: keep the plate fully inside the canvas. The wider live-feed layout can push the
+            // mapped plate below the StrikeZoneView's bottom edge, which made it look clipped/broken.
             p.setStyle(Paint.Style.STROKE); p.setStrokeWidth(dp(1f)); p.setColor(Color.argb(70, 255, 255, 255));
             float plateDepth = dp(10);
-            float plateY = mapZ(0.80f, zMin, zMax, drawT, drawH);
+            float rawPlateY = mapZ(0.80f, zMin, zMax, drawT, drawH);
+            float plateY = Math.min(rawPlateY, h - plateDepth - dp(4));
+            plateY = Math.max(drawT + dp(2), plateY);
             float plCx = (zoneL + zoneR) / 2f, plHalf = (zoneR - zoneL) * 0.5f;
             android.graphics.Path plate = new android.graphics.Path();
             plate.moveTo(plCx - plHalf, plateY); plate.lineTo(plCx + plHalf, plateY);
@@ -19981,33 +19999,18 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             abNav.setGravity(Gravity.CENTER_HORIZONTAL);
             LinearLayout.LayoutParams abLp = matchWrap(); abLp.setMargins(0, 0, 0, dp(1));
             // title row
-            // Under the outs: when live, show the current pitcher's game line. When browsing a past
-            // AB, show the inning + score context so you have a frame of reference for where you are.
-            if (!liveAb && ab != null) {
-                String half = ab.topHalf ? "Top " : "Bot ";
-                String ctx = half + ordinalNum(ab.inning);
-                String aAbbr = displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr);
-                String hAbbr = displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr);
-                if (ab.awayScoreAt >= 0 && ab.homeScoreAt >= 0) {
-                    ctx += "  ·  " + aAbbr + " " + ab.awayScoreAt + "–" + ab.homeScoreAt + " " + hAbbr;
-                }
-                TextView ctxT = text(ctx, 11, INK, true);
-                ctxT.setGravity(Gravity.CENTER); ctxT.setSingleLine(true); ctxT.setEllipsize(TextUtils.TruncateAt.END);
-                abNav.addView(ctxT, matchWrap());
-                TextView vs = text(safe(ab.batter) + " vs " + lastNameOnly(pitcherNm), 9, INK_DIM, true);
-                vs.setGravity(Gravity.CENTER); vs.setSingleLine(true); vs.setEllipsize(TextUtils.TruncateAt.END);
-                abNav.addView(vs, matchWrap());
+            // v373: remove the historical AB inning/score + batter-vs-pitcher header. It restated
+            // information already shown by the scoreboard and portraits, caused a height jump when
+            // swiping to previous plays, and created unnecessary vertical scroll.
+            String pLine = game.pitcherGameLines.get(pitcherId);
+            if (pLine != null && !pLine.isEmpty()) {
+                TextView pStat = text(lastNameOnly(pitcherNm) + " · " + pLine, 11, INK, true);
+                pStat.setGravity(Gravity.CENTER); pStat.setSingleLine(true); pStat.setEllipsize(TextUtils.TruncateAt.END);
+                abNav.addView(pStat, matchWrap());
             } else {
-                String pLine = game.pitcherGameLines.get(pitcherId);
-                if (pLine != null && !pLine.isEmpty()) {
-                    TextView pStat = text(lastNameOnly(pitcherNm) + " · " + pLine, 11, INK, true);
-                    pStat.setGravity(Gravity.CENTER); pStat.setSingleLine(true); pStat.setEllipsize(TextUtils.TruncateAt.END);
-                    abNav.addView(pStat, matchWrap());
-                } else {
-                    TextView pStat = text(lastNameOnly(pitcherNm) + " pitching", 11, INK_DIM, true);
-                    pStat.setGravity(Gravity.CENTER);
-                    abNav.addView(pStat, matchWrap());
-                }
+                TextView pStat = text(lastNameOnly(pitcherNm) + " pitching", 11, INK_DIM, true);
+                pStat.setGravity(Gravity.CENTER);
+                abNav.addView(pStat, matchWrap());
             }
             // dots strip + inline LIVE pill (when browsing a past AB) — kept on ONE row so it never
             // eats into the tracking window below.
