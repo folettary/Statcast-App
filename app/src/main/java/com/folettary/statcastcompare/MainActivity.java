@@ -321,6 +321,11 @@ public class MainActivity extends Activity {
     private LinearLayout activeLiveTrackerHost = null;       // v273: tracker mount for in-place updates
     private FrameLayout activeLiveScoreHeroHost = null; // v354: live score/inning hero refreshes during tracker polls
     private final Set<String> betweenInningDueUpSeen = new HashSet<>(); // v355: first render emphasizes last play, later render emphasizes due up
+    private int liveContextCarouselGamePk = -1;                 // v358: preserve ticker continuity across tracker rebuilds
+    private int liveContextCarouselScrollX = 0;
+    private int liveContextCarouselCycleWidth = 0;
+    private final java.util.ArrayList<GameContextCard> liveContextCarouselStableCards = new java.util.ArrayList<>();
+
     private View gameHubTabBarView = null;                   // v301: tab bar, to snap to on tab switch
     private TeamPalette activeLiveTrackerAwayPal = null, activeLiveTrackerHomePal = null;
     private LiveGame activeLiveTrackerGame = null;
@@ -772,7 +777,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v357", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v358", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20523,17 +20528,72 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         }
     }
 
+    private String gameContextCardId(GameContextCard c) {
+        return safe(c == null ? "" : c.eyebrow).toUpperCase(Locale.US);
+    }
+
     private int gameContextCardWidth(GameContextCard c) {
-        if (c == null) return dp(176);
-        int chars = safe(c.headline).length() + safe(c.subline).length();
-        int w = dp(148) + Math.min(dp(84), Math.max(0, chars - 28) * dp(2));
-        return Math.max(dp(150), Math.min(dp(236), w));
+        if (c == null) return dp(132);
+        String eb = safe(c.eyebrow);
+        String head = safe(c.headline);
+        String sub = safe(c.subline);
+        int maxLine = Math.max(eb.length(), Math.max(head.length(), sub.length()));
+        // v358: much tighter than v357. Simple stat cards should be little chips; only long
+        // evidence-backed cards get wide.
+        int w = dp(82) + Math.min(dp(124), Math.max(0, maxLine) * dp(4.2f));
+        return Math.max(dp(118), Math.min(dp(232), w));
+    }
+
+    private java.util.ArrayList<GameContextCard> stableGameContextCards(LiveGame game, java.util.ArrayList<GameContextCard> fresh) {
+        java.util.ArrayList<GameContextCard> sorted = new java.util.ArrayList<>();
+        if (fresh != null) sorted.addAll(fresh);
+        java.util.Collections.sort(sorted, (a, b) -> b.priority - a.priority);
+
+        int gamePk = game == null ? -1 : game.gamePk;
+        if (gamePk != liveContextCarouselGamePk) {
+            liveContextCarouselGamePk = gamePk;
+            liveContextCarouselScrollX = 0;
+            liveContextCarouselCycleWidth = 0;
+            liveContextCarouselStableCards.clear();
+        }
+
+        if (liveContextCarouselStableCards.isEmpty()) {
+            for (int i = 0; i < Math.min(6, sorted.size()); i++) liveContextCarouselStableCards.add(sorted.get(i));
+            return new java.util.ArrayList<>(liveContextCarouselStableCards);
+        }
+
+        java.util.HashMap<String, GameContextCard> freshById = new java.util.HashMap<>();
+        for (GameContextCard c : sorted) freshById.put(gameContextCardId(c), c);
+
+        java.util.ArrayList<GameContextCard> merged = new java.util.ArrayList<>();
+        // Keep the currently moving order stable; update each card's content in place when the
+        // same card type still exists. This prevents new pitch updates from reshuffling the strip.
+        for (GameContextCard old : liveContextCarouselStableCards) {
+            GameContextCard updated = freshById.remove(gameContextCardId(old));
+            if (updated != null) merged.add(updated);
+        }
+        // Newly-needed cards are appended to the off-screen tail, so they enter naturally as the
+        // ticker keeps moving instead of popping in at the front.
+        for (GameContextCard c : sorted) {
+            String id = gameContextCardId(c);
+            if (freshById.containsKey(id)) {
+                merged.add(c);
+                freshById.remove(id);
+            }
+            if (merged.size() >= 8) break;
+        }
+        // If everything expired at once, fall back to the fresh sorted set.
+        if (merged.isEmpty()) {
+            for (int i = 0; i < Math.min(6, sorted.size()); i++) merged.add(sorted.get(i));
+        }
+        liveContextCarouselStableCards.clear();
+        liveContextCarouselStableCards.addAll(merged);
+        return new java.util.ArrayList<>(liveContextCarouselStableCards);
     }
 
     private View situationalCarousel(LiveGame game, LiveAtBat ab, TeamPalette awayPal, TeamPalette homePal) {
-        java.util.ArrayList<GameContextCard> data = buildGameContextCards(game, ab, awayPal, homePal);
+        java.util.ArrayList<GameContextCard> data = stableGameContextCards(game, buildGameContextCards(game, ab, awayPal, homePal));
         if (data.isEmpty()) return null;
-        java.util.Collections.sort(data, (a, b) -> b.priority - a.priority);
 
         HorizontalScrollView scroller = new HorizontalScrollView(this);
         scroller.setHorizontalScrollBarEnabled(false);
@@ -20541,7 +20601,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         scroller.setPadding(0, 0, 0, 0);
         LinearLayout strip = new LinearLayout(this);
         strip.setOrientation(LinearLayout.HORIZONTAL);
-        int limit = Math.min(6, data.size());
+        int limit = Math.min(8, data.size());
         boolean autoLoop = limit >= 3;
         int loops = autoLoop ? 2 : 1; // duplicate once for seamless reset back to the first set
         final int[] cycleWidthPx = new int[] { 0 };
@@ -20557,6 +20617,9 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             }
         }
         scroller.addView(strip, new FrameLayout.LayoutParams(-2, -2));
+        if (cycleWidthPx[0] > 0 && liveContextCarouselScrollX > 0) {
+            scroller.scrollTo(liveContextCarouselScrollX % cycleWidthPx[0], 0);
+        }
 
         final boolean[] userHolding = new boolean[] { false };
         scroller.setOnTouchListener((v, ev) -> {
@@ -20564,15 +20627,27 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             int action = ev.getAction();
             if (action == android.view.MotionEvent.ACTION_DOWN || action == android.view.MotionEvent.ACTION_MOVE) {
                 userHolding[0] = true;
+                liveContextCarouselScrollX = scroller.getScrollX();
             } else if (action == android.view.MotionEvent.ACTION_UP || action == android.view.MotionEvent.ACTION_CANCEL) {
-                userHolding[0] = false; // resume immediately after the user's drag/tap ends
+                userHolding[0] = false;
+                liveContextCarouselScrollX = scroller.getScrollX();
                 v.getParent().requestDisallowInterceptTouchEvent(false);
             }
             return false;
         });
 
-        // v357: alive but not distracting. Cards are content-sized, the strip loops invisibly, and
-        // it resumes immediately after the user's touch ends. Slightly faster than v356.
+        // Restore immediately after layout so live pitch refreshes don't visibly jump back to zero.
+        scroller.post(() -> {
+            if (cycleWidthPx[0] > 0) {
+                liveContextCarouselCycleWidth = cycleWidthPx[0];
+                int x = liveContextCarouselScrollX % cycleWidthPx[0];
+                if (x < 0) x += cycleWidthPx[0];
+                scroller.scrollTo(x, 0);
+            }
+        });
+
+        // v358: ticker continuity. Rebuilds reuse the saved scroll offset; new cards append to the
+        // off-screen tail and become visible as the carousel naturally cycles.
         if (autoLoop) {
             final Runnable[] auto = new Runnable[1];
             auto[0] = new Runnable() {
@@ -20588,11 +20663,13 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                     }
                     if (!userHolding[0]) {
                         scroller.scrollBy(1, 0);
+                        liveContextCarouselScrollX = scroller.getScrollX();
+                        liveContextCarouselCycleWidth = cycleW;
                     }
                     main.postDelayed(this, 34L);
                 }
             };
-            scroller.postDelayed(auto[0], 700L);
+            scroller.postDelayed(auto[0], 250L);
         }
 
         return scroller;
@@ -20902,8 +20979,8 @@ private View liveGameCard(LiveGame game, int slateIndex) {
     private View insightCard(String eyebrow, String headline, String subline, int accent) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(12), dp(10), dp(12), dp(10));
-        card.setMinimumHeight(dp(82));
+        card.setPadding(dp(10), dp(9), dp(10), dp(9));
+        card.setMinimumHeight(dp(78));
         card.setBackground(roundedGradientStroke(new int[] {
                 Color.argb(46, Color.red(accent), Color.green(accent), Color.blue(accent)),
                 Color.argb(14, Color.red(accent), Color.green(accent), Color.blue(accent))
@@ -20912,7 +20989,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         eb.setSingleLine(true);
         eb.setLetterSpacing(0.18f);
         card.addView(eb, matchWrap());
-        TextView hl = text(safe(headline), 14, INK, true);
+        TextView hl = text(safe(headline), 13, INK, true);
         hl.setSingleLine(true);
         hl.setEllipsize(TextUtils.TruncateAt.END);
         hl.setPadding(0, dp(3), 0, 0);
