@@ -770,7 +770,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v349", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v350", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -22415,54 +22415,10 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         gameEdgeLp.setMargins(dp(12), 0, dp(12), dp(8));
         panel.addView(gameEdgeSummaryCard(game, gameEdge, awayPalette, homePalette, accent), gameEdgeLp);
 
-        addMatchupHubSection(panel, "GAME READ", "Quick edge summary");
-        LinearLayout.LayoutParams overallLp = new LinearLayout.LayoutParams(-1, dp(86));
-        overallLp.setMargins(dp(12), 0, dp(12), dp(5));
-        panel.addView(gameMenuTile("Team Overall",
-                liveTileValue(game, overall, "Broad team read"),
-                liveTileCaption(game, overall, "Composite edge across record, lineup, and prevention"),
-                liveTileAccent(overall, accent),
-                v -> openLiveTeamMatchup(game),
-                true,
-                null,
-                liveTileChip(game, overall),
-                liveTileAccent(overall, accent)), overallLp);
-
-        addMatchupHubSection(panel, "TEAM EDGES", "Offense · pitching · bullpen");
-        LinearLayout unitRow = matchupHubTileRow(panel);
-        unitRow.addView(gameMenuTile("Offense",
-                liveTileValue(game, offense, "Lineup vs lineup"),
-                liveTileCaption(game, offense, "Runs, discipline, and contact quality"),
-                liveTileAccent(offense, Color.rgb(99, 166, 255)),
-                v -> openLiveTeamOffenseMatchup(game),
-                true,
-                null,
-                liveTileChip(game, offense),
-                liveTileAccent(offense, Color.rgb(99, 166, 255))), new LinearLayout.LayoutParams(0, -1, 1));
-        LinearLayout.LayoutParams pdLp = new LinearLayout.LayoutParams(0, -1, 1);
-        pdLp.setMargins(dp(7), 0, 0, 0);
-        unitRow.addView(gameMenuTile("Pitching",
-                liveTileValue(game, pitching, "Staff prevention"),
-                liveTileCaption(game, pitching, "Run prevention and contact allowed"),
-                liveTileAccent(pitching, Color.rgb(120, 220, 207)),
-                v -> openLiveTeamPitchingDefenseMatchup(game),
-                true,
-                null,
-                liveTileChip(game, pitching),
-                liveTileAccent(pitching, Color.rgb(120, 220, 207))), pdLp);
-        LinearLayout.LayoutParams bullpenLp = new LinearLayout.LayoutParams(-1, dp(86));
-        bullpenLp.setMargins(dp(12), 0, dp(12), dp(5));
-        panel.addView(gameMenuTile("Bullpens",
-                liveTileValue(game, bullpen, "Reliever edge"),
-                liveTileCaption(game, bullpen, "Freshness + quality by available arms"),
-                liveTileAccent(bullpen, Color.rgb(120, 220, 207)),
-                v -> openLiveBullpenMatchup(game),
-                true,
-                null,
-                liveTileChip(game, bullpen),
-                liveTileAccent(bullpen, Color.rgb(120, 220, 207))), bullpenLp);
-
-        addMatchupHubSection(panel, "TODAY'S MATCHUPS", "Game-specific reads");
+        // v350: make the hub's mental model explicit. The top section contains the pieces
+        // that are most specific to today's game and that drive Game Edge. Broader season
+        // comparisons remain visible, but live in their own context section.
+        addMatchupHubSection(panel, "TODAY'S GAME FACTORS", "Starter matchup · lineup fit · bullpen state");
         boolean probablesKnown = !safe(game.awayPitcher).isEmpty() && !safe(game.homePitcher).isEmpty();
         String pitchers = (safe(game.awayPitcher).isEmpty() ? "Away SP TBD" : lastNameOnly(game.awayPitcher))
                 + " vs " + (safe(game.homePitcher).isEmpty() ? "Home SP TBD" : lastNameOnly(game.homePitcher));
@@ -22487,8 +22443,53 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
                 "Probable starters not posted yet",
                 probablesKnown ? liveTileChip(game, ovs) : null,
                 liveTileAccent(ovs, Color.rgb(255, 155, 92))), ovsLp);
+        LinearLayout.LayoutParams bullpenLp = new LinearLayout.LayoutParams(-1, dp(86));
+        bullpenLp.setMargins(dp(12), 0, dp(12), dp(5));
+        panel.addView(gameMenuTile("Bullpens",
+                liveTileValue(game, bullpen, "Reliever edge"),
+                liveTileCaption(game, bullpen, "Freshness + quality by available arms"),
+                liveTileAccent(bullpen, Color.rgb(120, 220, 207)),
+                v -> openLiveBullpenMatchup(game),
+                true,
+                null,
+                liveTileChip(game, bullpen),
+                liveTileAccent(bullpen, Color.rgb(120, 220, 207))), bullpenLp);
 
-        addMatchupHubSection(panel, "PLAYERS TO WATCH", "Top bats · recent form");
+        addMatchupHubSection(panel, "SEASON TEAM CONTEXT", "Broader team profile · not starter-specific");
+        LinearLayout.LayoutParams overallLp = new LinearLayout.LayoutParams(-1, dp(86));
+        overallLp.setMargins(dp(12), 0, dp(12), dp(5));
+        panel.addView(gameMenuTile("Team Overall",
+                liveTileValue(game, overall, "Broad team read"),
+                liveTileCaption(game, overall, "Composite edge across record, lineup, and prevention"),
+                liveTileAccent(overall, accent),
+                v -> openLiveTeamMatchup(game),
+                true,
+                null,
+                liveTileChip(game, overall),
+                liveTileAccent(overall, accent)), overallLp);
+        LinearLayout unitRow = matchupHubTileRow(panel);
+        unitRow.addView(gameMenuTile("Offense",
+                liveTileValue(game, offense, "Lineup vs lineup"),
+                liveTileCaption(game, offense, "Runs, discipline, and contact quality"),
+                liveTileAccent(offense, Color.rgb(99, 166, 255)),
+                v -> openLiveTeamOffenseMatchup(game),
+                true,
+                null,
+                liveTileChip(game, offense),
+                liveTileAccent(offense, Color.rgb(99, 166, 255))), new LinearLayout.LayoutParams(0, -1, 1));
+        LinearLayout.LayoutParams pdLp = new LinearLayout.LayoutParams(0, -1, 1);
+        pdLp.setMargins(dp(7), 0, 0, 0);
+        unitRow.addView(gameMenuTile("Pitching",
+                liveTileValue(game, pitching, "Staff prevention"),
+                liveTileCaption(game, pitching, "Season pitching context"),
+                liveTileAccent(pitching, Color.rgb(120, 220, 207)),
+                v -> openLiveTeamPitchingDefenseMatchup(game),
+                true,
+                null,
+                liveTileChip(game, pitching),
+                liveTileAccent(pitching, Color.rgb(120, 220, 207))), pdLp);
+
+        addMatchupHubSection(panel, "PLAYER / FORM CONTEXT", "Individual bats · recent form");
         LinearLayout hitterRow = matchupHubTileRow(panel);
         hitterRow.addView(gameMenuTile("Key Hitters",
                 liveTileValue(game, keyHitters, "Active season bats"),
@@ -22578,11 +22579,11 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
     private LiveMatchupEdgePreview liveGameEdgePreview(LiveGame game) {
         if (game == null) return new LiveMatchupEdgePreview(liveEdgeCacheKey(game, "gameedge"), false, "", "", "", Color.rgb(146, 164, 188));
         String cacheKey = liveEdgeCacheKey(game, "gameedge");
-        // v347: Game Edge should be today's game, not generic pitching. Use the actual
-        // offense-vs-starter read, today's probable starters, today's bullpen state, and only
-        // a light team baseline that avoids broad staff-pitching stats.
-        String[] keys = new String[] { "ovs", "starters", "bullpen", "baseline" };
-        double[] weights = new double[] { 0.40d, 0.30d, 0.20d, 0.10d };
+        // v350: Game Edge uses the correct lens for each area, then excludes non-today
+        // pitching noise. Today's starter/matchup factors still lead, but team quality now has
+        // enough weight to reflect a clearly better team without using generic staff pitching.
+        String[] keys = new String[] { "ovs", "starters", "baseline", "bullpen" };
+        double[] weights = new double[] { 0.35d, 0.25d, 0.25d, 0.15d };
         double scoreA = 0d;
         double totalW = 0d;
         int used = 0;
@@ -22604,7 +22605,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
             }
         }
         if (totalW <= 0d || (!hasDaily && used < 3)) {
-            return new LiveMatchupEdgePreview(cacheKey, false, "Pregame matchup read", "Combines lineup fit + starters + bullpen + team baseline", "", accent);
+            return new LiveMatchupEdgePreview(cacheKey, false, "Pregame matchup read", "Combines lineup fit + starters + team baseline + bullpen", "", accent);
         }
         int pctA = (int)Math.round(scoreA / totalW);
         if (pctA < 0) pctA = 0;
@@ -22671,7 +22672,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         value.setEllipsize(TextUtils.TruncateAt.END);
         card.addView(value, matchWrap());
 
-        String cap = edge != null && edge.available ? safe(edge.caption) : "Combines team profile, starters, bullpen, and matchup fit as reads load";
+        String cap = edge != null && edge.available ? safe(edge.caption) : "Combines today’s starter matchup, lineup fit, bullpen, and team baseline";
         TextView c = text(cap, 10, INK_SOFT, false);
         c.setPadding(0, dp(3), 0, 0);
         c.setSingleLine(false);
@@ -22722,7 +22723,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
     private ArrayList<Metric> liveTeamPreviewMetrics(String mode) {
         if ("offense".equals(mode)) return livePreviewMetrics("teamRPG", "teamOPS", "teamXWOBA", "teamBBMinusKPct", "teamBarrelPct", "teamHardHitPct", "teamSLG", "teamOBP");
         if ("pitching".equals(mode)) return livePreviewMetrics("teamRAPG", "teamERA", "teamWHIP", "teamOppOps", "teamPXWOBA", "teamPitchKMinusBBPct", "teamPBarrelPct", "teamPHardHitPct");
-        if ("baseline".equals(mode)) return livePreviewMetrics("teamWinPct", "teamRPG", "teamOPS", "teamXWOBA", "teamOBP", "teamSLG", "teamBBMinusKPct");
+        if ("baseline".equals(mode)) return livePreviewMetrics("teamWinPct", "teamRunDiff", "teamRPG", "teamOPS", "teamXWOBA", "teamOBP", "teamSLG", "teamBBMinusKPct");
         return livePreviewMetrics("teamWinPct", "teamRunDiff", "teamRPG", "teamRAPG", "teamOPS", "teamOppOps", "teamERA", "teamWHIP");
     }
 
