@@ -826,7 +826,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v375", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v376", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20011,6 +20011,45 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 outsRow.addView(dot, dl);
             }
             center.addView(outsRow, matchWrap());
+
+            // v376: AB position dots are only useful when browsing a historical AB. Put the compact
+            // nav in the existing center/portrait area instead of the row above the pitch window,
+            // so the tracking canvas reclaims that vertical space.
+            if (!liveAb && feed != null && feed.loaded && feed.atBats != null && !feed.atBats.isEmpty()) {
+                LinearLayout histRow = new LinearLayout(this);
+                histRow.setOrientation(LinearLayout.HORIZONTAL);
+                histRow.setGravity(Gravity.CENTER);
+
+                int histCount = feed.atBats.size();
+                int firstDot = Math.max(0, Math.min(idx - 4, histCount - 9));
+                int lastDot = Math.min(histCount - 1, firstDot + 8);
+                for (int i = firstDot; i <= lastDot; i++) {
+                    View d = new View(this);
+                    boolean cur = i == idx;
+                    GradientDrawable gd = new GradientDrawable(); gd.setShape(GradientDrawable.OVAL);
+                    gd.setColor(cur ? Color.rgb(82, 226, 176) : Color.argb(70, 255, 255, 255));
+                    d.setBackground(gd);
+                    int sz = cur ? dp(6) : dp(4);
+                    LinearLayout.LayoutParams dl = new LinearLayout.LayoutParams(sz, sz);
+                    dl.setMargins(dp(2), 0, dp(2), 0); dl.gravity = Gravity.CENTER_VERTICAL;
+                    histRow.addView(d, dl);
+                }
+
+                TextView livePill = text("LIVE", 7, Color.rgb(82, 226, 176), true);
+                livePill.setGravity(Gravity.CENTER);
+                livePill.setSingleLine(true);
+                livePill.setPadding(dp(6), dp(2), dp(6), dp(2));
+                livePill.setBackground(roundedStroke(Color.argb(28, 82, 226, 176), Color.argb(130, 82, 226, 176), 999, 1));
+                livePill.setForeground(ripple(true)); livePill.setClickable(true);
+                livePill.setOnClickListener(v -> { game.viewAtBatIndex = -1; rerenderTracker(game); });
+                LinearLayout.LayoutParams lpLp = new LinearLayout.LayoutParams(-2, -2);
+                lpLp.gravity = Gravity.CENTER_VERTICAL; lpLp.setMargins(dp(6), 0, 0, 0);
+                histRow.addView(livePill, lpLp);
+
+                LinearLayout.LayoutParams histLp = matchWrap();
+                histLp.setMargins(0, dp(2), 0, 0);
+                center.addView(histRow, histLp);
+            }
         }
         matchRow.addView(center, new LinearLayout.LayoutParams(0, -2, 1.2f));
         matchRow.addView(playerPortraitColumn(batterId, batterNm, "AT BAT", abBatColor), new LinearLayout.LayoutParams(0, -2, 1f));
@@ -20019,7 +20058,6 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         // ---- Strike zone + pitch list for the selected at-bat ----
         if (ab != null) {
             final int fidx = idx;
-            final int abCount = feed.atBats.size();
             // AB navigation header — cleaner than bare arrows. Swipe the zone to move between ABs;
             // a dots strip shows position; a prominent pill returns to the live AB when browsing.
             LinearLayout abNav = new LinearLayout(this);
@@ -20040,39 +20078,6 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 pStat.setGravity(Gravity.CENTER);
                 abNav.addView(pStat, matchWrap());
             }
-            // dots strip + inline LIVE pill (when browsing a past AB) — kept on ONE row so it never
-            // eats into the tracking window below.
-            LinearLayout dotsRow = new LinearLayout(this);
-            dotsRow.setOrientation(LinearLayout.HORIZONTAL);
-            dotsRow.setGravity(Gravity.CENTER);
-            LinearLayout.LayoutParams drLp = matchWrap(); drLp.setMargins(0, dp(5), 0, dp(2));
-            // show up to ~9 dots centered on the current AB to avoid clutter
-            int firstDot = Math.max(0, Math.min(fidx - 4, abCount - 9));
-            int lastDot = Math.min(abCount - 1, firstDot + 8);
-            for (int i = firstDot; i <= lastDot; i++) {
-                View d = new View(this);
-                boolean cur = i == fidx;
-                GradientDrawable gd = new GradientDrawable(); gd.setShape(GradientDrawable.OVAL);
-                gd.setColor(cur ? Color.rgb(82, 226, 176) : Color.argb(70, 255, 255, 255));
-                d.setBackground(gd);
-                int sz = cur ? dp(7) : dp(5);
-                LinearLayout.LayoutParams dl = new LinearLayout.LayoutParams(sz, sz);
-                dl.setMargins(dp(3), 0, dp(3), 0); dl.gravity = Gravity.CENTER_VERTICAL;
-                dotsRow.addView(d, dl);
-            }
-            // inline LIVE pill to the right of the dots, only when browsing a past AB
-            if (!liveAb) {
-                TextView livePill = text("● LIVE", 9, Color.rgb(82, 226, 176), true);
-                livePill.setGravity(Gravity.CENTER);
-                livePill.setPadding(dp(9), dp(3), dp(9), dp(3));
-                livePill.setBackground(roundedStroke(Color.argb(36, 82, 226, 176), Color.argb(150, 82, 226, 176), 999, 1));
-                livePill.setForeground(ripple(true)); livePill.setClickable(true);
-                livePill.setOnClickListener(v -> { game.viewAtBatIndex = -1; rerenderTracker(game); });
-                LinearLayout.LayoutParams lpLp = new LinearLayout.LayoutParams(-2, -2);
-                lpLp.gravity = Gravity.CENTER_VERTICAL; lpLp.setMargins(dp(8), 0, 0, 0);
-                dotsRow.addView(livePill, lpLp);
-            }
-            abNav.addView(dotsRow, drLp);
             card.addView(abNav, abLp);
 
             // v312: use ALL available space for tracking. Cancel the card's left padding so the
