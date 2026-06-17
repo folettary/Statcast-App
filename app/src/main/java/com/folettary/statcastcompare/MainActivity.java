@@ -777,7 +777,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v361", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v362", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20058,7 +20058,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             }
 
             LinearLayout.LayoutParams slotLp = new LinearLayout.LayoutParams(-1, resultEventSlotHeight());
-            slotLp.setMargins(0, dp(10), 0, 0);
+            slotLp.setMargins(0, dp(8), 0, 0);
             card.addView(resultEventSlot(eventChild, eventKey), slotLp);
         }
 
@@ -20066,7 +20066,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         if (liveAb && !"Final".equals(game.statusLabel())) {
             View sc = situationalCarousel(game, ab, activeLiveTrackerAwayPal, activeLiveTrackerHomePal);
             if (sc != null) {
-                LinearLayout.LayoutParams scLp = matchWrap(); scLp.setMargins(0, dp(8), 0, 0);
+                LinearLayout.LayoutParams scLp = matchWrap(); scLp.setMargins(0, dp(6), 0, 0);
                 card.addView(sc, scLp);
             }
         }
@@ -20220,7 +20220,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
     }
 
     private int resultEventSlotHeight() {
-        return dp(166);
+        return dp(136);
     }
 
     private View resultEventSlot(View child, int key) {
@@ -20269,6 +20269,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
     private View compactDueUpCard(LiveGame game, int accent) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
+        card.setGravity(Gravity.CENTER);
         card.setPadding(dp(12), dp(9), dp(12), dp(9));
         card.setBackground(roundedGradientStroke(new int[] {
                 Color.argb(34, Color.red(accent), Color.green(accent), Color.blue(accent)),
@@ -20292,6 +20293,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         int accent = outcomeColorFromText(safe(ab == null ? "" : ab.result) + " " + safe(ab == null ? "" : ab.description), fallbackColor);
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
+        card.setGravity(Gravity.CENTER);
         card.setPadding(dp(12), dp(9), dp(12), dp(9));
         card.setBackground(roundedGradientStroke(new int[] {
                 Color.argb(28, Color.red(accent), Color.green(accent), Color.blue(accent)),
@@ -20325,22 +20327,22 @@ private View liveGameCard(LiveGame game, int slateIndex) {
     private View betweenInningsCard(LiveGame game, int accent) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setGravity(Gravity.CENTER_HORIZONTAL);
-        card.setPadding(dp(14), dp(12), dp(14), dp(12));
+        card.setGravity(Gravity.CENTER);
+        card.setPadding(dp(12), dp(9), dp(12), dp(9));
         card.setBackground(roundedGradientStroke(new int[] {
-                Color.argb(40, Color.red(accent), Color.green(accent), Color.blue(accent)),
-                Color.argb(16, Color.red(accent), Color.green(accent), Color.blue(accent)),
-                Color.argb(40, Color.red(accent), Color.green(accent), Color.blue(accent))
-        }, 16, Color.argb(130, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
+                Color.argb(38, Color.red(accent), Color.green(accent), Color.blue(accent)),
+                Color.argb(14, Color.red(accent), Color.green(accent), Color.blue(accent)),
+                Color.argb(38, Color.red(accent), Color.green(accent), Color.blue(accent))
+        }, 16, Color.argb(118, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
 
-        TextView eyebrow = text("DUE UP", 8, accent, true);
+        TextView eyebrow = text("DUE UP", 7, accent, true);
         eyebrow.setLetterSpacing(0.22f); eyebrow.setGravity(Gravity.CENTER);
         card.addView(eyebrow, matchWrap());
 
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams rowLp = matchWrap(); rowLp.setMargins(0, dp(8), 0, 0);
+        LinearLayout.LayoutParams rowLp = matchWrap(); rowLp.setMargins(0, dp(5), 0, 0);
 
         int shown = Math.min(3, game.dueUp.size());
         for (int i = 0; i < shown; i++) {
@@ -20348,32 +20350,23 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             LinearLayout colV = new LinearLayout(this);
             colV.setOrientation(LinearLayout.VERTICAL);
             colV.setGravity(Gravity.CENTER_HORIZONTAL);
+            colV.setPadding(dp(4), dp(5), dp(4), dp(5));
+            colV.setBackground(roundedStroke(
+                    Color.argb(24, Color.red(accent), Color.green(accent), Color.blue(accent)),
+                    Color.argb(58, Color.red(accent), Color.green(accent), Color.blue(accent)),
+                    12, 1));
 
-            FrameLayout ring = new FrameLayout(this);
-            ImageView img = new ImageView(this);
-            img.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            GradientDrawable rb = new GradientDrawable();
-            rb.setShape(GradientDrawable.OVAL);
-            rb.setColor(Color.argb(40, 255, 255, 255));
-            rb.setStroke(dp(2), Color.argb(150, Color.red(accent), Color.green(accent), Color.blue(accent)));
-            ring.setBackground(rb);
-            int sz = dp(52);
-            FrameLayout.LayoutParams imgLp = new FrameLayout.LayoutParams(sz, sz);
-            ring.addView(img, imgLp);
-            loadPlayerImage(db.id, img);
-            colV.addView(ring, new LinearLayout.LayoutParams(dp(56), dp(56)));
-
-            TextView nm = text(db.name, 11, INK, true);
+            TextView nm = text(db.name, 10, INK, true);
             nm.setGravity(Gravity.CENTER); nm.setSingleLine(true); nm.setEllipsize(TextUtils.TruncateAt.END);
-            nm.setPadding(0, dp(4), 0, 0);
             colV.addView(nm, matchWrap());
 
             TextView ln = text(safe(db.line).isEmpty() ? "0-0" : db.line, 8, INK_DIM, true);
             ln.setGravity(Gravity.CENTER); ln.setSingleLine(true); ln.setEllipsize(TextUtils.TruncateAt.END);
+            ln.setPadding(0, dp(1), 0, 0);
             colV.addView(ln, matchWrap());
 
             LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(0, -2, 1f);
-            cLp.setMargins(dp(4), 0, dp(4), 0);
+            cLp.setMargins(dp(3), 0, dp(3), 0);
             row.addView(colV, cLp);
         }
         card.addView(row, rowLp);
@@ -21007,6 +21000,26 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         return card;
     }
 
+    private TextView resultMetricPill(String value, int accent, boolean emphasis) {
+        TextView pill = text(value, 8, emphasis ? INK : INK_SOFT, true);
+        pill.setGravity(Gravity.CENTER);
+        pill.setSingleLine(true);
+        pill.setEllipsize(TextUtils.TruncateAt.END);
+        pill.setPadding(dp(6), dp(2), dp(6), dp(2));
+        pill.setBackground(roundedStroke(
+                Color.argb(emphasis ? 38 : 24, Color.red(accent), Color.green(accent), Color.blue(accent)),
+                Color.argb(emphasis ? 96 : 58, Color.red(accent), Color.green(accent), Color.blue(accent)),
+                999, 1));
+        return pill;
+    }
+
+    private void addResultMetricPill(LinearLayout row, String value, int accent, boolean emphasis) {
+        if (safe(value).isEmpty()) return;
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+        lp.setMargins(dp(2), 0, dp(2), 0);
+        row.addView(resultMetricPill(value, accent, emphasis), lp);
+    }
+
     private View resultCard(LiveAtBat ab, LivePitch pitch, int batColor) {
         boolean pitchMode = pitch != null;
         int accent = pitchMode ? pitchOutcomeColor(pitch, ab)
@@ -21015,7 +21028,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setGravity(Gravity.CENTER);
-        card.setPadding(dp(14), dp(9), dp(14), dp(9));
+        card.setPadding(dp(10), dp(7), dp(10), dp(7));
         card.setBackground(roundedGradientStroke(new int[] {
                 Color.argb(48, Color.red(accent), Color.green(accent), Color.blue(accent)),
                 Color.argb(20, Color.red(accent), Color.green(accent), Color.blue(accent)),
@@ -21060,14 +21073,13 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 card.addView(advT, matchWrap());
             }
         } else {
-            // v361: completed at-bat result keeps all content but fits the fixed Result/Event slot.
-            // Remove vertical ceremony (divider + separate ON THE PITCH label) while preserving:
-            // result, contact metrics, xBA, description, pitch speed/type/spin.
+            // v362: same fixed-size premium event card. Keep all content, but use compact styling:
+            // result hero, metric chips, 2-line description, and a distinct pitch footer pill.
             TextView label = text("RESULT", 7, accent, true);
             label.setLetterSpacing(0.22f); label.setGravity(Gravity.CENTER);
             card.addView(label, matchWrap());
 
-            TextView big = text(safe(ab.result).toUpperCase(Locale.US), 18, INK, true);
+            TextView big = text(safe(ab.result).toUpperCase(Locale.US), 17, INK, true);
             big.setGravity(Gravity.CENTER); big.setLetterSpacing(0.02f);
             big.setPadding(0, dp(1), 0, 0);
             card.addView(big, matchWrap());
@@ -21080,30 +21092,25 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 }
             }
             if (contact != null) {
-                StringBuilder meta = new StringBuilder();
-                if (!Double.isNaN(contact.exitVelo)) meta.append(String.format(Locale.US, "%.0f mph EV", contact.exitVelo));
-                if (!Double.isNaN(contact.launchAngle)) { if (meta.length() > 0) meta.append("  •  "); meta.append(String.format(Locale.US, "%.0f° LA", contact.launchAngle)); }
-                if (!Double.isNaN(contact.distance) && contact.distance > 0) { if (meta.length() > 0) meta.append("  •  "); meta.append(String.format(Locale.US, "%.0f ft", contact.distance)); }
+                LinearLayout metricRow = new LinearLayout(this);
+                metricRow.setOrientation(LinearLayout.HORIZONTAL);
+                metricRow.setGravity(Gravity.CENTER);
+                metricRow.setPadding(0, dp(3), 0, 0);
+                if (!Double.isNaN(contact.exitVelo)) addResultMetricPill(metricRow, String.format(Locale.US, "%.0f EV", contact.exitVelo), accent, false);
+                if (!Double.isNaN(contact.launchAngle)) addResultMetricPill(metricRow, String.format(Locale.US, "%.0f° LA", contact.launchAngle), accent, false);
+                if (!Double.isNaN(contact.distance) && contact.distance > 0) addResultMetricPill(metricRow, String.format(Locale.US, "%.0f ft", contact.distance), accent, false);
                 if (!Double.isNaN(contact.xba)) {
                     String x = String.format(Locale.US, "%.3f", contact.xba);
                     if (x.startsWith("0")) x = x.substring(1);
-                    if (meta.length() > 0) meta.append("  •  ");
-                    meta.append(x).append(" xBA");
+                    addResultMetricPill(metricRow, x + " xBA", accent, true);
                 }
-                if (meta.length() > 0) {
-                    TextView metaView = text(meta.toString(), 9, accent, true);
-                    metaView.setGravity(Gravity.CENTER);
-                    metaView.setSingleLine(true);
-                    metaView.setEllipsize(TextUtils.TruncateAt.END);
-                    metaView.setPadding(0, dp(2), 0, 0);
-                    card.addView(metaView, matchWrap());
-                }
+                if (metricRow.getChildCount() > 0) card.addView(metricRow, matchWrap());
             }
 
             if (!safe(ab.description).isEmpty()) {
-                TextView desc = text(ab.description, 9, INK_DIM, false);
+                TextView desc = text(ab.description, 8, INK_DIM, false);
                 desc.setGravity(Gravity.CENTER);
-                desc.setPadding(dp(2), dp(4), dp(2), 0);
+                desc.setPadding(dp(3), dp(4), dp(3), 0);
                 desc.setMaxLines(2);
                 desc.setEllipsize(TextUtils.TruncateAt.END);
                 card.addView(desc, matchWrap());
@@ -21117,12 +21124,19 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 if (!Double.isNaN(endPitch.spinRate) && endPitch.spinRate > 0) {
                     pitchLine.append("  •  ").append(String.format(Locale.US, "%.0f rpm", endPitch.spinRate));
                 }
-                TextView pitchT = text(pitchLine.toString(), 9, INK_SOFT, true);
+                TextView pitchT = text(pitchLine.toString(), 8, INK_SOFT, true);
                 pitchT.setGravity(Gravity.CENTER);
                 pitchT.setSingleLine(true);
                 pitchT.setEllipsize(TextUtils.TruncateAt.END);
-                pitchT.setPadding(0, dp(5), 0, 0);
-                card.addView(pitchT, matchWrap());
+                pitchT.setPadding(dp(8), dp(3), dp(8), dp(3));
+                pitchT.setBackground(roundedStroke(
+                        Color.argb(28, 255, 255, 255),
+                        Color.argb(42, Color.red(accent), Color.green(accent), Color.blue(accent)),
+                        999, 1));
+                LinearLayout.LayoutParams pp = new LinearLayout.LayoutParams(-2, -2);
+                pp.gravity = Gravity.CENTER_HORIZONTAL;
+                pp.setMargins(0, dp(5), 0, 0);
+                card.addView(pitchT, pp);
             }
         }
         return card;
