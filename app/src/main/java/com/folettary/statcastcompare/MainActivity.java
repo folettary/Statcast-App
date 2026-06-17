@@ -770,7 +770,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v351", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v352", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -18467,14 +18467,33 @@ private String liveStateSummary(LiveGame game) {
     else if (st.contains("end")) half = "End";
     else half = "";
     String inning = game.sitInning > 0 ? ordinalNum(game.sitInning) : "";
-    String outs = game.sitOuts + " out" + (game.sitOuts == 1 ? "" : "s");
     String left = (half.isEmpty() ? inning : (half + (inning.isEmpty() ? "" : " " + inning))).trim();
     if (left.isEmpty()) left = "In progress";
-    return left + " · " + outs;
+    return left;
 }
 
-// v351: actual base-state glyph for live slate tiles. This replaces the old ◆◇◇ text
-// shorthand with a small baseball-diamond read: 2B on top, 3B left, 1B right.
+private LinearLayout miniOutDots(int outs) {
+    LinearLayout row = new LinearLayout(this);
+    row.setOrientation(LinearLayout.HORIZONTAL);
+    row.setGravity(Gravity.CENTER);
+    int safeOuts = Math.max(0, Math.min(3, outs));
+    for (int i = 0; i < 3; i++) {
+        View dot = new View(this);
+        GradientDrawable gd = new GradientDrawable();
+        gd.setShape(GradientDrawable.OVAL);
+        boolean filled = i < safeOuts;
+        gd.setColor(filled ? Color.rgb(247, 197, 77) : Color.argb(30, 255, 255, 255));
+        gd.setStroke(dp(1), filled ? Color.argb(120, 255, 231, 150) : Color.argb(80, 255, 255, 255));
+        dot.setBackground(gd);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(6), dp(6));
+        lp.setMargins(dp(2), 0, dp(2), 0);
+        row.addView(dot, lp);
+    }
+    return row;
+}
+
+// v352: centered bases for live slate tiles; outs are shown separately as dots.
+// 2B on top, 3B left, 1B right.
 private class MiniBasesView extends View {
     private final boolean onFirst;
     private final boolean onSecond;
@@ -18491,11 +18510,11 @@ private class MiniBasesView extends View {
         float w = getWidth();
         float h = getHeight();
         float cx = w / 2f;
-        float topY = h * 0.22f;
-        float midY = h * 0.52f;
-        float leftX = cx - h * 0.30f;
-        float rightX = cx + h * 0.30f;
-        float r = Math.max(dp(3.4f), h * 0.15f);
+        float topY = h * 0.25f;
+        float midY = h * 0.57f;
+        float leftX = cx - h * 0.33f;
+        float rightX = cx + h * 0.33f;
+        float r = Math.max(dp(3.4f), h * 0.14f);
 
         paint.setStyle(Paint.Style.STROKE);
         paint.setStrokeWidth(dp(0.9f));
@@ -18593,24 +18612,30 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             new LinearLayout.LayoutParams(0, -2, 1));
     content.addView(scoreRow, matchWrap());
 
-    // v351: for in-progress games, show a cleaner live-state row with readable inning/outs
-    // text and a true mini base diamond instead of the old ◆◇◇ text shorthand.
+    // v352: center the bases in the middle of the tile and use simple dots for outs.
+    // Bases are spatial; outs are a count. This is easier to scan than a combined text/glyph row.
     boolean inProgress = gameStatusRank(game) == 1 && !game.isPregame() && !"Final".equals(game.statusLabel());
     if (inProgress && game.sitInning > 0) {
+        MiniBasesView basesView = new MiniBasesView(game.onFirst, game.onSecond, game.onThird);
+        LinearLayout.LayoutParams basesLp = new LinearLayout.LayoutParams(dp(54), dp(34));
+        basesLp.gravity = Gravity.CENTER_HORIZONTAL;
+        basesLp.setMargins(0, dp(3), 0, 0);
+        content.addView(basesView, basesLp);
+
         LinearLayout liveRow = new LinearLayout(this);
         liveRow.setOrientation(LinearLayout.HORIZONTAL);
         liveRow.setGravity(Gravity.CENTER_VERTICAL);
-        liveRow.setPadding(0, dp(8), 0, 0);
+        liveRow.setPadding(0, dp(1), 0, 0);
 
         TextView state = text(liveStateSummary(game), 10, Color.rgb(82, 226, 176), true);
         state.setSingleLine(true);
         state.setEllipsize(TextUtils.TruncateAt.END);
         liveRow.addView(state, new LinearLayout.LayoutParams(0, -2, 1));
 
-        MiniBasesView basesView = new MiniBasesView(game.onFirst, game.onSecond, game.onThird);
-        LinearLayout.LayoutParams basesLp = new LinearLayout.LayoutParams(dp(38), dp(26));
-        basesLp.setMargins(dp(7), 0, 0, 0);
-        liveRow.addView(basesView, basesLp);
+        LinearLayout outs = miniOutDots(game.sitOuts);
+        LinearLayout.LayoutParams outsLp = new LinearLayout.LayoutParams(-2, -2);
+        outsLp.setMargins(dp(6), 0, 0, 0);
+        liveRow.addView(outs, outsLp);
         content.addView(liveRow, matchWrap());
     }
 
@@ -18808,12 +18833,23 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             JSONObject root = new JSONObject(body);
             JSONObject liveData = root.optJSONObject("liveData");
             if (liveData == null) return;
+            // v352: keep the tracker hero/scoreboard and base diamond tied to MLB's official
+            // current game state. Feed play text explains what happened; linescore tells us what
+            // the state is now, including sac-fly/advancement scores and stationary runners.
+            try { parseLiveSituation(liveData.optJSONObject("linescore"), game); } catch (Exception ignored) { }
             JSONObject plays = liveData.optJSONObject("plays");
             if (plays == null) return;
             JSONArray allPlays = plays.optJSONArray("allPlays");
             if (allPlays == null) return;
 
             LiveFeed feed = new LiveFeed();
+            // v352: build each AB's post-play base state sequentially. MLB runner arrays often list
+            // only runners who moved; a runner who stays on first after a sac fly/flyout may not be
+            // repeated in that play's movement array. Carrying the previous base state prevents the
+            // tracker from briefly dropping stationary runners when browsing the latest completed AB.
+            boolean carryFirst = false, carrySecond = false, carryThird = false;
+            int carryInning = -1;
+            boolean carryTop = false;
             for (int i = 0; i < allPlays.length(); i++) {
                 JSONObject play = allPlays.optJSONObject(i);
                 if (play == null) continue;
@@ -18838,6 +18874,10 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                     if (result.has("awayScore")) ab.awayScoreAt = result.optInt("awayScore", -1);
                     if (result.has("homeScore")) ab.homeScoreAt = result.optInt("homeScore", -1);
                 }
+                if (carryInning >= 0 && (carryInning != inning || carryTop != topHalf)) {
+                    carryFirst = false; carrySecond = false; carryThird = false;
+                }
+                boolean nextFirst = carryFirst, nextSecond = carrySecond, nextThird = carryThird;
                 JSONArray runners = play.optJSONArray("runners");
                 if (runners != null) {
                     for (int ri = 0; ri < runners.length(); ri++) {
@@ -18845,12 +18885,21 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                         if (rn == null) continue;
                         JSONObject mv = rn.optJSONObject("movement");
                         if (mv == null) continue;
-                        String end = mv.optString("end", "");
-                        if ("1B".equals(end)) ab.onFirst = true;
-                        else if ("2B".equals(end)) ab.onSecond = true;
-                        else if ("3B".equals(end)) ab.onThird = true;
+                        String startBase = mv.optString("start", "");
+                        String endBase = mv.optString("end", "");
+                        if ("1B".equals(startBase)) nextFirst = false;
+                        else if ("2B".equals(startBase)) nextSecond = false;
+                        else if ("3B".equals(startBase)) nextThird = false;
+                        if ("1B".equals(endBase)) nextFirst = true;
+                        else if ("2B".equals(endBase)) nextSecond = true;
+                        else if ("3B".equals(endBase)) nextThird = true;
                     }
                 }
+                ab.onFirst = nextFirst;
+                ab.onSecond = nextSecond;
+                ab.onThird = nextThird;
+                carryFirst = nextFirst; carrySecond = nextSecond; carryThird = nextThird;
+                carryInning = inning; carryTop = topHalf;
                 if (matchup != null) {
                     JSONObject b = matchup.optJSONObject("batter");
                     JSONObject p = matchup.optJSONObject("pitcher");
