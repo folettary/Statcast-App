@@ -319,6 +319,7 @@ public class MainActivity extends Activity {
     private long lastLivePullRefreshMs = 0L;
     private TextView liveFeedRefreshButton = null;
     private LinearLayout activeLiveTrackerHost = null;       // v273: tracker mount for in-place updates
+    private FrameLayout activeLiveScoreHeroHost = null; // v354: live score/inning hero refreshes during tracker polls
     private View gameHubTabBarView = null;                   // v301: tab bar, to snap to on tab switch
     private TeamPalette activeLiveTrackerAwayPal = null, activeLiveTrackerHomePal = null;
     private LiveGame activeLiveTrackerGame = null;
@@ -770,7 +771,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v352", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v354", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -1921,6 +1922,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         if (game == null) return;
         screenRequestToken++;
         activeLiveGameMenu = game;
+        activeLiveScoreHeroHost = null;
         activePrimaryTab = TAB_MATCHUP;
         matchupPathMode = MATCHUP_PATH_LIVE;
         matchupResultMode = false;
@@ -18825,6 +18827,37 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         return e;
     }
 
+    private String smartNonPitchEventLabel(String eventType, String description) {
+        String s = (safe(eventType) + " " + safe(description)).toLowerCase(Locale.US);
+        if (s.contains("mound visit")) return "Mound Visit";
+        if (s.contains("pinch hitter") || s.contains("pinch-hitter") || s.contains("pinch hits")) return "Pinch Hitter";
+        if (s.contains("pinch runner") || s.contains("pinch-runs") || s.contains("pinch runs")) return "Pinch Runner";
+        if (s.contains("pitching change") || s.contains("pitcher replaces")
+                || s.contains("enters pitching") || s.contains("relieves")
+                || (s.contains("replaces") && (s.contains("pitcher") || s.contains("pitching") || s.contains("mound")))) return "Pitching Change";
+        if (s.contains("defensive switch") || s.contains("defensive substitution") || s.contains("defensive change")
+                || s.contains("remains in the game") || s.contains("now playing")) return "Defensive Change";
+        if (s.contains("injury") || s.contains("trainer")) return "Injury Delay";
+        if (s.contains("challenge") || s.contains("review")) return "Review";
+        if (s.contains("delay")) return "Delay";
+        if (!safe(eventType).isEmpty()) return titleCaseEvent(eventType);
+        return "Roster Move";
+    }
+
+    private String titleCaseEvent(String s) {
+        s = safe(s).trim();
+        if (s.isEmpty()) return "";
+        String[] parts = s.replace('_', ' ').toLowerCase(Locale.US).split("\\s+");
+        StringBuilder out = new StringBuilder();
+        for (String p : parts) {
+            if (p.isEmpty()) continue;
+            if (out.length() > 0) out.append(' ');
+            out.append(Character.toUpperCase(p.charAt(0)));
+            if (p.length() > 1) out.append(p.substring(1));
+        }
+        return out.toString();
+    }
+
     private void fetchLiveFeedInto(LiveGame game) {
         if (game == null) return;
         try {
@@ -18956,7 +18989,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                             if (cnt != null) { lp.balls = cnt.optInt("balls", 0); lp.strikes = cnt.optInt("strikes", 0); }
                             ab.pitches.add(lp);
                         } else {
-                            // Non-pitch event = roster action (pitching change, pinch hitter, etc.)
+                            // Non-pitch event = mound visit, pitching change, pinch hitter, review, delay, etc.
                             JSONObject details = ev.optJSONObject("details");
                             String evtType = details == null ? "" : details.optString("event", details.optString("description", ""));
                             String desc = details == null ? "" : details.optString("description", "");
@@ -18964,12 +18997,11 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                                 LiveFeedEntry fe = new LiveFeedEntry();
                                 fe.kind = 2;
                                 fe.inning = inning; fe.topHalf = topHalf;
-                                fe.headline = safe(evtType).isEmpty() ? "Roster move" : evtType;
+                                fe.headline = smartNonPitchEventLabel(evtType, desc);
                                 fe.detail = desc;
                                 feed.feed.add(fe);
-                                // remember the most recent roster move and the AB it occurred in, so
-                                // the result card can surface it as a purple card when it's the latest
-                                // thing that happened (e.g. a pitching change before the next pitch).
+                                // remember the most recent non-pitch event so the result card can
+                                // surface it when it's the latest thing that happened before a pitch.
                                 feed.latestRosterMove = fe;
                                 feed.latestRosterAbIndex = feed.atBats.size(); // this AB's index (added below)
                             }
@@ -19291,10 +19323,11 @@ private View liveGameCard(LiveGame game, int slateIndex) {
 
     private class StrikeZoneView extends View {
         private final java.util.List<LivePitch> pitches;
+        private final LiveAtBat atBat;
         private final ZoneBounds bounds;
         private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-        StrikeZoneView(android.content.Context c, java.util.List<LivePitch> pitches, ZoneBounds bounds) {
-            super(c); this.pitches = pitches; this.bounds = bounds;
+        StrikeZoneView(android.content.Context c, java.util.List<LivePitch> pitches, LiveAtBat atBat, ZoneBounds bounds) {
+            super(c); this.pitches = pitches; this.atBat = atBat; this.bounds = bounds;
             setLayerType(View.LAYER_TYPE_SOFTWARE, null);
         }
         @Override protected void onDraw(Canvas canvas) {
@@ -19398,11 +19431,11 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 if (Math.abs(px) > 50f || Math.abs(pz) > 50f) continue; // only drop garbage sentinels; extremes clamp+chevron
                 float cxRaw = mapX(px, xMin, xMax, drawL, drawW);
                 float cyRaw = mapZ(pz, zMin, zMax, drawT, drawH);
-                int col = pitchTypeColor(lp.typeCode);
+                int col = pitchOutcomeColor(lp, atBat);
                 int age = Math.max(0, latestNo - lp.number);
                 int alpha = age == 0 ? 220 : (age <= 3 ? 150 : (count >= 9 ? 72 : 100));
                 float stroke = age == 0 ? dp(3.8f) : (age <= 3 ? dp(2.8f) : dp(2.0f));
-                float dotR = age == 0 ? dp(9.2f) : (age <= 3 ? dp(7.8f) : dp(6.8f));
+                float dotR = age == 0 ? dp(10.8f) : (age <= 3 ? dp(9.2f) : dp(8.0f));
                 float tInset = dotR + dp(2);
                 float cx = Math.max(drawL + tInset, Math.min(drawL + drawW - tInset, cxRaw));
                 float cy = Math.max(drawT + tInset, Math.min(drawT + drawH - tInset, cyRaw));
@@ -19431,12 +19464,12 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 if (Math.abs(px) > 50f || Math.abs(pz) > 50f) continue; // only drop garbage sentinels; extremes clamp+chevron
                 float cxRaw = mapX(px, xMin, xMax, drawL, drawW);
                 float cyRaw = mapZ(pz, zMin, zMax, drawT, drawH);
-                int col = pitchTypeColor(lp.typeCode);
+                int col = pitchOutcomeColor(lp, atBat);
                 int age = Math.max(0, latestNo - lp.number);
                 boolean latest = age == 0;
                 boolean recent = age <= 3;
                 int alpha = latest ? 255 : (recent ? 215 : (count >= 9 ? 145 : 175));
-                float r = latest ? dp(9.2f) : (recent ? dp(7.8f) : dp(6.8f));
+                float r = latest ? dp(10.8f) : (recent ? dp(9.2f) : dp(8.0f));
                 // Inset so the whole dot (plus a hair for the glow) stays inside the plot, and clamp
                 // any pitch whose true location is outside the window to the edge — marked pinned.
                 float inset = r + dp(2);
@@ -19445,19 +19478,54 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 float cx = Math.max(minX, Math.min(maxX, cxRaw));
                 float cy = Math.max(minY, Math.min(maxY, cyRaw));
                 boolean pinned = (cx != cxRaw) || (cy != cyRaw);
+                int kind = pitchOutcomeKind(lp, atBat);
+                boolean diamond = isPitchOutcomeDiamond(kind);
                 p.setStyle(Paint.Style.FILL);
                 if (latest) p.setShadowLayer(dp(5), 0, 0, col);
                 else if (recent) p.setShadowLayer(dp(2.5f), 0, 0, Color.argb(120, Color.red(col), Color.green(col), Color.blue(col)));
                 else p.clearShadowLayer();
-                p.setColor(Color.argb(alpha, Color.red(col), Color.green(col), Color.blue(col)));
-                canvas.drawCircle(cx, cy, r, p);
+
+                if (diamond) {
+                    android.graphics.Path marker = new android.graphics.Path();
+                    marker.moveTo(cx, cy - r * 1.08f);
+                    marker.lineTo(cx + r * 1.08f, cy);
+                    marker.lineTo(cx, cy + r * 1.08f);
+                    marker.lineTo(cx - r * 1.08f, cy);
+                    marker.close();
+                    p.setStyle(Paint.Style.FILL);
+                    p.setColor(Color.argb(alpha, Color.red(col), Color.green(col), Color.blue(col)));
+                    canvas.drawPath(marker, p);
+                    p.clearShadowLayer();
+                    p.setStyle(Paint.Style.STROKE);
+                    p.setStrokeWidth(latest ? dp(1.4f) : dp(1.0f));
+                    p.setColor(Color.argb(latest ? 210 : 150, 255, 255, 255));
+                    canvas.drawPath(marker, p);
+                } else if (kind == 1) { // ball: green ring, not a filled strike-family marker
+                    p.setStyle(Paint.Style.FILL);
+                    p.setColor(Color.argb(latest ? 96 : 72, 8, 13, 22));
+                    canvas.drawCircle(cx, cy, r, p);
+                    p.clearShadowLayer();
+                    p.setStyle(Paint.Style.STROKE);
+                    p.setStrokeWidth(latest ? dp(2.4f) : dp(1.8f));
+                    p.setColor(Color.argb(alpha, Color.red(col), Color.green(col), Color.blue(col)));
+                    canvas.drawCircle(cx, cy, r - dp(0.7f), p);
+                } else {
+                    p.setStyle(Paint.Style.FILL);
+                    p.setColor(Color.argb(alpha, Color.red(col), Color.green(col), Color.blue(col)));
+                    canvas.drawCircle(cx, cy, r, p);
+                    p.clearShadowLayer();
+                    p.setStyle(Paint.Style.STROKE);
+                    p.setStrokeWidth(latest ? dp(1.2f) : dp(0.9f));
+                    p.setColor(Color.argb(latest ? 190 : 130, 255, 255, 255));
+                    canvas.drawCircle(cx, cy, r - dp(0.5f), p);
+                }
+
                 p.clearShadowLayer();
-                p.setColor(Color.argb(latest ? 238 : 205, 8, 13, 22));
-                canvas.drawCircle(cx, cy, Math.max(dp(2.5f), r - dp(2.3f)), p);
-                p.setColor(Color.argb(latest ? 255 : 220, 255, 255, 255));
+                p.setStyle(Paint.Style.FILL);
+                p.setColor(pitchMarkerTextColor(kind));
                 p.setTextAlign(Paint.Align.CENTER); p.setFakeBoldText(true);
-                p.setTextSize(latest ? dp(10) : dp(9));
-                canvas.drawText(String.valueOf(lp.number), cx, cy + dp(3.3f), p);
+                p.setTextSize(latest ? dp(10.5f) : dp(9.4f));
+                canvas.drawText(String.valueOf(lp.number), cx, cy + dp(3.5f), p);
                 // pinned marker: a small chevron just outside the dot, pointing where the pitch
                 // actually went, so an off-the-chart pitch reads as "further this way".
                 if (pinned) {
@@ -19501,6 +19569,78 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             default: return Color.rgb(150, 170, 200);
         }
     }
+
+    // v354: one shared outcome language for zone markers + pitch list + result-card accents.
+    // 1 ball, 2 strike, 3 foul, 4 in-play out, 5 in-play/reached, 6 run-scoring play.
+    private int outcomeBallColor() { return Color.rgb(82, 226, 176); }       // green ring
+    private int outcomeStrikeColor() { return Color.rgb(255, 96, 96); }      // red filled
+    private int outcomeFoulColor() { return Color.rgb(245, 170, 62); }       // amber filled
+    private int outcomeInPlayOutColor() { return Color.rgb(172, 184, 202); } // gray diamond
+    private int outcomeReachColor() { return Color.rgb(96, 175, 255); }      // blue diamond
+    private int outcomeRunColor() { return Color.rgb(247, 197, 77); }        // gold diamond
+
+    private boolean isPitchOutcomeDiamond(int kind) {
+        return kind == 4 || kind == 5 || kind == 6;
+    }
+
+    private int pitchMarkerTextColor(int kind) {
+        if (kind == 1 || kind == 2 || kind == 5) return Color.WHITE;
+        return Color.rgb(8, 13, 22);
+    }
+
+    private int pitchOutcomeColor(LivePitch lp, LiveAtBat ab) {
+        return outcomeColorForKind(pitchOutcomeKind(lp, ab));
+    }
+
+    private int outcomeColorForKind(int kind) {
+        switch (kind) {
+            case 1: return outcomeBallColor();
+            case 2: return outcomeStrikeColor();
+            case 3: return outcomeFoulColor();
+            case 4: return outcomeInPlayOutColor();
+            case 5: return outcomeReachColor();
+            case 6: return outcomeRunColor();
+            default: return Color.rgb(150, 170, 200);
+        }
+    }
+
+    private int pitchOutcomeKind(LivePitch lp, LiveAtBat ab) {
+        if (lp == null) return 0;
+        if (lp.isInPlay || safe(lp.result).toLowerCase(Locale.US).contains("in play")) {
+            return contactOutcomeKind(ab);
+        }
+        String r = safe(lp.result).toLowerCase(Locale.US);
+        if (r.contains("foul")) return 3;
+        if (lp.isBall || r.contains("ball") || r.contains("pitchout") || r.contains("automatic ball")) return 1;
+        if (lp.isStrike || r.contains("strike") || r.contains("swinging") || r.contains("miss")) return 2;
+        return 0;
+    }
+
+    private int contactOutcomeKind(LiveAtBat ab) {
+        if (ab == null) return 4;
+        String s = (safe(ab.result) + " " + safe(ab.description)).toLowerCase(Locale.US);
+        if (isRunScoringOutcome(s)) return 6;
+        if (isReachOutcome(s)) return 5;
+        return 4;
+    }
+
+    private boolean isRunScoringOutcome(String s) {
+        s = safe(s).toLowerCase(Locale.US);
+        return s.contains("scores") || s.contains(" scored") || s.contains(" rbi")
+                || s.contains("homer") || s.contains("home run") || s.contains("grand slam")
+                || s.contains("sac fly") || s.contains("sacrifice fly") || s.contains("bases-clearing");
+    }
+
+    private boolean isReachOutcome(String s) {
+        s = safe(s).toLowerCase(Locale.US);
+        if (s.contains("double play") || s.contains("triple play") || s.contains("grounded into")
+                || s.contains("grounds into")) return false;
+        return s.contains("single") || s.contains("double") || s.contains("triple")
+                || s.contains("singled") || s.contains("doubled") || s.contains("tripled")
+                || s.contains("reaches") || s.contains("reached") || s.contains("on error")
+                || s.contains("fielder's choice");
+    }
+
     private View countDotsRow(String label, int filled, int total, int fillColor) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
@@ -19554,6 +19694,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                     LiveFeed f = g.liveFeed;
                     boolean followingLive = (g.viewAtBatIndex < 0) || (f != null && f.loaded && g.viewAtBatIndex >= f.atBats.size() - 1);
                     if (followingLive) g.viewAtBatIndex = -1;
+                    refreshActiveLiveScoreHero(g);
                     host.removeAllViews();
                     liveUpdateRebuild = true;
                     host.addView(buildTrackerPager(g), matchWrap());
@@ -19589,6 +19730,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 if (host.getParent() == null) return;
                 activeLiveTrackerAwayPal = awayPalette;
                 activeLiveTrackerHomePal = homePalette;
+                refreshActiveLiveScoreHero(game);
                 host.removeAllViews();
                 liveUpdateRebuild = true;
                 host.addView(buildTrackerPager(game), matchWrap());
@@ -19798,7 +19940,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             zoneRow.setGravity(Gravity.TOP);
             LinearLayout.LayoutParams zrLp = matchWrap(); zrLp.setMargins(-dp(12), 0, -dp(2), 0);
             int zoneH = dp(264);
-            StrikeZoneView zone = new StrikeZoneView(this, ab.pitches, strikeZoneBoundsForFeed(feed));
+            StrikeZoneView zone = new StrikeZoneView(this, ab.pitches, ab, strikeZoneBoundsForFeed(feed));
             LinearLayout.LayoutParams zLp = new LinearLayout.LayoutParams(0, zoneH, 1f);
             zoneRow.addView(zone, zLp);
             // pitch list: newest first, in a fixed-height window that scrolls independently of the
@@ -19828,7 +19970,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 waiting.setMaxLines(3);
                 legend.addView(waiting, matchWrap());
             } else {
-                for (int pi = ab.pitches.size() - 1; pi >= 0; pi--) legend.addView(pitchLegendRow(ab.pitches.get(pi)), matchWrap());
+                for (int pi = ab.pitches.size() - 1; pi >= 0; pi--) legend.addView(pitchLegendRow(ab.pitches.get(pi), ab), matchWrap());
             }
             legendScroll.addView(legend, new ScrollView.LayoutParams(-1, -2));
             legendClip.addView(legendScroll, new FrameLayout.LayoutParams(-1, zoneH));
@@ -19849,14 +19991,22 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             String inState = safe(game.sitInningState).toLowerCase(Locale.US);
             boolean betweenInnings = !("Final".equals(game.statusLabel())) && (inState.contains("middle") || inState.contains("end"));
             if (betweenInnings && liveAb && game.dueUp != null && !game.dueUp.isEmpty()) {
+                // v354: do not let "Due Up" hide the play that ended the half-inning. Show the
+                // completed result first, then the next three batters as the secondary card.
+                if (ab != null && ab.complete && !safe(ab.result).isEmpty()) {
+                    View rc = resultCard(ab, null, batColor);
+                    animateResultIn(rc, ("res-between-" + fidx + "-" + ab.result).hashCode());
+                    card.addView(rc, bannerLp());
+                }
                 // color the due-up card by the team COMING UP (not the one that just batted)
                 boolean topUp = game.dueUp.get(0).topComingUp;
                 TeamPalette upPal = topUp ? activeLiveTrackerAwayPal : activeLiveTrackerHomePal;
                 if (upPal == null) upPal = neutralPalette();
                 int upColor = ensureReadableColor(upPal.primary, 150);
                 View bic = betweenInningsCard(game, upColor);
-                animateResultIn(bic, ("dueup-" + game.sitInning + "-" + inState).hashCode());
-                card.addView(bic, bannerLp());
+                LinearLayout.LayoutParams bicLp = bannerLp();
+                if (ab != null && ab.complete && !safe(ab.result).isEmpty()) bicLp.setMargins(0, dp(8), 0, 0);
+                card.addView(bic, bicLp);
             } else if (liveAb && ab != null && ab.pitches.isEmpty()
                     && feed.latestRosterMove != null && feed.latestRosterAbIndex == idx) {
                 // A roster move (pitching change, sub, injury) just happened and no pitch has been
@@ -20244,68 +20394,40 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 Color.argb(18, 170, 130, 255),
                 Color.argb(46, 170, 130, 255)
         }, 16, Color.argb(150, 170, 130, 255), 2));
-        TextView eyebrow = text("ROSTER MOVE", 8, PURPLE, true);
+        String label = smartNonPitchEventLabel(fe == null ? "" : fe.headline, fe == null ? "" : fe.detail);
+        TextView eyebrow = text(label.toUpperCase(Locale.US), 8, PURPLE, true);
         eyebrow.setLetterSpacing(0.22f); eyebrow.setGravity(Gravity.CENTER);
         card.addView(eyebrow, matchWrap());
-        TextView head = text(safe(fe.headline), 18, INK, true);
+        String headText = fe != null && !safe(fe.detail).isEmpty() ? fe.detail : (fe == null ? "" : safe(fe.headline));
+        TextView head = text(headText, 18, INK, true);
         head.setGravity(Gravity.CENTER); head.setPadding(0, dp(2), 0, 0);
+        head.setMaxLines(2); head.setEllipsize(TextUtils.TruncateAt.END);
         card.addView(head, matchWrap());
-        if (!safe(fe.detail).isEmpty()) {
-            TextView detail = text(fe.detail, 10, INK_DIM, false);
-            detail.setGravity(Gravity.CENTER); detail.setPadding(0, dp(3), 0, 0);
-            card.addView(detail, matchWrap());
-        }
         return card;
     }
 
-    // v336: situational-stats carousel pinned below the tracker — a horizontal strip of insight
-    // cards (pitcher's day, batter's day, win-prob moment, due up, game pulse). Assembled from data
-    // already loaded, so cards only appear when they have real content. Feels alive without extra
-    // network cost. Scrolls horizontally, independent of the page and the AB carousel above it.
+    // v353: smart Game Context carousel. These cards replace the older box-score-style strip.
+    // They appear/disappear based on the current game state so the row feels like a live companion:
+    // pressure, traffic, contact spot, pitcher stress, bullpen decision, count leverage, and hard contact.
+    private class GameContextCard {
+        final int priority;
+        final String eyebrow;
+        final String headline;
+        final String subline;
+        final int accent;
+        GameContextCard(int priority, String eyebrow, String headline, String subline, int accent) {
+            this.priority = priority;
+            this.eyebrow = eyebrow;
+            this.headline = headline;
+            this.subline = subline;
+            this.accent = accent;
+        }
+    }
+
     private View situationalCarousel(LiveGame game, LiveAtBat ab, TeamPalette awayPal, TeamPalette homePal) {
-        java.util.ArrayList<View> cards = new java.util.ArrayList<>();
-        int accentP = ensureReadableColor((awayPal != null ? awayPal : neutralPalette()).primary, 150);
-        int accentH = ensureReadableColor((homePal != null ? homePal : neutralPalette()).primary, 150);
-
-        // 1) Win-probability moment
-        if (game.wpHomeSeries != null && !game.wpHomeSeries.isEmpty()) {
-            float homeWp = game.wpHomeSeries.get(game.wpHomeSeries.size() - 1);
-            int homePct = Math.round(homeWp); // wpHomeSeries is already 0–100
-            String fav = homePct >= 50 ? displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr)
-                                       : displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr);
-            int favPct = homePct >= 50 ? homePct : (100 - homePct);
-            cards.add(insightCard("WIN PROBABILITY", fav + " " + favPct + "%", "to win", accentH));
-        }
-        // 2) Pitcher's day
-        if (ab != null && ab.pitcherId > 0) {
-            String pl = game.pitcherGameLines.get(ab.pitcherId);
-            if (pl != null && !pl.isEmpty())
-                cards.add(insightCard("ON THE MOUND", lastNameOnly(ab.pitcher), pl, accentP));
-        }
-        // 3) Batter's day
-        if (ab != null && ab.batterId > 0) {
-            String bl = game.batterGameLines.get(ab.batterId);
-            if (bl != null && !bl.isEmpty())
-                cards.add(insightCard("AT THE PLATE", lastNameOnly(ab.batter), "today: " + bl, accentH));
-        }
-        // 4) Due up
-        if (game.dueUp != null && !game.dueUp.isEmpty()) {
-            StringBuilder names = new StringBuilder();
-            for (int i = 0; i < Math.min(3, game.dueUp.size()); i++) {
-                if (names.length() > 0) names.append(", ");
-                names.append(game.dueUp.get(i).name);
-            }
-            cards.add(insightCard("DUE UP", names.toString(), "next to bat", accentP));
-        }
-        // 5) Game pulse (line score totals)
-        if (game.awayHits >= 0 && game.homeHits >= 0) {
-            String aA = displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr);
-            String hA = displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr);
-            String hits = aA + " " + game.awayHits + " H · " + hA + " " + game.homeHits + " H";
-            cards.add(insightCard("HITS", hits, "team totals", accentH));
-        }
-
-        if (cards.isEmpty()) return null;
+        java.util.ArrayList<GameContextCard> data = buildGameContextCards(game, ab, awayPal, homePal);
+        if (data.isEmpty()) return null;
+        java.util.Collections.sort(data, (a, b) -> b.priority - a.priority);
 
         HorizontalScrollView scroller = new HorizontalScrollView(this);
         scroller.setHorizontalScrollBarEnabled(false);
@@ -20313,13 +20435,14 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         scroller.setPadding(0, 0, 0, 0);
         LinearLayout strip = new LinearLayout(this);
         strip.setOrientation(LinearLayout.HORIZONTAL);
-        for (int i = 0; i < cards.size(); i++) {
-            LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(dp(180), -2);
+        int limit = Math.min(6, data.size());
+        for (int i = 0; i < limit; i++) {
+            LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(dp(202), -2);
             clp.setMargins(i == 0 ? 0 : dp(8), 0, 0, 0);
-            strip.addView(cards.get(i), clp);
+            GameContextCard c = data.get(i);
+            strip.addView(insightCard(c.eyebrow, c.headline, c.subline, c.accent), clp);
         }
         scroller.addView(strip, new FrameLayout.LayoutParams(-2, -2));
-        // let the horizontal scroller own horizontal drags without the page hijacking them
         scroller.setOnTouchListener((v, ev) -> {
             v.getParent().requestDisallowInterceptTouchEvent(true);
             return false;
@@ -20327,30 +20450,335 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         return scroller;
     }
 
-    // One insight card: eyebrow + headline + subline, tinted by an accent.
+    private java.util.ArrayList<GameContextCard> buildGameContextCards(LiveGame game, LiveAtBat ab, TeamPalette awayPal, TeamPalette homePal) {
+        java.util.ArrayList<GameContextCard> cards = new java.util.ArrayList<>();
+        if (game == null) return cards;
+
+        boolean battingHome = battingTeamIsHome(game, ab);
+        String batAbbr = battingHome ? displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr)
+                                     : displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr);
+        String defAbbr = battingHome ? displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr)
+                                     : displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr);
+        int batAccent = ensureReadableColor((battingHome ? homePal : awayPal) != null ? (battingHome ? homePal : awayPal).primary : neutralPalette().primary, 150);
+        int defAccent = ensureReadableColor((battingHome ? awayPal : homePal) != null ? (battingHome ? awayPal : homePal).primary : neutralPalette().secondary, 150);
+        int neutralAccent = Color.rgb(244, 207, 100);
+
+        int inning = game.sitInning > 0 ? game.sitInning : (ab == null ? 0 : ab.inning);
+        int outs = Math.max(0, Math.min(3, game.sitOuts));
+        int runners = runnerCount(game);
+        boolean risp = hasRisp(game);
+        boolean thirdLessThanTwo = game.onThird && outs < 2;
+        int margin = liveScoreMargin(game);
+        boolean close = margin >= 0 && margin <= 3;
+        boolean late = inning >= 7;
+        boolean middleLate = inning >= 5;
+        String baseOut = liveBaseOutSummary(game);
+        String batterName = liveBatterName(game, ab);
+        String pitcherName = livePitcherName(game, ab);
+        String batterLine = currentBatterLine(game, ab);
+        String pitcherLine = currentPitcherLine(game, ab);
+        int pitchCount = currentPitcherPitchCount(game, ab);
+        int halfTraffic = currentHalfTraffic(game, ab);
+        int recentHard = recentHardContactCount(game, 4);
+        LivePitch lastHard = latestHardContact(game);
+        float lastWpSwing = latestWinProbSwing(game);
+        String lastBigPlay = latestWinProbDescription(game);
+        boolean stress = runners >= 2 || (runners > 0 && outs < 2) || pitchCount >= 75 || halfTraffic >= 3;
+
+        // Highest-leverage live situations.
+        if ((late && close) || (close && risp) || (inning >= 6 && runners >= 2)) {
+            String head = close ? batAbbr + " leverage spot" : "Pressure is rising";
+            String why = baseOut + " · " + (batterName.isEmpty() ? "current matchup matters" : batterName + " can swing the inning");
+            cards.add(new GameContextCard(120 + runners * 8 + (late ? 12 : 0), "PRESSURE SPOT", head, why, batAccent));
+        }
+
+        // Runner(s) in scoring position or multiple runners on.
+        if (risp || runners >= 2) {
+            String head = risp ? batAbbr + " has traffic" : batAbbr + " building an inning";
+            String why = baseOut;
+            if (!batterLine.isEmpty()) why += " · " + lastNameOnly(batterName) + " today: " + batterLine;
+            else if (!batterName.isEmpty()) why += " · " + batterName + " up";
+            cards.add(new GameContextCard(108 + runners * 10 + (thirdLessThanTwo ? 10 : 0), "TRAFFIC THREAT", head, why, batAccent));
+        }
+
+        // Specific baseball situation: runner on third with fewer than two outs.
+        if (thirdLessThanTwo) {
+            String head = batAbbr + " can score without a hit";
+            String why = outs == 0 ? "Runner on 3rd, no outs · contact changes the score"
+                                   : "Runner on 3rd, one out · contact still matters";
+            cards.add(new GameContextCard(116, "CONTACT NEEDED", head, why, batAccent));
+        }
+
+        // Current count leverage from the latest pitch.
+        LivePitch latest = latestPitchForAtBat(ab);
+        if (latest != null && ab != null && !ab.complete) {
+            String count = latest.balls + "-" + latest.strikes;
+            if (latest.balls >= 3 && latest.strikes <= 1) {
+                cards.add(new GameContextCard(104, "HITTER COUNT", batterName.isEmpty() ? count + " count" : batterName + " ahead", count + " · one pitch can create traffic", batAccent));
+            } else if (latest.strikes >= 2 && latest.balls <= 1) {
+                cards.add(new GameContextCard(102, "PUT-AWAY SPOT", pitcherName.isEmpty() ? count + " count" : pitcherName + " ahead", count + " · strikeout can defuse the inning", defAccent));
+            } else if (latest.balls == 3 && latest.strikes == 2) {
+                cards.add(new GameContextCard(106, "FULL COUNT", "Runner movement risk", count + " · payoff pitch can flip the base state", neutralAccent));
+            }
+        }
+
+        // Pitcher stress: traffic, pitch count, repeated baserunners in the inning.
+        if (stress && !pitcherName.isEmpty()) {
+            StringBuilder why = new StringBuilder();
+            if (pitchCount > 0) why.append(pitchCount).append(" pitches");
+            if (halfTraffic >= 3) {
+                if (why.length() > 0) why.append(" · ");
+                why.append("traffic in this half-inning");
+            } else if (runners > 0) {
+                if (why.length() > 0) why.append(" · ");
+                why.append(baseOut);
+            }
+            if (why.length() == 0 && !pitcherLine.isEmpty()) why.append(pitcherLine);
+            cards.add(new GameContextCard(98 + runners * 6 + (pitchCount >= 85 ? 10 : 0), "PITCHER STRESS", lastNameOnly(pitcherName) + " under pressure", why.toString(), defAccent));
+        }
+
+        // Bullpen decision starts appearing as the game gets into starter-change territory.
+        if (middleLate && close && (stress || pitchCount >= 70 || inning >= 6)) {
+            String why = inning >= 7 ? "Late close game · leverage arms may decide it"
+                                     : "Starter-change window approaching";
+            if (pitchCount > 0) why = pitchCount + " pitches · " + why;
+            cards.add(new GameContextCard(90 + (late ? 12 : 0), "BULLPEN DECISION", defAbbr + " decision point", why, Color.rgb(120, 220, 207)));
+        }
+
+        // Late-game edge is different from bullpen decision: it frames the whole endgame.
+        if (late && close) {
+            String head = margin == 0 ? "Tie game, late" : "Close game, late";
+            cards.add(new GameContextCard(88, "LATE GAME EDGE", head, "Every baserunner now changes the win path", Color.rgb(120, 220, 207)));
+        }
+
+        // Recent hard contact from the actual live feed.
+        if (recentHard >= 2) {
+            String why = recentHard + " hard-hit balls in the recent feed";
+            if (lastHard != null && !Double.isNaN(lastHard.exitVelo)) why = Math.round(lastHard.exitVelo) + " mph latest hard contact";
+            cards.add(new GameContextCard(86, "HARD CONTACT TREND", "Contact quality flashing", why, Color.rgb(255, 155, 92)));
+        } else if (lastHard != null && !Double.isNaN(lastHard.exitVelo) && lastHard.exitVelo >= 100d) {
+            cards.add(new GameContextCard(84, "LOUD CONTACT", "Recent 100+ mph contact", "Even before the score changes, contact quality matters", Color.rgb(255, 155, 92)));
+        }
+
+        // Win probability / momentum. This stays in the strip, but with a "so what" framing.
+        if (game.wpHomeSeries != null && !game.wpHomeSeries.isEmpty()) {
+            float homeWp = game.wpHomeSeries.get(game.wpHomeSeries.size() - 1);
+            int homePct = Math.round(homeWp);
+            String fav = homePct >= 50 ? displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr)
+                                       : displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr);
+            int favPct = homePct >= 50 ? homePct : (100 - homePct);
+            String why = close ? "Close enough for the next spot to matter" : "Current win path based on live state";
+            cards.add(new GameContextCard(74, "WIN PATH", fav + " " + favPct + "%", why, neutralAccent));
+        }
+        if (!Float.isNaN(lastWpSwing) && lastWpSwing >= 8f) {
+            String head = "Last swing " + Math.round(lastWpSwing) + " pts";
+            String why = safe(lastBigPlay);
+            if (why.length() > 58) why = why.substring(0, 56) + "…";
+            if (why.isEmpty()) why = "Recent play meaningfully moved the game";
+            cards.add(new GameContextCard(92, "MOMENTUM SWING", head, why, neutralAccent));
+        }
+
+        // Current batter/pitcher cards now only appear when they add context to a live situation.
+        if (runners > 0 && !batterName.isEmpty() && !batterLine.isEmpty()) {
+            cards.add(new GameContextCard(70, "BATTER CONTEXT", lastNameOnly(batterName), "today: " + batterLine, batAccent));
+        }
+        if ((stress || inning >= 6) && !pitcherName.isEmpty() && !pitcherLine.isEmpty()) {
+            cards.add(new GameContextCard(68, "MOUND CONTEXT", lastNameOnly(pitcherName), pitcherLine, defAccent));
+        }
+
+        // Between-inning / next-wave context. Pulls out during normal AB action unless due-up matters.
+        String st = safe(game.sitInningState).toLowerCase(Locale.US);
+        boolean betweenInnings = st.contains("middle") || st.contains("end");
+        if (betweenInnings && game.dueUp != null && !game.dueUp.isEmpty()) {
+            StringBuilder names = new StringBuilder();
+            for (int i = 0; i < Math.min(3, game.dueUp.size()); i++) {
+                if (names.length() > 0) names.append(", ");
+                names.append(game.dueUp.get(i).name);
+            }
+            cards.add(new GameContextCard(82, "NEXT WAVE", names.toString(), "due up next half-inning", batAccent));
+        }
+
+        // Stable fallback: never show box-score totals, but always keep at least one contextual card.
+        if (cards.isEmpty()) {
+            String head = inning > 0 ? liveStateSummary(game) : "Game context";
+            String why = ab != null && !safe(ab.batter).isEmpty()
+                    ? lastNameOnly(ab.batter) + " vs " + lastNameOnly(ab.pitcher)
+                    : "Waiting for the next leverage point";
+            cards.add(new GameContextCard(10, "GAME CONTEXT", head, why, neutralAccent));
+        }
+
+        return cards;
+    }
+
+    private boolean battingTeamIsHome(LiveGame game, LiveAtBat ab) {
+        // Prefer the official current live situation over the last AB object. After the final out
+        // of a half-inning, the last AB still belongs to the previous half while the game state has
+        // already advanced to Middle/Bottom/End.
+        String st = safe(game == null ? "" : game.sitInningState).toLowerCase(Locale.US);
+        if (st.contains("top")) return false;
+        if (st.contains("bottom") || st.contains("bot") || st.contains("middle")) return true;
+        if (st.contains("end")) return false;
+        if (ab != null) return !ab.topHalf;
+        return false;
+    }
+
+    private int runnerCount(LiveGame game) {
+        if (game == null) return 0;
+        int n = 0;
+        if (game.onFirst) n++;
+        if (game.onSecond) n++;
+        if (game.onThird) n++;
+        return n;
+    }
+
+    private boolean hasRisp(LiveGame game) {
+        return game != null && (game.onSecond || game.onThird);
+    }
+
+    private int liveScoreMargin(LiveGame game) {
+        if (game == null || game.awayScore < 0 || game.homeScore < 0) return -1;
+        return Math.abs(game.awayScore - game.homeScore);
+    }
+
+    private String liveBaseOutSummary(LiveGame game) {
+        if (game == null) return "Live state loading";
+        java.util.ArrayList<String> bases = new java.util.ArrayList<>();
+        if (game.onFirst) bases.add("1st");
+        if (game.onSecond) bases.add("2nd");
+        if (game.onThird) bases.add("3rd");
+        String b = bases.isEmpty() ? "bases empty" : "runners on " + joinShort(bases, "/");
+        int outs = Math.max(0, Math.min(3, game.sitOuts));
+        return b + " · " + outs + " out" + (outs == 1 ? "" : "s");
+    }
+
+    private String liveBatterName(LiveGame game, LiveAtBat ab) {
+        if (game != null && !safe(game.sitBatter).isEmpty()) return safe(game.sitBatter);
+        return ab == null ? "" : safe(ab.batter);
+    }
+
+    private String livePitcherName(LiveGame game, LiveAtBat ab) {
+        if (game != null && !safe(game.sitPitcher).isEmpty()) return safe(game.sitPitcher);
+        return ab == null ? "" : safe(ab.pitcher);
+    }
+
+    private String currentBatterLine(LiveGame game, LiveAtBat ab) {
+        if (game == null) return "";
+        int id = game.sitBatterId > 0 ? game.sitBatterId : (ab == null ? 0 : ab.batterId);
+        if (id <= 0 || game.batterGameLines == null) return "";
+        String line = game.batterGameLines.get(id);
+        return line == null ? "" : line;
+    }
+
+    private String currentPitcherLine(LiveGame game, LiveAtBat ab) {
+        if (game == null) return "";
+        int id = game.sitPitcherId > 0 ? game.sitPitcherId : (ab == null ? 0 : ab.pitcherId);
+        if (id <= 0 || game.pitcherGameLines == null) return "";
+        String line = game.pitcherGameLines.get(id);
+        return line == null ? "" : line;
+    }
+
+    private LivePitch latestPitchForAtBat(LiveAtBat ab) {
+        if (ab == null || ab.pitches == null || ab.pitches.isEmpty()) return null;
+        return ab.pitches.get(ab.pitches.size() - 1);
+    }
+
+    private int currentPitcherPitchCount(LiveGame game, LiveAtBat ab) {
+        if (game == null || game.liveFeed == null || game.liveFeed.atBats == null) return 0;
+        int pid = game.sitPitcherId > 0 ? game.sitPitcherId : (ab == null ? 0 : ab.pitcherId);
+        if (pid <= 0) return 0;
+        int count = 0;
+        for (LiveAtBat x : game.liveFeed.atBats) {
+            if (x != null && x.pitcherId == pid && x.pitches != null) count += x.pitches.size();
+        }
+        return count;
+    }
+
+    private int currentHalfTraffic(LiveGame game, LiveAtBat ab) {
+        if (game == null || game.liveFeed == null || game.liveFeed.atBats == null) return runnerCount(game);
+        int inning = game.sitInning > 0 ? game.sitInning : (ab == null ? 0 : ab.inning);
+        boolean top = !battingTeamIsHome(game, ab);
+        int traffic = runnerCount(game);
+        for (LiveAtBat x : game.liveFeed.atBats) {
+            if (x == null || x.inning != inning || x.topHalf != top) continue;
+            String r = safe(x.result).toLowerCase(Locale.US);
+            if (r.contains("single") || r.contains("double") || r.contains("triple") || r.contains("walk")
+                    || r.contains("hit by pitch") || r.contains("fielder") || r.contains("error")) {
+                traffic++;
+            }
+        }
+        return traffic;
+    }
+
+    private LivePitch latestHardContact(LiveGame game) {
+        if (game == null || game.liveFeed == null || game.liveFeed.atBats == null) return null;
+        for (int i = game.liveFeed.atBats.size() - 1; i >= 0; i--) {
+            LiveAtBat ab = game.liveFeed.atBats.get(i);
+            if (ab == null || ab.pitches == null) continue;
+            for (int j = ab.pitches.size() - 1; j >= 0; j--) {
+                LivePitch p = ab.pitches.get(j);
+                if (p != null && !Double.isNaN(p.exitVelo) && p.exitVelo >= 95d) return p;
+            }
+        }
+        return null;
+    }
+
+    private int recentHardContactCount(LiveGame game, int recentBipLimit) {
+        if (game == null || game.liveFeed == null || game.liveFeed.atBats == null) return 0;
+        int seen = 0, hard = 0;
+        for (int i = game.liveFeed.atBats.size() - 1; i >= 0 && seen < recentBipLimit; i--) {
+            LiveAtBat ab = game.liveFeed.atBats.get(i);
+            if (ab == null || ab.pitches == null) continue;
+            for (int j = ab.pitches.size() - 1; j >= 0 && seen < recentBipLimit; j--) {
+                LivePitch p = ab.pitches.get(j);
+                if (p == null || Double.isNaN(p.exitVelo)) continue;
+                seen++;
+                if (p.exitVelo >= 95d) hard++;
+            }
+        }
+        return hard;
+    }
+
+    private float latestWinProbSwing(LiveGame game) {
+        if (game == null || game.wpSwings == null || game.wpSwings.isEmpty()) return Float.NaN;
+        return game.wpSwings.get(game.wpSwings.size() - 1);
+    }
+
+    private String latestWinProbDescription(LiveGame game) {
+        if (game == null || game.wpDescriptions == null || game.wpDescriptions.isEmpty()) return "";
+        return game.wpDescriptions.get(game.wpDescriptions.size() - 1);
+    }
+
+    // One Game Context card: eyebrow + insight + "why it matters", tinted by an accent.
     private View insightCard(String eyebrow, String headline, String subline, int accent) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setPadding(dp(12), dp(10), dp(12), dp(10));
+        card.setMinimumHeight(dp(82));
         card.setBackground(roundedGradientStroke(new int[] {
-                Color.argb(34, Color.red(accent), Color.green(accent), Color.blue(accent)),
-                Color.argb(12, Color.red(accent), Color.green(accent), Color.blue(accent))
-        }, 14, Color.argb(96, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
+                Color.argb(46, Color.red(accent), Color.green(accent), Color.blue(accent)),
+                Color.argb(14, Color.red(accent), Color.green(accent), Color.blue(accent))
+        }, 14, Color.argb(112, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
         TextView eb = text(eyebrow, 7, accent, true);
+        eb.setSingleLine(true);
         eb.setLetterSpacing(0.18f);
         card.addView(eb, matchWrap());
         TextView hl = text(safe(headline), 14, INK, true);
-        hl.setSingleLine(true); hl.setEllipsize(TextUtils.TruncateAt.END); hl.setPadding(0, dp(3), 0, 0);
+        hl.setSingleLine(true);
+        hl.setEllipsize(TextUtils.TruncateAt.END);
+        hl.setPadding(0, dp(3), 0, 0);
         card.addView(hl, matchWrap());
         TextView sl = text(safe(subline), 9, INK_DIM, true);
-        sl.setSingleLine(true); sl.setEllipsize(TextUtils.TruncateAt.END); sl.setPadding(0, dp(1), 0, 0);
+        sl.setSingleLine(false);
+        sl.setMaxLines(2);
+        sl.setEllipsize(TextUtils.TruncateAt.END);
+        sl.setPadding(0, dp(2), 0, 0);
         card.addView(sl, matchWrap());
         return card;
     }
 
     private View resultCard(LiveAtBat ab, LivePitch pitch, int batColor) {
         boolean pitchMode = pitch != null;
-        int accent = pitchMode ? pitchTypeColor(pitch.typeCode)
+        int accent = pitchMode ? pitchOutcomeColor(pitch, ab)
                                : outcomeColorFromText(safe(ab.result) + " " + safe(ab.description), batColor);
 
         LinearLayout card = new LinearLayout(this);
@@ -20929,21 +21357,39 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         return col;
     }
 
-    private View pitchLegendRow(LivePitch lp) {
+    private View pitchLegendRow(LivePitch lp, LiveAtBat ab) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(0, dp(2), 0, dp(2));
-        // numbered colored dot
+        // numbered outcome marker: same color/shape language as the zone and result-card accent.
+        int kind = pitchOutcomeKind(lp, ab);
+        int oColor = pitchOutcomeColor(lp, ab);
         FrameLayout dotWrap = new FrameLayout(this);
         View dot = new View(this);
-        GradientDrawable gd = new GradientDrawable(); gd.setShape(GradientDrawable.OVAL); gd.setColor(pitchTypeColor(lp.typeCode));
+        GradientDrawable gd = new GradientDrawable();
+        if (isPitchOutcomeDiamond(kind)) {
+            gd.setShape(GradientDrawable.RECTANGLE);
+            gd.setCornerRadius(dp(2));
+            gd.setColor(oColor);
+            gd.setStroke(dp(1), Color.argb(150, 255, 255, 255));
+            dot.setRotation(45f);
+        } else {
+            gd.setShape(GradientDrawable.OVAL);
+            if (kind == 1) {
+                gd.setColor(Color.argb(76, 8, 13, 22));
+                gd.setStroke(dp(2), oColor);
+            } else {
+                gd.setColor(oColor);
+                gd.setStroke(dp(1), Color.argb(130, 255, 255, 255));
+            }
+        }
         dot.setBackground(gd);
-        FrameLayout.LayoutParams dl = new FrameLayout.LayoutParams(dp(18), dp(18));
+        FrameLayout.LayoutParams dl = new FrameLayout.LayoutParams(dp(20), dp(20));
         dotWrap.addView(dot, dl);
-        TextView num = text(String.valueOf(lp.number), 9, Color.argb(235, 8, 13, 22), true);
+        TextView num = text(String.valueOf(lp.number), 9, pitchMarkerTextColor(kind), true);
         num.setGravity(Gravity.CENTER);
-        dotWrap.addView(num, new FrameLayout.LayoutParams(dp(18), dp(18)));
+        dotWrap.addView(num, new FrameLayout.LayoutParams(dp(20), dp(20)));
         LinearLayout.LayoutParams dwl = new LinearLayout.LayoutParams(-2, -2); dwl.setMargins(0, 0, dp(5), 0);
         row.addView(dotWrap, dwl);
         // stacked: "4-Seam · 102" then result/exit-velo beneath — column is weight-bounded so text
@@ -20952,14 +21398,14 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         col.setOrientation(LinearLayout.VERTICAL);
         String typeShort = pitchTypeShort(lp.typeCode, lp.typeName);
         String speed = lp.speed > 0 ? String.format(Locale.US, "%.0f", lp.speed) : "";
-        TextView t = text(typeShort + (speed.isEmpty() ? "" : " · " + speed), 9, INK, true);
+        TextView t = text(typeShort + (speed.isEmpty() ? "" : " · " + speed), 9, pitchTypeColor(lp.typeCode), true);
         t.setSingleLine(true); t.setEllipsize(TextUtils.TruncateAt.END);
         col.addView(t, matchWrap());
         String res = safe(lp.result);
         if (lp.isInPlay && !Double.isNaN(lp.exitVelo)) {
             res = String.format(Locale.US, "In play · %.0f EV", lp.exitVelo);
         }
-        TextView r = text(res, 8, lp.isInPlay ? Color.rgb(82, 226, 176) : INK_DIM, false);
+        TextView r = text(res, 8, pitchOutcomeColor(lp, ab), false);
         r.setSingleLine(false); r.setMaxLines(2); r.setEllipsize(TextUtils.TruncateAt.END);
         col.addView(r, matchWrap());
         row.addView(col, new LinearLayout.LayoutParams(0, -2, 1));
@@ -20986,35 +21432,22 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         return safe(name).isEmpty() ? safe(code) : name;
     }
 
-    // v316/v317: shared outcome→color classifier for fast scanning. Used by both the play feed and
-    // the result card so colors are consistent.
-    //   blue=run scored (even on an out, e.g. sac fly) · green=reached base · red=strikeout
-    //   yellow=out on contact · purple handled by caller (roster moves)
+    // v354: shared outcome→color classifier for fast scanning. This now matches the zone marker
+    // system: green=ball/walk, red=strike, amber=foul, gray=in-play out, blue=reaches, gold=run.
     private int outcomeColorFromText(String text, int fallback) {
-        final int BLUE = Color.rgb(96, 175, 255);
-        final int GREEN = Color.rgb(82, 226, 176);
-        final int RED = Color.rgb(255, 96, 96);
-        final int YELLOW = Color.rgb(247, 197, 77);
         String s = safe(text).toLowerCase(Locale.US);
-        // Double/triple plays are contact-in-play OUTS → yellow. Check FIRST so "double play" isn't
-        // mistaken for a "double" hit (green). A DP that scores a run is still a run → blue, so the
-        // scoring check above this stays ahead of it.
-        if (s.contains("scores") || s.contains("homer") || s.contains("home run") || s.contains(" rbi")
-                || s.contains("grand slam") || s.contains("sacrifice") || s.contains("sac fly")
-                || s.contains("bases-clearing")) return BLUE;
-        if (s.contains("double play") || s.contains("triple play") || s.contains("grounded into")
-                || s.contains("grounds into")) return YELLOW;
+        if (isRunScoringOutcome(s)) return outcomeRunColor();
+        if (s.contains("foul")) return outcomeFoulColor();
         if (s.contains("strikeout") || s.contains("strikes out") || s.contains("struck out")
-                || s.contains("called out on strikes")) return RED;
-        // hit senses only — avoid bare "double"/"triple" which also appear in "double play"
-        if (s.contains("walk") || s.contains("singles") || s.contains("doubles") || s.contains("triples")
-                || s.contains("singled") || s.contains("doubled") || s.contains("tripled")
-                || s.contains("a single") || s.contains("a double") || s.contains("a triple")
-                || s.contains("hit by pitch") || s.contains("reaches") || s.contains("reached")
-                || s.contains("intentionally walked") || s.contains("on error")) return GREEN;
-        if (s.contains("out") || s.contains("grounds") || s.contains("flies") || s.contains("lines")
-                || s.contains("pops") || s.contains("forceout") || s.contains("fielder's choice")
-                || s.contains("grounded") || s.contains("flied")) return YELLOW;
+                || s.contains("called out on strikes")) return outcomeStrikeColor();
+        if (s.contains("walk") || s.contains("intentionally walked") || s.contains("hit by pitch")) return outcomeBallColor();
+        if (isReachOutcome(s)) return outcomeReachColor();
+        if (s.contains("double play") || s.contains("triple play") || s.contains("grounded into")
+                || s.contains("grounds into") || s.contains("out") || s.contains("grounds")
+                || s.contains("flies") || s.contains("lines") || s.contains("pops")
+                || s.contains("forceout") || s.contains("grounded") || s.contains("flied")) {
+            return outcomeInPlayOutColor();
+        }
         return fallback;
     }
 
@@ -21052,7 +21485,9 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         }
         row.addView(col, new LinearLayout.LayoutParams(0, -2, 1));
         if (fe.kind == 2) {
-            TextView tag = text("MOVE", 8, Color.rgb(170, 130, 255), true);
+            String lab = smartNonPitchEventLabel(fe.headline, fe.detail).toUpperCase(Locale.US);
+            String tagText = lab.contains("MOUND") ? "VISIT" : (lab.contains("PITCHING") ? "PITCH" : (lab.contains("PINCH") ? "PINCH" : (lab.contains("REVIEW") ? "REV" : (lab.contains("DELAY") ? "DELAY" : "MOVE"))));
+            TextView tag = text(tagText, 8, Color.rgb(170, 130, 255), true);
             tag.setGravity(Gravity.CENTER);
             row.addView(tag, new LinearLayout.LayoutParams(-2, -2));
         }
@@ -22298,9 +22733,11 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
                 liveCard.addView(liveSubBar(game), matchWrap());
             }
             View liveHero = liveScoreHero(game, away, home, awayPalette, homePalette);
+            activeLiveScoreHeroHost = new FrameLayout(this);
+            activeLiveScoreHeroHost.addView(liveHero, new FrameLayout.LayoutParams(-1, -2));
             LinearLayout.LayoutParams lhLp = matchWrap();
             lhLp.setMargins(0, liveHubSelected ? dp(1) : 0, 0, 0);
-            liveCard.addView(liveHero, lhLp);
+            liveCard.addView(activeLiveScoreHeroHost, lhLp);
             panel.addView(liveCard, cardLp);
         } else {
             LinearLayout.LayoutParams heroLp = matchWrap();
@@ -23307,6 +23744,16 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
 
     // v277: compact, score-forward hero for live games — team logos on the outside, big score
     // numbers flanking center, and a center column carrying inning · bases · count · outs.
+    private void refreshActiveLiveScoreHero(LiveGame game) {
+        if (game == null || activeLiveScoreHeroHost == null || activeLiveScoreHeroHost.getParent() == null) return;
+        Team away = teamForLiveGame(game.awayTeamId, game.awayName, game.awayAbbr);
+        Team home = teamForLiveGame(game.homeTeamId, game.homeName, game.homeAbbr);
+        TeamPalette awayPalette = away == null ? paletteForAbbr(game.awayAbbr) : paletteForTeam(away);
+        TeamPalette homePalette = home == null ? paletteForAbbr(game.homeAbbr) : paletteForTeam(home);
+        activeLiveScoreHeroHost.removeAllViews();
+        activeLiveScoreHeroHost.addView(liveScoreHero(game, away, home, awayPalette, homePalette), new FrameLayout.LayoutParams(-1, -2));
+    }
+
     private View liveScoreHero(LiveGame game, Team away, Team home, TeamPalette awayPalette, TeamPalette homePalette) {
         int awayColor = ensureReadableColor(awayPalette.primary, 150);
         int homeColor = ensureReadableColor(homePalette.primary, 150);
