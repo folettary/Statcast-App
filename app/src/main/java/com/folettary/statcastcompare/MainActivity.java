@@ -783,7 +783,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v367", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v368", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -23047,17 +23047,29 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         TeamPalette awayPalette = away == null ? paletteForAbbr(game.awayAbbr) : paletteForTeam(away);
         TeamPalette homePalette = home == null ? paletteForAbbr(game.homeAbbr) : paletteForTeam(home);
 
+        final int screenW = Math.max(1, getResources().getDisplayMetrics().widthPixels);
+        final int screenH = Math.max(1, getResources().getDisplayMetrics().heightPixels);
+        final int visibleH = (mainScroll != null && mainScroll.getHeight() > dp(320))
+                ? mainScroll.getHeight()
+                : Math.max(dp(720), screenH - dp(96));
+        final int pageW = Math.max(1, screenW - dp(24));
+        // v368: Focus Mode owns the whole visible app viewport. The pager is weight-based inside
+        // this fixed-height root, so pages slide inside one no-scroll shell and the context cards
+        // have room to render instead of being squeezed into a clipped strip.
+        final int focusRootH = Math.max(dp(720), visibleH - dp(8));
+        final int[] pageIndex = new int[] { liveFocusPageIndex() };
+
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setClipChildren(true);
         panel.setClipToPadding(true);
-        panel.setPadding(0, dp(2), 0, dp(2));
+        panel.setPadding(0, dp(2), 0, dp(3));
         panel.setBackground(roundedGradientStroke(
                 guardedDuelGradient(awayPalette, homePalette, true),
                 22,
                 guardedDuelStroke(awayPalette, homePalette, 128),
                 1));
-        LinearLayout.LayoutParams panelLp = matchWrap();
+        LinearLayout.LayoutParams panelLp = new LinearLayout.LayoutParams(-1, focusRootH);
         panelLp.setMargins(0, dp(5), 0, 0);
         standingsBox.addView(panel, panelLp);
 
@@ -23073,16 +23085,6 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         hintLp.setMargins(dp(12), 0, dp(12), dp(1));
         panel.addView(hint, hintLp);
 
-        final int screenW = Math.max(1, getResources().getDisplayMetrics().widthPixels);
-        final int screenH = Math.max(1, getResources().getDisplayMetrics().heightPixels);
-        final int visibleH = (mainScroll != null && mainScroll.getHeight() > 0) ? mainScroll.getHeight() : screenH;
-        final int pageW = Math.max(1, screenW - dp(24));
-        // v367: fill the full remaining Focus Mode screen. v366 fixed the tallest-page dead-scroll
-        // issue, but capped the viewport too short, clipping the context carousel and leaving unused
-        // black space below the dashboard.
-        final int focusPagerH = Math.max(dp(560), visibleH - dp(190));
-        final int[] pageIndex = new int[] { liveFocusPageIndex() };
-
         SwipePagerFrame pager = new SwipePagerFrame(this);
         pager.setClipChildren(true);
         pager.setClipToPadding(true);
@@ -23094,7 +23096,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         strip.setClipToPadding(true);
 
         // Build all three pages up front so focus mode is a true horizontal carousel instead of
-        // "swipe → rebuild the whole screen." Each page is fixed to the viewport and centered.
+        // "swipe → rebuild the whole screen." Pages fill the fixed viewport and stay centered.
         LinearLayout trackerPage = new LinearLayout(this);
         trackerPage.setOrientation(LinearLayout.VERTICAL);
         trackerPage.setGravity(Gravity.CENTER_HORIZONTAL);
@@ -23127,11 +23129,11 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         activeLiveTrackerGame = game;
         loadLiveTracker(game, trackerHost, awayPalette, homePalette);
 
-        strip.addView(trackerPage, new LinearLayout.LayoutParams(pageW, focusPagerH));
-        strip.addView(wpPage, new LinearLayout.LayoutParams(pageW, focusPagerH));
-        strip.addView(boxPage, new LinearLayout.LayoutParams(pageW, focusPagerH));
+        strip.addView(trackerPage, new LinearLayout.LayoutParams(pageW, -1));
+        strip.addView(wpPage, new LinearLayout.LayoutParams(pageW, -1));
+        strip.addView(boxPage, new LinearLayout.LayoutParams(pageW, -1));
         strip.setTranslationX(-pageIndex[0] * pageW);
-        pager.addView(strip, new FrameLayout.LayoutParams(pageW * 3, focusPagerH));
+        pager.addView(strip, new FrameLayout.LayoutParams(pageW * 3, -1));
 
         final TextView d0 = text("●", 9, INK_DIM, true);
         final TextView d1 = text("●", 9, INK_DIM, true);
@@ -23174,7 +23176,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
             }
         });
 
-        LinearLayout.LayoutParams pagerLp = new LinearLayout.LayoutParams(pageW, focusPagerH);
+        LinearLayout.LayoutParams pagerLp = new LinearLayout.LayoutParams(pageW, 0, 1f);
         pagerLp.gravity = Gravity.CENTER_HORIZONTAL;
         pagerLp.setMargins(dp(12), 0, dp(12), 0);
         panel.addView(pager, pagerLp);
