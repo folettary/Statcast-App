@@ -771,13 +771,27 @@ public class MainActivity extends Activity {
         mainScroll = scroll;
         scroll.setFillViewport(true);
         scroll.setBackgroundColor(Color.rgb(4, 8, 15));
+        scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
         scroll.setOnTouchListener((v, event) -> {
+            if (liveFocusMode) {
+                if (event.getAction() == android.view.MotionEvent.ACTION_MOVE
+                        || event.getAction() == android.view.MotionEvent.ACTION_UP
+                        || event.getAction() == android.view.MotionEvent.ACTION_CANCEL) {
+                    main.post(() -> mainScroll.scrollTo(0, 0));
+                }
+                return false;
+            }
             handleLiveFeedPullToRefresh(event);
             return false;
         });
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            scroll.setOnScrollChangeListener((v, scrollX, scrollY, oldScrollX, oldScrollY) -> {
+                if (liveFocusMode && scrollY != 0) main.post(() -> mainScroll.scrollTo(0, 0));
+            });
+        }
         root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(10), 0, dp(10), dp(10));
+        root.setPadding(dp(4), 0, dp(4), dp(4));
         scroll.addView(root, new ScrollView.LayoutParams(-1, -2));
         screen.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
         setContentView(screen);
@@ -797,7 +811,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v371", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v372", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -19821,6 +19835,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 liveUpdateRebuild = true;
                 host.addView(buildTrackerPager(game), matchWrap());
                 liveUpdateRebuild = false;
+                if (liveFocusMode && mainScroll != null) main.post(() -> mainScroll.scrollTo(0, 0));
                 host.setVisibility(View.VISIBLE);
                 host.setAlpha(0f);
                 host.animate().alpha(1f).setDuration(220).start();
@@ -19860,7 +19875,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
 
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(12), dp(8), dp(12), dp(8));
+        card.setPadding(dp(8), dp(8), dp(8), dp(8));
         card.setBackground(roundedGradientStroke(new int[] {
                 Color.rgb(7, 12, 21),
                 mixColor(batPal.primary, Color.rgb(7, 12, 21), 0.82f),
@@ -20036,7 +20051,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             LinearLayout zoneRow = new LinearLayout(this);
             zoneRow.setOrientation(LinearLayout.HORIZONTAL);
             zoneRow.setGravity(Gravity.TOP);
-            LinearLayout.LayoutParams zrLp = matchWrap(); zrLp.setMargins(-dp(12), 0, -dp(2), 0);
+            LinearLayout.LayoutParams zrLp = matchWrap(); zrLp.setMargins(-dp(8), 0, -dp(2), 0);
             int zoneH = dp(264);
             StrikeZoneView zone = new StrikeZoneView(this, ab.pitches, ab, strikeZoneBoundsForFeed(feed));
             LinearLayout.LayoutParams zLp = new LinearLayout.LayoutParams(0, zoneH, 1f);
@@ -20329,6 +20344,10 @@ private View liveGameCard(LiveGame game, int slateIndex) {
     }
     private void animateResultIn(View v, int key) {
         if (!animationsAllowed) return;     // neighbour/offscreen render — never animate
+        if (liveFocusMode || (activeLiveTrackerGame != null && activeLiveTrackerGame.viewAtBatIndex >= 0)) {
+            lastResultKey = key;
+            return;
+        }
         if (!liveUpdateRebuild) { lastResultKey = key; return; } // user navigation — update key, don't animate
         if (key == lastResultKey) return;   // same content on a live poll — don't re-animate
         lastResultKey = key;
@@ -21248,6 +21267,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         if (game == null || activeLiveTrackerHost == null) return;
         activeLiveTrackerHost.removeAllViews();
         activeLiveTrackerHost.addView(buildTrackerPager(game), matchWrap());
+        if (liveFocusMode && mainScroll != null) main.post(() -> mainScroll.scrollTo(0, 0));
     }
 
     // v323: build the tracker card for a SPECIFIC at-bat index by temporarily pointing the game's
@@ -23163,12 +23183,12 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         activeLiveScoreHeroHost = new FrameLayout(this);
         activeLiveScoreHeroHost.addView(hero, new FrameLayout.LayoutParams(-1, -2));
         LinearLayout.LayoutParams heroLp = matchWrap();
-        heroLp.setMargins(dp(8), 0, dp(8), 0);
+        heroLp.setMargins(dp(4), 0, dp(4), 0);
         panel.addView(activeLiveScoreHeroHost, heroLp);
 
         LinearLayout hint = (LinearLayout) liveFocusHintRow();
         LinearLayout.LayoutParams hintLp = matchWrap();
-        hintLp.setMargins(dp(8), 0, dp(8), 0);
+        hintLp.setMargins(dp(4), 0, dp(4), 0);
         panel.addView(hint, hintLp);
 
         // Same live-tab content as normal mode. Horizontal navigation still comes from the normal
@@ -23290,7 +23310,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
             liveCard.setPadding(dp(2), dp(2), dp(2), dp(4));
             liveCard.setBackground(roundedStroke(Color.argb(150, 6, 11, 20), Color.argb(46, 255, 255, 255), 20, 1));
             LinearLayout.LayoutParams cardLp = matchWrap();
-            cardLp.setMargins(dp(12), controlsAboveHero ? 0 : dp(6), dp(12), dp(4));
+            cardLp.setMargins(dp(4), controlsAboveHero ? 0 : dp(6), dp(4), dp(4));
             if (liveHubSelected) {
                 liveCard.addView(liveSubBar(game), matchWrap());
             }
@@ -23434,7 +23454,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
             finalHost.setOrientation(LinearLayout.VERTICAL);
             finalHost.addView(finalGamePage(game, awayPalette, homePalette), matchWrap());
             SwipePagerFrame swipeWrap = wrapInSubTabSwiper(game, finalHost, true, false); // ←Box Score
-            LinearLayout.LayoutParams fLp = matchWrap(); fLp.setMargins(dp(12), 0, dp(12), dp(6));
+            LinearLayout.LayoutParams fLp = matchWrap(); fLp.setMargins(dp(4), 0, dp(4), dp(2));
             panel.addView(swipeWrap, fLp);
             // ensure win-prob + line score data is present so "Biggest Moment" / line score populate;
             // if it wasn't loaded yet, fetch in the background and rebuild the page once.
@@ -23454,7 +23474,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
             wpHost.setOrientation(LinearLayout.VERTICAL);
             loadWinProbability(game, wpHost, awayPalette, homePalette);
             SwipePagerFrame swipeWrap = wrapInSubTabSwiper(game, wpHost, true, true); // ←Tracker  Box→
-            LinearLayout.LayoutParams wpLp = matchWrap(); wpLp.setMargins(dp(12), 0, dp(12), dp(6));
+            LinearLayout.LayoutParams wpLp = matchWrap(); wpLp.setMargins(dp(4), 0, dp(4), dp(2));
             panel.addView(swipeWrap, wpLp);
         } else if ("box".equals(gameHubLiveSub)) {
             LinearLayout boxHost = new LinearLayout(this);
@@ -23466,7 +23486,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
             LinearLayout trackerHost = new LinearLayout(this);
             trackerHost.setOrientation(LinearLayout.VERTICAL);
             trackerHost.setVisibility(View.GONE);
-            LinearLayout.LayoutParams thLp = matchWrap(); thLp.setMargins(dp(12), 0, dp(12), dp(6));
+            LinearLayout.LayoutParams thLp = matchWrap(); thLp.setMargins(dp(4), 0, dp(4), dp(2));
             panel.addView(trackerHost, thLp);
             activeLiveTrackerHost = trackerHost;
             activeLiveTrackerAwayPal = awayPalette;
