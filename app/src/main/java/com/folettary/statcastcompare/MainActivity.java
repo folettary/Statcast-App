@@ -777,7 +777,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v358", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v360", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20540,7 +20540,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         int maxLine = Math.max(eb.length(), Math.max(head.length(), sub.length()));
         // v358: much tighter than v357. Simple stat cards should be little chips; only long
         // evidence-backed cards get wide.
-        int w = dp(82) + Math.min(dp(124), Math.max(0, maxLine) * dp(4.2f));
+        int w = dp(82) + Math.min(dp(124), Math.max(0, maxLine) * dp(4));
         return Math.max(dp(118), Math.min(dp(232), w));
     }
 
