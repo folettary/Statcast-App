@@ -336,6 +336,10 @@ public class MainActivity extends Activity {
     private boolean gameHubTabDirty = true;        // v276: apply smart default on fresh game entry
     private String gameHubLiveSub = "tracker";     // v276: tracker | prob | line (inside Live tab)
     private boolean liveFocusMode = false;             // v364: fullscreen swipeable live dashboard
+    private String liveResultHoldKey = "";             // v369: keep terminal PA result visible briefly
+    private long liveResultHoldUntilMs = 0L;
+    private int liveResultHoldGamePk = -1;
+    private long liveResumeRefreshMs = 0L;             // v369: refresh stale live feed immediately on resume
     // v167: Matchups tab is now a two-path hub: compact live games or manual create.
     private static final int MATCHUP_PATH_LIVE = 0;
     private static final int MATCHUP_PATH_CREATE = 1;
@@ -572,11 +576,19 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        // Resume polling if we're sitting on a live game's tracker.
+        // Resume polling and immediately refresh if we're sitting on a stale live game.
         if (activePrimaryTab == TAB_MATCHUP && activeLiveTrackerGame != null
                 && activeLiveTrackerGame == activeLiveGameMenu && activeLiveTrackerGame.isLive()
                 && activeLiveTrackerHost != null) {
             startLiveTrackerPolling(activeLiveTrackerGame);
+        }
+        if (activePrimaryTab == TAB_MATCHUP && activeLiveGameMenu != null && activeLiveGameMenu.isLive()) {
+            long now = System.currentTimeMillis();
+            long feedAt = activeLiveGameMenu.liveFeed == null ? 0L : activeLiveGameMenu.liveFeed.fetchedAt;
+            if ((feedAt <= 0L || now - feedAt > 5000L) && now - liveResumeRefreshMs > 3000L) {
+                liveResumeRefreshMs = now;
+                main.post(() -> refreshLiveGameMenu(activeLiveGameMenu));
+            }
         }
         // Refresh the visible game-tile surface so scores/states update on return without needing a
         // manual force-refresh. Only when we're on a list view (not inside a single game's tracker).
@@ -783,7 +795,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v368", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v369", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -19630,10 +19642,16 @@ private View liveGameCard(LiveGame game, int slateIndex) {
 
     private int pitchOutcomeKind(LivePitch lp, LiveAtBat ab) {
         if (lp == null) return 0;
-        if (lp.isInPlay || safe(lp.result).toLowerCase(Locale.US).contains("in play")) {
+        String r = safe(lp.result).toLowerCase(Locale.US);
+        if (lp.isInPlay || r.contains("in play")) {
+            // v369: MLB's live feed often says "In play, no out" before the official result
+            // label arrives. Treat that as a safe/reaches contact outcome so the zone, pitch list,
+            // and result card all show the same blue diamond.
+            if (r.contains("no out")) return 5;
+            if (r.contains("run") || r.contains("score")) return 6;
+            if (r.contains("out")) return 4;
             return contactOutcomeKind(ab);
         }
-        String r = safe(lp.result).toLowerCase(Locale.US);
         if (r.contains("foul")) return 3;
         if (lp.isBall || r.contains("ball") || r.contains("pitchout") || r.contains("automatic ball")) return 1;
         if (lp.isStrike || r.contains("strike") || r.contains("swinging") || r.contains("miss")) return 2;
@@ -19668,6 +19686,42 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 || s.contains("singled") || s.contains("doubled") || s.contains("tripled")
                 || s.contains("reaches") || s.contains("reached") || s.contains("on error")
                 || s.contains("fielder's choice");
+    }
+
+    private long terminalResultHoldMs(LiveAtBat ab) {
+        String s = (safe(ab == null ? "" : ab.result) + " " + safe(ab == null ? "" : ab.description)).toLowerCase(Locale.US);
+        if (isRunScoringOutcome(s)) return 4500L;
+        if (isReachOutcome(s) || s.contains("walk") || s.contains("hit by pitch")) return 3500L;
+        return 2800L;
+    }
+
+    private String terminalResultKey(LiveGame game, LiveAtBat ab, int idx) {
+        if (game == null || ab == null) return "";
+        return game.gamePk + ":" + idx + ":" + ab.abNumber + ":" + safe(ab.result) + ":" + safe(ab.description);
+    }
+
+    private int heldLiveResultIndex(LiveGame game, LiveFeed feed) {
+        if (game == null || feed == null || !feed.loaded || feed.atBats == null || feed.atBats.isEmpty()) return -1;
+        if (game.viewAtBatIndex >= 0) return -1; // browsing old ABs should not be hijacked
+        int latest = -1;
+        for (int i = feed.atBats.size() - 1; i >= 0; i--) {
+            LiveAtBat ab = feed.atBats.get(i);
+            if (ab != null && ab.complete && !safe(ab.result).isEmpty()) { latest = i; break; }
+        }
+        if (latest < 0) return -1;
+        LiveAtBat ab = feed.atBats.get(latest);
+        String key = terminalResultKey(game, ab, latest);
+        long now = System.currentTimeMillis();
+        if (game.gamePk != liveResultHoldGamePk) {
+            liveResultHoldGamePk = game.gamePk;
+            liveResultHoldKey = "";
+            liveResultHoldUntilMs = 0L;
+        }
+        if (!key.equals(liveResultHoldKey)) {
+            liveResultHoldKey = key;
+            liveResultHoldUntilMs = now + terminalResultHoldMs(ab);
+        }
+        return now < liveResultHoldUntilMs ? latest : -1;
     }
 
     private View countDotsRow(String label, int filled, int total, int fillColor) {
@@ -19762,7 +19816,9 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 refreshActiveLiveScoreHero(game);
                 host.removeAllViews();
                 liveUpdateRebuild = true;
-                host.addView(buildTrackerPager(game), matchWrap());
+                View tracker = buildTrackerPager(game);
+                if (liveFocusMode) host.addView(tracker, new LinearLayout.LayoutParams(-1, -1));
+                else host.addView(tracker, matchWrap());
                 liveUpdateRebuild = false;
                 host.setVisibility(View.VISIBLE);
                 host.setAlpha(0f);
@@ -19786,7 +19842,8 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             if (game.viewAtBatIndex >= 0 && game.viewAtBatIndex < feed.atBats.size()) {
                 idx = game.viewAtBatIndex;
             } else {
-                idx = liveAtBatIndex(game, feed); // following live: match the current situation's batter
+                int heldIdx = heldLiveResultIndex(game, feed);
+                idx = heldIdx >= 0 ? heldIdx : liveAtBatIndex(game, feed); // following live: match situation unless holding a fresh result
             }
             ab = feed.atBats.get(idx);
         }
@@ -20071,7 +20128,11 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         }
 
         // ---- Game Context carousel (core tracker section; always above Play Feed) ----
-        // v363: Play Feed is lower priority. Even after a completed AB, keep context visible here.
+        // v369: in Focus Mode, this becomes the bottom-anchored insight row inside the no-scroll page.
+        if (liveFocusMode) {
+            Space bottomFlex = new Space(this);
+            card.addView(bottomFlex, new LinearLayout.LayoutParams(-1, 0, 1f));
+        }
         if (!"Final".equals(game.statusLabel())) {
             View sc = situationalCarousel(game, ab, activeLiveTrackerAwayPal, activeLiveTrackerHomePal);
             if (sc != null) {
@@ -20337,7 +20398,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setGravity(Gravity.CENTER);
-        card.setPadding(dp(12), dp(9), dp(12), dp(9));
+        card.setPadding(dp(12), dp(liveFocusMode ? 10 : 9), dp(12), dp(liveFocusMode ? 10 : 9));
         card.setBackground(roundedGradientStroke(new int[] {
                 Color.argb(38, Color.red(accent), Color.green(accent), Color.blue(accent)),
                 Color.argb(14, Color.red(accent), Color.green(accent), Color.blue(accent)),
@@ -20351,7 +20412,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams rowLp = matchWrap(); rowLp.setMargins(0, dp(5), 0, 0);
+        LinearLayout.LayoutParams rowLp = matchWrap(); rowLp.setMargins(0, dp(liveFocusMode ? 7 : 5), 0, 0);
 
         int shown = Math.min(3, game.dueUp.size());
         for (int i = 0; i < shown; i++) {
@@ -20359,13 +20420,31 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             LinearLayout colV = new LinearLayout(this);
             colV.setOrientation(LinearLayout.VERTICAL);
             colV.setGravity(Gravity.CENTER_HORIZONTAL);
-            colV.setPadding(dp(4), dp(5), dp(4), dp(5));
+            colV.setPadding(dp(4), dp(liveFocusMode ? 6 : 5), dp(4), dp(liveFocusMode ? 6 : 5));
             colV.setBackground(roundedStroke(
                     Color.argb(24, Color.red(accent), Color.green(accent), Color.blue(accent)),
                     Color.argb(58, Color.red(accent), Color.green(accent), Color.blue(accent)),
                     12, 1));
 
-            TextView nm = text(db.name, 10, INK, true);
+            if (liveFocusMode) {
+                FrameLayout ring = new FrameLayout(this);
+                GradientDrawable rb = new GradientDrawable();
+                rb.setShape(GradientDrawable.OVAL);
+                rb.setColor(Color.argb(42, 255, 255, 255));
+                rb.setStroke(dp(2), Color.argb(150, Color.red(accent), Color.green(accent), Color.blue(accent)));
+                ring.setBackground(rb);
+                ImageView img = new ImageView(this);
+                img.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                int sz = dp(38);
+                FrameLayout.LayoutParams imgLp = new FrameLayout.LayoutParams(sz, sz, Gravity.CENTER);
+                ring.addView(img, imgLp);
+                loadPlayerImage(db.id, img);
+                LinearLayout.LayoutParams ringLp = new LinearLayout.LayoutParams(dp(42), dp(42));
+                ringLp.setMargins(0, 0, 0, dp(3));
+                colV.addView(ring, ringLp);
+            }
+
+            TextView nm = text(db.name, liveFocusMode ? 10 : 10, INK, true);
             nm.setGravity(Gravity.CENTER); nm.setSingleLine(true); nm.setEllipsize(TextUtils.TruncateAt.END);
             colV.addView(nm, matchWrap());
 
@@ -20381,6 +20460,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         card.addView(row, rowLp);
         return card;
     }
+
 
     // v328: victory card shown when the game is final — winning team color gradient, big logo
     // watermark, FINAL + score + both records, and the game's standout performer.
@@ -20539,15 +20619,18 @@ private View liveGameCard(LiveGame game, int slateIndex) {
     }
 
     private int gameContextCardWidth(GameContextCard c) {
-        if (c == null) return dp(132);
+        if (c == null) return liveFocusMode ? dp(220) : dp(132);
         String eb = safe(c.eyebrow);
         String head = safe(c.headline);
         String sub = safe(c.subline);
         int maxLine = Math.max(eb.length(), Math.max(head.length(), sub.length()));
-        // v358: much tighter than v357. Simple stat cards should be little chips; only long
-        // evidence-backed cards get wide.
-        int w = dp(82) + Math.min(dp(124), Math.max(0, maxLine) * dp(4));
-        return Math.max(dp(118), Math.min(dp(232), w));
+        // v369: compact ticker cards in normal mode; larger, readable insight cards in Focus Mode.
+        int base = liveFocusMode ? dp(156) : dp(82);
+        int cap = liveFocusMode ? dp(180) : dp(124);
+        int min = liveFocusMode ? dp(220) : dp(118);
+        int max = liveFocusMode ? dp(318) : dp(232);
+        int w = base + Math.min(cap, Math.max(0, maxLine) * dp(liveFocusMode ? 5 : 4));
+        return Math.max(min, Math.min(max, w));
     }
 
     private java.util.ArrayList<GameContextCard> stableGameContextCards(LiveGame game, java.util.ArrayList<GameContextCard> fresh) {
@@ -20624,7 +20707,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 GameContextCard c = data.get(i);
                 int cardW = gameContextCardWidth(c);
                 int leftMargin = (loop == 0 && i == 0) ? 0 : dp(8);
-                LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(cardW, -2);
+                LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(cardW, liveFocusMode ? dp(112) : -2);
                 clp.setMargins(leftMargin, 0, 0, 0);
                 strip.addView(insightCard(c.eyebrow, c.headline, c.subline, c.accent), clp);
                 if (loop == 0) cycleWidthPx[0] += leftMargin + cardW;
@@ -20993,26 +21076,27 @@ private View liveGameCard(LiveGame game, int slateIndex) {
     private View insightCard(String eyebrow, String headline, String subline, int accent) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(10), dp(9), dp(10), dp(9));
-        card.setMinimumHeight(dp(78));
+        card.setGravity(liveFocusMode ? Gravity.CENTER_VERTICAL : Gravity.NO_GRAVITY);
+        card.setPadding(dp(liveFocusMode ? 13 : 10), dp(liveFocusMode ? 11 : 9), dp(liveFocusMode ? 13 : 10), dp(liveFocusMode ? 11 : 9));
+        card.setMinimumHeight(dp(liveFocusMode ? 104 : 78));
         card.setBackground(roundedGradientStroke(new int[] {
-                Color.argb(46, Color.red(accent), Color.green(accent), Color.blue(accent)),
-                Color.argb(14, Color.red(accent), Color.green(accent), Color.blue(accent))
-        }, 14, Color.argb(112, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
-        TextView eb = text(eyebrow, 7, accent, true);
+                Color.argb(liveFocusMode ? 58 : 46, Color.red(accent), Color.green(accent), Color.blue(accent)),
+                Color.argb(liveFocusMode ? 20 : 14, Color.red(accent), Color.green(accent), Color.blue(accent))
+        }, liveFocusMode ? 18 : 14, Color.argb(liveFocusMode ? 132 : 112, Color.red(accent), Color.green(accent), Color.blue(accent)), 1));
+        TextView eb = text(eyebrow, liveFocusMode ? 8 : 7, accent, true);
         eb.setSingleLine(true);
         eb.setLetterSpacing(0.18f);
         card.addView(eb, matchWrap());
-        TextView hl = text(safe(headline), 13, INK, true);
+        TextView hl = text(safe(headline), liveFocusMode ? 15 : 13, INK, true);
         hl.setSingleLine(true);
         hl.setEllipsize(TextUtils.TruncateAt.END);
-        hl.setPadding(0, dp(3), 0, 0);
+        hl.setPadding(0, dp(liveFocusMode ? 5 : 3), 0, 0);
         card.addView(hl, matchWrap());
-        TextView sl = text(safe(subline), 9, INK_DIM, true);
+        TextView sl = text(safe(subline), liveFocusMode ? 11 : 9, INK_DIM, true);
         sl.setSingleLine(false);
-        sl.setMaxLines(2);
+        sl.setMaxLines(liveFocusMode ? 3 : 2);
         sl.setEllipsize(TextUtils.TruncateAt.END);
-        sl.setPadding(0, dp(2), 0, 0);
+        sl.setPadding(0, dp(liveFocusMode ? 4 : 2), 0, 0);
         card.addView(sl, matchWrap());
         return card;
     }
@@ -21265,8 +21349,12 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         // Resolve the current absolute index the card is showing.
         int curIdx;
         if (feed != null && feed.loaded && !feed.atBats.isEmpty()) {
-            curIdx = (game.viewAtBatIndex >= 0 && game.viewAtBatIndex < feed.atBats.size())
-                    ? game.viewAtBatIndex : liveAtBatIndex(game, feed);
+            if (game.viewAtBatIndex >= 0 && game.viewAtBatIndex < feed.atBats.size()) {
+                curIdx = game.viewAtBatIndex;
+            } else {
+                int heldIdx = heldLiveResultIndex(game, feed);
+                curIdx = heldIdx >= 0 ? heldIdx : liveAtBatIndex(game, feed);
+            }
         } else {
             // no feed → just render the single card, no paging
             return liveTrackerCard(game, activeLiveTrackerAwayPal, activeLiveTrackerHomePal);
@@ -21287,18 +21375,18 @@ private View liveGameCard(LiveGame game, int slateIndex) {
 
         final View currentCard = trackerCardForIndex(game, center, true);
         host.addView(currentCard, new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT));
+                FrameLayout.LayoutParams.MATCH_PARENT, liveFocusMode ? FrameLayout.LayoutParams.MATCH_PARENT : FrameLayout.LayoutParams.WRAP_CONTENT));
 
         final View prevCard = hasPrev ? trackerCardForIndex(game, center - 1) : null;
         if (prevCard != null) {
             host.addView(prevCard, new FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT));
+                    FrameLayout.LayoutParams.MATCH_PARENT, liveFocusMode ? FrameLayout.LayoutParams.MATCH_PARENT : FrameLayout.LayoutParams.WRAP_CONTENT));
             prevCard.setTranslationX(-screenW);
         }
         final View nextCard = hasNext ? trackerCardForIndex(game, center + 1) : null;
         if (nextCard != null) {
             host.addView(nextCard, new FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT));
+                    FrameLayout.LayoutParams.MATCH_PARENT, liveFocusMode ? FrameLayout.LayoutParams.MATCH_PARENT : FrameLayout.LayoutParams.WRAP_CONTENT));
             nextCard.setTranslationX(screenW);
         }
 
@@ -21678,6 +21766,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
     private int outcomeColorFromText(String text, int fallback) {
         String s = safe(text).toLowerCase(Locale.US);
         if (isRunScoringOutcome(s)) return outcomeRunColor();
+        if (s.contains("in play") && s.contains("no out")) return outcomeReachColor();
         if (s.contains("foul")) return outcomeFoulColor();
         if (s.contains("strikeout") || s.contains("strikes out") || s.contains("struck out")
                 || s.contains("called out on strikes")) return outcomeStrikeColor();
@@ -23056,7 +23145,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         // v368: Focus Mode owns the whole visible app viewport. The pager is weight-based inside
         // this fixed-height root, so pages slide inside one no-scroll shell and the context cards
         // have room to render instead of being squeezed into a clipped strip.
-        final int focusRootH = Math.max(dp(720), visibleH - dp(8));
+        final int focusRootH = Math.max(dp(720), visibleH - dp(4));
         final int[] pageIndex = new int[] { liveFocusPageIndex() };
 
         LinearLayout panel = new LinearLayout(this);
@@ -23107,7 +23196,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         trackerHost.setOrientation(LinearLayout.VERTICAL);
         trackerHost.setGravity(Gravity.CENTER_HORIZONTAL);
         trackerHost.setVisibility(View.GONE);
-        trackerPage.addView(trackerHost, new LinearLayout.LayoutParams(-1, -2));
+        trackerPage.addView(trackerHost, new LinearLayout.LayoutParams(-1, -1));
 
         LinearLayout wpPage = new LinearLayout(this);
         wpPage.setOrientation(LinearLayout.VERTICAL);
