@@ -772,7 +772,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v356", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v357", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20523,6 +20523,13 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         }
     }
 
+    private int gameContextCardWidth(GameContextCard c) {
+        if (c == null) return dp(176);
+        int chars = safe(c.headline).length() + safe(c.subline).length();
+        int w = dp(148) + Math.min(dp(84), Math.max(0, chars - 28) * dp(2));
+        return Math.max(dp(150), Math.min(dp(236), w));
+    }
+
     private View situationalCarousel(LiveGame game, LiveAtBat ab, TeamPalette awayPal, TeamPalette homePal) {
         java.util.ArrayList<GameContextCard> data = buildGameContextCards(game, ab, awayPal, homePal);
         if (data.isEmpty()) return null;
@@ -20537,55 +20544,55 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         int limit = Math.min(6, data.size());
         boolean autoLoop = limit >= 3;
         int loops = autoLoop ? 2 : 1; // duplicate once for seamless reset back to the first set
+        final int[] cycleWidthPx = new int[] { 0 };
         for (int loop = 0; loop < loops; loop++) {
             for (int i = 0; i < limit; i++) {
-                LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(dp(202), -2);
-                clp.setMargins((loop == 0 && i == 0) ? 0 : dp(8), 0, 0, 0);
                 GameContextCard c = data.get(i);
+                int cardW = gameContextCardWidth(c);
+                int leftMargin = (loop == 0 && i == 0) ? 0 : dp(8);
+                LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(cardW, -2);
+                clp.setMargins(leftMargin, 0, 0, 0);
                 strip.addView(insightCard(c.eyebrow, c.headline, c.subline, c.accent), clp);
+                if (loop == 0) cycleWidthPx[0] += leftMargin + cardW;
             }
         }
         scroller.addView(strip, new FrameLayout.LayoutParams(-2, -2));
 
         final boolean[] userHolding = new boolean[] { false };
-        final long[] resumeAfterMs = new long[] { 0L };
         scroller.setOnTouchListener((v, ev) -> {
             v.getParent().requestDisallowInterceptTouchEvent(true);
             int action = ev.getAction();
             if (action == android.view.MotionEvent.ACTION_DOWN || action == android.view.MotionEvent.ACTION_MOVE) {
                 userHolding[0] = true;
-                resumeAfterMs[0] = System.currentTimeMillis() + 4500L;
             } else if (action == android.view.MotionEvent.ACTION_UP || action == android.view.MotionEvent.ACTION_CANCEL) {
-                userHolding[0] = false;
-                resumeAfterMs[0] = System.currentTimeMillis() + 4500L;
+                userHolding[0] = false; // resume immediately after the user's drag/tap ends
                 v.getParent().requestDisallowInterceptTouchEvent(false);
             }
             return false;
         });
 
-        // v356: make the Game Context row feel alive. It slowly glides, loops invisibly, and
-        // pauses while the user touches it. Only enable when there are enough cards to avoid noise.
+        // v357: alive but not distracting. Cards are content-sized, the strip loops invisibly, and
+        // it resumes immediately after the user's touch ends. Slightly faster than v356.
         if (autoLoop) {
             final Runnable[] auto = new Runnable[1];
             auto[0] = new Runnable() {
                 @Override public void run() {
                     if (scroller.getParent() == null) return;
-                    if (strip.getWidth() <= 0 || scroller.getWidth() <= 0) {
+                    if (strip.getWidth() <= 0 || scroller.getWidth() <= 0 || cycleWidthPx[0] <= 0) {
                         main.postDelayed(this, 120L);
                         return;
                     }
-                    int cycleW = Math.max(1, strip.getWidth() / 2);
+                    int cycleW = Math.max(1, cycleWidthPx[0]);
                     if (scroller.getScrollX() >= cycleW) {
                         scroller.scrollTo(scroller.getScrollX() - cycleW, 0);
                     }
-                    long now = System.currentTimeMillis();
-                    if (!userHolding[0] && now >= resumeAfterMs[0]) {
+                    if (!userHolding[0]) {
                         scroller.scrollBy(1, 0);
                     }
-                    main.postDelayed(this, 42L);
+                    main.postDelayed(this, 34L);
                 }
             };
-            scroller.postDelayed(auto[0], 900L);
+            scroller.postDelayed(auto[0], 700L);
         }
 
         return scroller;
