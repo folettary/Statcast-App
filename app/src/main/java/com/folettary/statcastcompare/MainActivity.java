@@ -770,7 +770,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v350", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v351", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -18457,6 +18457,88 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         }, 250);
     }
 
+private String liveStateSummary(LiveGame game) {
+    if (game == null) return "Live";
+    String st = safe(game.sitInningState).toLowerCase(Locale.US);
+    String half;
+    if (st.contains("top")) half = "Top";
+    else if (st.contains("bot")) half = "Bot";
+    else if (st.contains("middle")) half = "Mid";
+    else if (st.contains("end")) half = "End";
+    else half = "";
+    String inning = game.sitInning > 0 ? ordinalNum(game.sitInning) : "";
+    String outs = game.sitOuts + " out" + (game.sitOuts == 1 ? "" : "s");
+    String left = (half.isEmpty() ? inning : (half + (inning.isEmpty() ? "" : " " + inning))).trim();
+    if (left.isEmpty()) left = "In progress";
+    return left + " · " + outs;
+}
+
+// v351: actual base-state glyph for live slate tiles. This replaces the old ◆◇◇ text
+// shorthand with a small baseball-diamond read: 2B on top, 3B left, 1B right.
+private class MiniBasesView extends View {
+    private final boolean onFirst;
+    private final boolean onSecond;
+    private final boolean onThird;
+    private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    MiniBasesView(boolean onFirst, boolean onSecond, boolean onThird) {
+        super(MainActivity.this);
+        this.onFirst = onFirst;
+        this.onSecond = onSecond;
+        this.onThird = onThird;
+    }
+    @Override protected void onDraw(Canvas canvas) {
+        super.onDraw(canvas);
+        float w = getWidth();
+        float h = getHeight();
+        float cx = w / 2f;
+        float topY = h * 0.22f;
+        float midY = h * 0.52f;
+        float leftX = cx - h * 0.30f;
+        float rightX = cx + h * 0.30f;
+        float r = Math.max(dp(3.4f), h * 0.15f);
+
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(dp(0.9f));
+        paint.setColor(Color.argb(46, 236, 242, 248));
+        Path guide = new Path();
+        guide.moveTo(cx, topY - r * 1.6f);
+        guide.lineTo(rightX + r * 1.45f, midY);
+        guide.lineTo(cx, h * 0.82f);
+        guide.lineTo(leftX - r * 1.45f, midY);
+        guide.close();
+        canvas.drawPath(guide, paint);
+
+        drawMiniBase(canvas, cx, topY, r, onSecond);  // 2B
+        drawMiniBase(canvas, rightX, midY, r, onFirst); // 1B
+        drawMiniBase(canvas, leftX, midY, r, onThird); // 3B
+    }
+    private void drawMiniBase(Canvas canvas, float cx, float cy, float r, boolean occupied) {
+        Path p = new Path();
+        p.moveTo(cx, cy - r);
+        p.lineTo(cx + r, cy);
+        p.lineTo(cx, cy + r);
+        p.lineTo(cx - r, cy);
+        p.close();
+        if (occupied) {
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(Color.rgb(247, 197, 77));
+            canvas.drawPath(p, paint);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(dp(0.9f));
+            paint.setColor(Color.argb(190, 255, 231, 150));
+            canvas.drawPath(p, paint);
+        } else {
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(Color.argb(28, 236, 242, 248));
+            canvas.drawPath(p, paint);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(dp(1.0f));
+            paint.setColor(Color.argb(130, 236, 242, 248));
+            canvas.drawPath(p, paint);
+        }
+    }
+}
+
 private View liveGameCard(LiveGame game) {
     return liveGameCard(game, 0);
 }
@@ -18511,33 +18593,24 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             new LinearLayout.LayoutParams(0, -2, 1));
     content.addView(scoreRow, matchWrap());
 
-    // v331: for in-progress games, fill the space (freed by removing the CTA) with live state:
-    // inning · outs · a compact bases indicator.
+    // v351: for in-progress games, show a cleaner live-state row with readable inning/outs
+    // text and a true mini base diamond instead of the old ◆◇◇ text shorthand.
     boolean inProgress = gameStatusRank(game) == 1 && !game.isPregame() && !"Final".equals(game.statusLabel());
     if (inProgress && game.sitInning > 0) {
         LinearLayout liveRow = new LinearLayout(this);
         liveRow.setOrientation(LinearLayout.HORIZONTAL);
         liveRow.setGravity(Gravity.CENTER_VERTICAL);
-        liveRow.setPadding(0, dp(9), 0, 0);
+        liveRow.setPadding(0, dp(8), 0, 0);
 
-        String half = safe(game.sitInningState).toLowerCase(Locale.US);
-        String arrow = half.contains("top") ? "▲" : (half.contains("bot") ? "▼" : "•");
-        String inningTxt = arrow + " " + ordinalNum(game.sitInning);
-        TextView inn = text(inningTxt, 10, Color.rgb(82, 226, 176), true);
-        liveRow.addView(inn, new LinearLayout.LayoutParams(-2, -2));
+        TextView state = text(liveStateSummary(game), 10, Color.rgb(82, 226, 176), true);
+        state.setSingleLine(true);
+        state.setEllipsize(TextUtils.TruncateAt.END);
+        liveRow.addView(state, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView outs = text("  ·  " + game.sitOuts + " out" + (game.sitOuts == 1 ? "" : "s"), 10, Color.argb(220, 236, 242, 248), true);
-        liveRow.addView(outs, new LinearLayout.LayoutParams(-2, -2));
-
-        // tiny bases indicator (filled diamonds for occupied bases)
-        boolean anyOn = game.onFirst || game.onSecond || game.onThird;
-        if (anyOn) {
-            String bases = "  ·  ";
-            // order: 1B 2B 3B as ◆ filled / ◇ empty
-            bases += (game.onFirst ? "◆" : "◇") + (game.onSecond ? "◆" : "◇") + (game.onThird ? "◆" : "◇");
-            TextView basesT = text(bases, 10, Color.rgb(247, 197, 77), true);
-            liveRow.addView(basesT, new LinearLayout.LayoutParams(-2, -2));
-        }
+        MiniBasesView basesView = new MiniBasesView(game.onFirst, game.onSecond, game.onThird);
+        LinearLayout.LayoutParams basesLp = new LinearLayout.LayoutParams(dp(38), dp(26));
+        basesLp.setMargins(dp(7), 0, 0, 0);
+        liveRow.addView(basesView, basesLp);
         content.addView(liveRow, matchWrap());
     }
 
