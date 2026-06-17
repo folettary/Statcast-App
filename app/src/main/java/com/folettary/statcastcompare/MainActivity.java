@@ -777,7 +777,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v360", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v361", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20022,64 +20022,51 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             // past the live AB — so the last at-bat shows its real result here, not the victory card.)
             String inState = safe(game.sitInningState).toLowerCase(Locale.US);
             boolean betweenInnings = !("Final".equals(game.statusLabel())) && (inState.contains("middle") || inState.contains("end"));
+            View eventChild = null;
+            int eventKey = 0;
             if (betweenInnings && liveAb && game.dueUp != null && !game.dueUp.isEmpty()) {
-                // v355: first between-inning render emphasizes the last play; the next poll/render
-                // flips emphasis to Due Up while keeping a compact Last Play reference.
+                // v361: fixed Result/Event slot. The slot is always the same height, so the
+                // carousel below does not jump when we swap result/due-up/event cards.
                 String betweenKey = game.gamePk + ":" + game.sitInning + ":" + inState;
                 boolean seenBetween = betweenInningDueUpSeen.contains(betweenKey);
                 if (!seenBetween) betweenInningDueUpSeen.add(betweenKey);
 
-                // color the due-up card by the team COMING UP (not the one that just batted)
                 boolean topUp = game.dueUp.get(0).topComingUp;
                 TeamPalette upPal = topUp ? activeLiveTrackerAwayPal : activeLiveTrackerHomePal;
                 if (upPal == null) upPal = neutralPalette();
                 int upColor = ensureReadableColor(upPal.primary, 150);
 
                 boolean hasLastPlay = ab != null && ab.complete && !safe(ab.result).isEmpty();
-                if (!seenBetween) {
-                    if (hasLastPlay) {
-                        View rc = resultCard(ab, null, batColor);
-                        animateResultIn(rc, ("res-between-" + fidx + "-" + ab.result).hashCode());
-                        card.addView(rc, bannerLp());
-                    }
-                    View dueMini = compactDueUpCard(game, upColor);
-                    LinearLayout.LayoutParams dueMiniLp = bannerLp();
-                    if (hasLastPlay) dueMiniLp.setMargins(0, dp(8), 0, 0);
-                    card.addView(dueMini, dueMiniLp);
+                if (!seenBetween && hasLastPlay) {
+                    eventChild = resultCard(ab, null, batColor);
+                    eventKey = ("res-between-" + fidx + "-" + ab.result).hashCode();
                 } else {
-                    View bic = betweenInningsCard(game, upColor);
-                    card.addView(bic, bannerLp());
-                    if (hasLastPlay) {
-                        View lp = compactLastPlayCard(ab, batColor);
-                        LinearLayout.LayoutParams lpLp = bannerLp();
-                        lpLp.setMargins(0, dp(8), 0, 0);
-                        card.addView(lp, lpLp);
-                    }
+                    eventChild = betweenInningsCard(game, upColor);
+                    eventKey = ("dueup-" + game.sitInning + "-" + inState).hashCode();
                 }
             } else if (liveAb && ab != null && ab.pitches.isEmpty()
                     && feed.latestRosterMove != null && feed.latestRosterAbIndex == idx) {
-                // A roster move (pitching change, sub, injury) just happened and no pitch has been
-                // thrown yet → show it as a purple card, matching the play-feed color scheme.
-                View rmc = rosterMoveCard(feed.latestRosterMove);
-                animateResultIn(rmc, ("roster-" + idx + "-" + safe(feed.latestRosterMove.headline)).hashCode());
-                card.addView(rmc, bannerLp());
+                eventChild = rosterMoveCard(feed.latestRosterMove);
+                eventKey = ("roster-" + idx + "-" + safe(feed.latestRosterMove.headline)).hashCode();
             } else if (ab != null && ab.complete && !safe(ab.result).isEmpty()) {
-                View rc = resultCard(ab, null, batColor);
-                animateResultIn(rc, ("res-" + fidx + "-" + ab.result).hashCode());
-                card.addView(rc, bannerLp());
+                eventChild = resultCard(ab, null, batColor);
+                eventKey = ("res-" + fidx + "-" + ab.result).hashCode();
             } else if (ab != null && !ab.pitches.isEmpty()) {
                 LivePitch latest = ab.pitches.get(ab.pitches.size() - 1);
-                View rc = resultCard(ab, latest, batColor);
-                animateResultIn(rc, (fidx * 1000) + latest.number);
-                card.addView(rc, bannerLp());
+                eventChild = resultCard(ab, latest, batColor);
+                eventKey = (fidx * 1000) + latest.number;
             }
+
+            LinearLayout.LayoutParams slotLp = new LinearLayout.LayoutParams(-1, resultEventSlotHeight());
+            slotLp.setMargins(0, dp(10), 0, 0);
+            card.addView(resultEventSlot(eventChild, eventKey), slotLp);
         }
 
         // ---- Situational stats carousel (pinned below the tracker, live AB only) ----
         if (liveAb && !"Final".equals(game.statusLabel())) {
             View sc = situationalCarousel(game, ab, activeLiveTrackerAwayPal, activeLiveTrackerHomePal);
             if (sc != null) {
-                LinearLayout.LayoutParams scLp = matchWrap(); scLp.setMargins(0, dp(12), 0, 0);
+                LinearLayout.LayoutParams scLp = matchWrap(); scLp.setMargins(0, dp(8), 0, 0);
                 card.addView(sc, scLp);
             }
         }
@@ -20230,6 +20217,23 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         LinearLayout.LayoutParams lp = matchWrap();
         lp.setMargins(0, 0, 0, 0);
         return lp;
+    }
+
+    private int resultEventSlotHeight() {
+        return dp(166);
+    }
+
+    private View resultEventSlot(View child, int key) {
+        FrameLayout slot = new FrameLayout(this);
+        slot.setClipChildren(true);
+        slot.setClipToPadding(true);
+        slot.setPadding(0, 0, 0, 0);
+        if (child != null) {
+            animateResultIn(child, key);
+            FrameLayout.LayoutParams cp = new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER);
+            slot.addView(child, cp);
+        }
+        return slot;
     }
 
     // Big, unmistakable result banner for a completed plate appearance.
@@ -21056,14 +21060,18 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 card.addView(advT, matchWrap());
             }
         } else {
-            // COMPLETE at-bat — the outcome.
-            TextView label = text("RESULT", 8, accent, true);
+            // v361: completed at-bat result keeps all content but fits the fixed Result/Event slot.
+            // Remove vertical ceremony (divider + separate ON THE PITCH label) while preserving:
+            // result, contact metrics, xBA, description, pitch speed/type/spin.
+            TextView label = text("RESULT", 7, accent, true);
             label.setLetterSpacing(0.22f); label.setGravity(Gravity.CENTER);
             card.addView(label, matchWrap());
-            TextView big = text(safe(ab.result).toUpperCase(Locale.US), 20, INK, true);
+
+            TextView big = text(safe(ab.result).toUpperCase(Locale.US), 18, INK, true);
             big.setGravity(Gravity.CENTER); big.setLetterSpacing(0.02f);
+            big.setPadding(0, dp(1), 0, 0);
             card.addView(big, matchWrap());
-            // EV / LA / distance from the contact pitch, if any
+
             LivePitch contact = null;
             if (ab.pitches != null) {
                 for (int i = ab.pitches.size() - 1; i >= 0; i--) {
@@ -21074,73 +21082,47 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             if (contact != null) {
                 StringBuilder meta = new StringBuilder();
                 if (!Double.isNaN(contact.exitVelo)) meta.append(String.format(Locale.US, "%.0f mph EV", contact.exitVelo));
-                if (!Double.isNaN(contact.launchAngle)) { if (meta.length() > 0) meta.append(" \u2022 "); meta.append(String.format(Locale.US, "%.0f\u00b0 LA", contact.launchAngle)); }
-                if (!Double.isNaN(contact.distance) && contact.distance > 0) { if (meta.length() > 0) meta.append(" \u2022 "); meta.append(String.format(Locale.US, "%.0f ft", contact.distance)); }
-                if (meta.length() > 0) {
-                    TextView metaView = text(meta.toString(), 9, accent, true);
-                    metaView.setGravity(Gravity.CENTER); metaView.setPadding(0, dp(2), 0, 0);
-                    card.addView(metaView, matchWrap());
-                }
-                // xBA — real expected batting average from Statcast (Savant). Its own line, since it's
-                // a marquee advanced stat. Baseball convention: .XXX with no leading zero.
+                if (!Double.isNaN(contact.launchAngle)) { if (meta.length() > 0) meta.append("  •  "); meta.append(String.format(Locale.US, "%.0f° LA", contact.launchAngle)); }
+                if (!Double.isNaN(contact.distance) && contact.distance > 0) { if (meta.length() > 0) meta.append("  •  "); meta.append(String.format(Locale.US, "%.0f ft", contact.distance)); }
                 if (!Double.isNaN(contact.xba)) {
                     String x = String.format(Locale.US, "%.3f", contact.xba);
                     if (x.startsWith("0")) x = x.substring(1);
-                    LinearLayout xbaRow = new LinearLayout(this);
-                    xbaRow.setOrientation(LinearLayout.HORIZONTAL);
-                    xbaRow.setGravity(Gravity.CENTER | Gravity.BOTTOM);
-                    xbaRow.setPadding(0, dp(2), 0, 0);
-                    TextView xv = text(x, 13, INK, true);
-                    xbaRow.addView(xv, new LinearLayout.LayoutParams(-2, -2));
-                    TextView xl = text(" xBA", 9, accent, true); xl.setPadding(0, 0, 0, dp(1));
-                    xbaRow.addView(xl, new LinearLayout.LayoutParams(-2, -2));
-                    LinearLayout.LayoutParams xrLp = new LinearLayout.LayoutParams(-2, -2);
-                    xrLp.gravity = Gravity.CENTER_HORIZONTAL;
-                    card.addView(xbaRow, xrLp);
+                    if (meta.length() > 0) meta.append("  •  ");
+                    meta.append(x).append(" xBA");
+                }
+                if (meta.length() > 0) {
+                    TextView metaView = text(meta.toString(), 9, accent, true);
+                    metaView.setGravity(Gravity.CENTER);
+                    metaView.setSingleLine(true);
+                    metaView.setEllipsize(TextUtils.TruncateAt.END);
+                    metaView.setPadding(0, dp(2), 0, 0);
+                    card.addView(metaView, matchWrap());
                 }
             }
+
             if (!safe(ab.description).isEmpty()) {
-                TextView desc = text(ab.description, 10, INK_DIM, false);
-                desc.setGravity(Gravity.CENTER); desc.setPadding(0, dp(3), 0, 0);
+                TextView desc = text(ab.description, 9, INK_DIM, false);
+                desc.setGravity(Gravity.CENTER);
+                desc.setPadding(dp(2), dp(4), dp(2), 0);
+                desc.setMaxLines(2);
+                desc.setEllipsize(TextUtils.TruncateAt.END);
                 card.addView(desc, matchWrap());
             }
-            // v319: the pitch that ENDED the at-bat — shown as a secondary section so the outcome
-            // stays the hero. Subtle divider, then a compact velo · type · spin line.
+
             LivePitch endPitch = (ab.pitches != null && !ab.pitches.isEmpty()) ? ab.pitches.get(ab.pitches.size() - 1) : null;
             if (endPitch != null && (endPitch.speed > 0 || !safe(endPitch.typeCode).isEmpty())) {
-                View divider = new View(this);
-                GradientDrawable dg = new GradientDrawable();
-                dg.setColor(Color.argb(40, 255, 255, 255));
-                divider.setBackground(dg);
-                LinearLayout.LayoutParams dvLp = new LinearLayout.LayoutParams(dp(120), Math.max(1, dp(1)));
-                dvLp.gravity = Gravity.CENTER_HORIZONTAL; dvLp.setMargins(0, dp(8), 0, dp(6));
-                card.addView(divider, dvLp);
-
-                int pcol = pitchTypeColor(endPitch.typeCode);
-                TextView eyebrow = text("ON THE PITCH", 7, INK_DIM, true);
-                eyebrow.setLetterSpacing(0.2f); eyebrow.setGravity(Gravity.CENTER);
-                card.addView(eyebrow, matchWrap());
-
-                LinearLayout pitchRow = new LinearLayout(this);
-                pitchRow.setOrientation(LinearLayout.HORIZONTAL);
-                pitchRow.setGravity(Gravity.CENTER | Gravity.BOTTOM);
-                pitchRow.setPadding(0, dp(1), 0, 0);
-                if (endPitch.speed > 0) {
-                    TextView v = text(String.format(Locale.US, "%.0f", endPitch.speed), 15, INK, true);
-                    pitchRow.addView(v, new LinearLayout.LayoutParams(-2, -2));
-                    TextView mph = text(" mph ", 9, INK_DIM, true); mph.setPadding(0, 0, dp(2), dp(1));
-                    pitchRow.addView(mph, new LinearLayout.LayoutParams(-2, -2));
-                }
-                TextView typeT = text(pitchTypeShort(endPitch.typeCode, endPitch.typeName), 13, pcol, true);
-                pitchRow.addView(typeT, new LinearLayout.LayoutParams(-2, -2));
+                StringBuilder pitchLine = new StringBuilder("Pitch: ");
+                if (endPitch.speed > 0) pitchLine.append(String.format(Locale.US, "%.0f mph ", endPitch.speed));
+                pitchLine.append(pitchTypeShort(endPitch.typeCode, endPitch.typeName));
                 if (!Double.isNaN(endPitch.spinRate) && endPitch.spinRate > 0) {
-                    TextView spin = text(String.format(Locale.US, "  \u00b7  %.0f rpm", endPitch.spinRate), 10, INK_DIM, true);
-                    spin.setPadding(0, 0, 0, dp(1));
-                    pitchRow.addView(spin, new LinearLayout.LayoutParams(-2, -2));
+                    pitchLine.append("  •  ").append(String.format(Locale.US, "%.0f rpm", endPitch.spinRate));
                 }
-                LinearLayout.LayoutParams prLp = new LinearLayout.LayoutParams(-2, -2);
-                prLp.gravity = Gravity.CENTER_HORIZONTAL;
-                card.addView(pitchRow, prLp);
+                TextView pitchT = text(pitchLine.toString(), 9, INK_SOFT, true);
+                pitchT.setGravity(Gravity.CENTER);
+                pitchT.setSingleLine(true);
+                pitchT.setEllipsize(TextUtils.TruncateAt.END);
+                pitchT.setPadding(0, dp(5), 0, 0);
+                card.addView(pitchT, matchWrap());
             }
         }
         return card;
