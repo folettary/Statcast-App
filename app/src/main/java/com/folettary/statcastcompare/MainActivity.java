@@ -783,7 +783,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v364", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v365", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -22955,6 +22955,78 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         return top;
     }
 
+    private int liveFocusPageIndex() {
+        if ("prob".equals(gameHubLiveSub)) return 1;
+        if ("box".equals(gameHubLiveSub)) return 2;
+        return 0;
+    }
+
+    private String liveFocusSubForIndex(int idx) {
+        if (idx == 1) return "prob";
+        if (idx == 2) return "box";
+        return "tracker";
+    }
+
+    private void updateLiveFocusDots(TextView d0, TextView d1, TextView d2, int idx) {
+        if (d0 == null || d1 == null || d2 == null) return;
+        d0.setTextColor(idx == 0 ? Color.rgb(82, 226, 176) : Color.argb(105, 255, 255, 255));
+        d1.setTextColor(idx == 1 ? Color.rgb(82, 226, 176) : Color.argb(105, 255, 255, 255));
+        d2.setTextColor(idx == 2 ? Color.rgb(82, 226, 176) : Color.argb(105, 255, 255, 255));
+    }
+
+    private View focusHeroHeader(LiveGame game, Team away, Team home, TeamPalette awayPalette, TeamPalette homePalette) {
+        FrameLayout shell = new FrameLayout(this);
+        shell.addView(liveScoreHero(game, away, home, awayPalette, homePalette), new FrameLayout.LayoutParams(-1, -2));
+
+        // v365: controls are now tiny overlays inside the scoreboard header, not a permanent top bar.
+        TextView exit = text("×", 13, INK_SOFT, true);
+        exit.setGravity(Gravity.CENTER);
+        exit.setAlpha(0.72f);
+        exit.setPadding(dp(7), dp(3), dp(7), dp(3));
+        exit.setBackground(roundedStroke(Color.argb(18, 255, 255, 255), Color.argb(44, 255, 255, 255), 999, 1));
+        exit.setForeground(ripple(true));
+        exit.setClickable(true);
+        exit.setOnClickListener(v -> exitLiveFocusMode());
+        FrameLayout.LayoutParams xLp = new FrameLayout.LayoutParams(-2, -2, Gravity.START | Gravity.TOP);
+        xLp.setMargins(dp(9), dp(8), 0, 0);
+        shell.addView(exit, xLp);
+
+        TextView refresh = text("↻", 12, INK_SOFT, true);
+        refresh.setGravity(Gravity.CENTER);
+        refresh.setAlpha(0.72f);
+        refresh.setPadding(dp(7), dp(3), dp(7), dp(3));
+        refresh.setBackground(roundedStroke(Color.argb(18, 255, 255, 255), Color.argb(44, 255, 255, 255), 999, 1));
+        refresh.setForeground(ripple(true));
+        refresh.setClickable(true);
+        refresh.setOnClickListener(v -> refreshLiveGameMenu(game));
+        FrameLayout.LayoutParams rLp = new FrameLayout.LayoutParams(-2, -2, Gravity.END | Gravity.TOP);
+        rLp.setMargins(0, dp(8), dp(9), 0);
+        shell.addView(refresh, rLp);
+        return shell;
+    }
+
+    private View liveFocusHintRow() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER);
+        row.setPadding(0, dp(1), 0, dp(3));
+
+        TextView left = text("‹", 13, Color.argb(120, 255, 255, 255), true);
+        left.setGravity(Gravity.CENTER);
+        row.addView(left, new LinearLayout.LayoutParams(dp(18), -2));
+
+        TextView label = text("Tracker  •  Win Prob  •  Box", 8, INK_DIM, true);
+        label.setGravity(Gravity.CENTER);
+        label.setSingleLine(true);
+        label.setLetterSpacing(0.08f);
+        row.addView(label, new LinearLayout.LayoutParams(-2, -2));
+
+        TextView right = text("›", 13, Color.argb(120, 255, 255, 255), true);
+        right.setGravity(Gravity.CENTER);
+        row.addView(right, new LinearLayout.LayoutParams(dp(18), -2));
+        return row;
+    }
+
     private void renderLiveFocusMode(LiveGame game) {
         if (game == null || standingsBox == null) return;
         activeLiveGameMenu = game;
@@ -22987,50 +23059,110 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         panelLp.setMargins(0, dp(5), 0, 0);
         standingsBox.addView(panel, panelLp);
 
-        panel.addView(focusTopBar(game), matchWrap());
-
-        View liveHero = liveScoreHero(game, away, home, awayPalette, homePalette);
+        View hero = focusHeroHeader(game, away, home, awayPalette, homePalette);
         activeLiveScoreHeroHost = new FrameLayout(this);
-        activeLiveScoreHeroHost.addView(liveHero, new FrameLayout.LayoutParams(-1, -2));
+        activeLiveScoreHeroHost.addView(hero, new FrameLayout.LayoutParams(-1, -2));
         LinearLayout.LayoutParams heroLp = matchWrap();
-        heroLp.setMargins(dp(12), dp(2), dp(12), dp(4));
+        heroLp.setMargins(dp(12), dp(2), dp(12), dp(2));
         panel.addView(activeLiveScoreHeroHost, heroLp);
 
-        View content;
-        boolean canLeft = true, canRight = true;
-        if ("prob".equals(gameHubLiveSub)) {
-            stopLiveTrackerPolling();
-            LinearLayout wpHost = new LinearLayout(this);
-            wpHost.setOrientation(LinearLayout.VERTICAL);
-            loadWinProbability(game, wpHost, awayPalette, homePalette);
-            content = wpHost;
-            canLeft = true; canRight = true;
-        } else if ("box".equals(gameHubLiveSub)) {
-            stopLiveTrackerPolling();
-            LinearLayout boxHost = new LinearLayout(this);
-            boxHost.setOrientation(LinearLayout.VERTICAL);
-            renderBoxTab(boxHost, game, awayPalette, homePalette);
-            content = boxHost;
-            canLeft = true; canRight = false;
-        } else {
-            gameHubLiveSub = "tracker";
-            LinearLayout trackerHost = new LinearLayout(this);
-            trackerHost.setOrientation(LinearLayout.VERTICAL);
-            trackerHost.setVisibility(View.GONE);
-            activeLiveTrackerHost = trackerHost;
-            activeLiveTrackerAwayPal = awayPalette;
-            activeLiveTrackerHomePal = homePalette;
-            activeLiveTrackerGame = game;
-            loadLiveTracker(game, trackerHost, awayPalette, homePalette);
-            startLiveTrackerPolling(game);
-            content = trackerHost;
-            canLeft = false; canRight = true;
-        }
+        LinearLayout hint = (LinearLayout) liveFocusHintRow();
+        LinearLayout.LayoutParams hintLp = matchWrap();
+        hintLp.setMargins(dp(12), 0, dp(12), dp(2));
+        panel.addView(hint, hintLp);
 
-        SwipePagerFrame swipe = wrapInSubTabSwiper(game, content, canLeft, canRight);
-        LinearLayout.LayoutParams swLp = matchWrap();
-        swLp.setMargins(dp(12), 0, dp(12), dp(2));
-        panel.addView(swipe, swLp);
+        final int pageW = Math.max(1, getResources().getDisplayMetrics().widthPixels - dp(24));
+        final int[] pageIndex = new int[] { liveFocusPageIndex() };
+
+        SwipePagerFrame pager = new SwipePagerFrame(this);
+        pager.setClipChildren(false);
+        pager.setClipToPadding(false);
+
+        LinearLayout strip = new LinearLayout(this);
+        strip.setOrientation(LinearLayout.HORIZONTAL);
+        strip.setClipChildren(false);
+        strip.setClipToPadding(false);
+
+        // Build all three pages up front so focus mode is a true horizontal carousel instead of
+        // "swipe → rebuild the whole screen."
+        LinearLayout trackerPage = new LinearLayout(this);
+        trackerPage.setOrientation(LinearLayout.VERTICAL);
+        trackerPage.setVisibility(View.VISIBLE);
+        LinearLayout trackerHost = new LinearLayout(this);
+        trackerHost.setOrientation(LinearLayout.VERTICAL);
+        trackerHost.setVisibility(View.GONE);
+        trackerPage.addView(trackerHost, matchWrap());
+
+        LinearLayout wpPage = new LinearLayout(this);
+        wpPage.setOrientation(LinearLayout.VERTICAL);
+        loadWinProbability(game, wpPage, awayPalette, homePalette);
+
+        LinearLayout boxPage = new LinearLayout(this);
+        boxPage.setOrientation(LinearLayout.VERTICAL);
+        renderBoxTab(boxPage, game, awayPalette, homePalette);
+
+        activeLiveTrackerHost = trackerHost;
+        activeLiveTrackerAwayPal = awayPalette;
+        activeLiveTrackerHomePal = homePalette;
+        activeLiveTrackerGame = game;
+        loadLiveTracker(game, trackerHost, awayPalette, homePalette);
+
+        strip.addView(trackerPage, new LinearLayout.LayoutParams(pageW, -2));
+        strip.addView(wpPage, new LinearLayout.LayoutParams(pageW, -2));
+        strip.addView(boxPage, new LinearLayout.LayoutParams(pageW, -2));
+        strip.setTranslationX(-pageIndex[0] * pageW);
+        pager.addView(strip, new FrameLayout.LayoutParams(pageW * 3, -2));
+
+        final TextView d0 = text("●", 9, INK_DIM, true);
+        final TextView d1 = text("●", 9, INK_DIM, true);
+        final TextView d2 = text("●", 9, INK_DIM, true);
+        updateLiveFocusDots(d0, d1, d2, pageIndex[0]);
+        LinearLayout dots = new LinearLayout(this);
+        dots.setGravity(Gravity.CENTER);
+        dots.addView(d0);
+        TextView gap1 = text("  ", 9, INK_DIM, false); dots.addView(gap1);
+        dots.addView(d1);
+        TextView gap2 = text("  ", 9, INK_DIM, false); dots.addView(gap2);
+        dots.addView(d2);
+
+        pager.setPager(new TrackerPagerCb() {
+            @Override public void onDrag(float dx) {
+                float t = -pageIndex[0] * pageW + dx;
+                if ((pageIndex[0] == 0 && dx > 0) || (pageIndex[0] == 2 && dx < 0)) {
+                    t = -pageIndex[0] * pageW + dx * 0.28f;
+                }
+                strip.setTranslationX(t);
+            }
+
+            @Override public void onRelease(float dx) {
+                int next = pageIndex[0];
+                if (dx < -pageW * 0.20f && pageIndex[0] < 2) next++;
+                else if (dx > pageW * 0.20f && pageIndex[0] > 0) next--;
+
+                pageIndex[0] = next;
+                gameHubLiveSub = liveFocusSubForIndex(next);
+                if (next == 0) {
+                    game.viewAtBatIndex = -1;
+                    startLiveTrackerPolling(game);
+                } else {
+                    stopLiveTrackerPolling();
+                }
+                updateLiveFocusDots(d0, d1, d2, next);
+                strip.animate().translationX(-next * pageW).setDuration(220)
+                        .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
+            }
+        });
+
+        LinearLayout.LayoutParams pagerLp = new LinearLayout.LayoutParams(pageW, -2);
+        pagerLp.setMargins(dp(12), 0, dp(12), 0);
+        panel.addView(pager, pagerLp);
+
+        LinearLayout.LayoutParams dotsLp = matchWrap();
+        dotsLp.setMargins(0, dp(2), 0, 0);
+        panel.addView(dots, dotsLp);
+
+        if (pageIndex[0] == 0) startLiveTrackerPolling(game);
+        else stopLiveTrackerPolling();
 
         if (mainScroll != null) mainScroll.post(() -> mainScroll.scrollTo(0, 0));
     }
@@ -24180,7 +24312,10 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         TeamPalette awayPalette = away == null ? paletteForAbbr(game.awayAbbr) : paletteForTeam(away);
         TeamPalette homePalette = home == null ? paletteForAbbr(game.homeAbbr) : paletteForTeam(home);
         activeLiveScoreHeroHost.removeAllViews();
-        activeLiveScoreHeroHost.addView(liveScoreHero(game, away, home, awayPalette, homePalette), new FrameLayout.LayoutParams(-1, -2));
+        View hero = liveFocusMode
+                ? focusHeroHeader(game, away, home, awayPalette, homePalette)
+                : liveScoreHero(game, away, home, awayPalette, homePalette);
+        activeLiveScoreHeroHost.addView(hero, new FrameLayout.LayoutParams(-1, -2));
     }
 
     private View liveScoreHero(LiveGame game, Team away, Team home, TeamPalette awayPalette, TeamPalette homePalette) {
