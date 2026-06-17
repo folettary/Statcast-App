@@ -777,7 +777,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v362", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v363", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20058,15 +20058,16 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             }
 
             LinearLayout.LayoutParams slotLp = new LinearLayout.LayoutParams(-1, resultEventSlotHeight());
-            slotLp.setMargins(0, dp(8), 0, 0);
+            slotLp.setMargins(0, dp(6), 0, 0);
             card.addView(resultEventSlot(eventChild, eventKey), slotLp);
         }
 
-        // ---- Situational stats carousel (pinned below the tracker, live AB only) ----
-        if (liveAb && !"Final".equals(game.statusLabel())) {
+        // ---- Game Context carousel (core tracker section; always above Play Feed) ----
+        // v363: Play Feed is lower priority. Even after a completed AB, keep context visible here.
+        if (!"Final".equals(game.statusLabel())) {
             View sc = situationalCarousel(game, ab, activeLiveTrackerAwayPal, activeLiveTrackerHomePal);
             if (sc != null) {
-                LinearLayout.LayoutParams scLp = matchWrap(); scLp.setMargins(0, dp(6), 0, 0);
+                LinearLayout.LayoutParams scLp = matchWrap(); scLp.setMargins(0, dp(4), 0, 0);
                 card.addView(sc, scLp);
             }
         }
@@ -20220,7 +20221,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
     }
 
     private int resultEventSlotHeight() {
-        return dp(136);
+        return dp(126);
     }
 
     private View resultEventSlot(View child, int key) {
@@ -20590,6 +20591,14 @@ private View liveGameCard(LiveGame game, int slateIndex) {
 
     private View situationalCarousel(LiveGame game, LiveAtBat ab, TeamPalette awayPal, TeamPalette homePal) {
         java.util.ArrayList<GameContextCard> data = stableGameContextCards(game, buildGameContextCards(game, ab, awayPal, homePal));
+        if (data.isEmpty() && game != null) {
+            String head = game.sitInning > 0 ? liveInningHeroLabel(game) : safe(game.statusLabel());
+            String sub = ab != null && !safe(ab.batter).isEmpty()
+                    ? lastNameOnly(ab.batter) + " vs " + lastNameOnly(ab.pitcher)
+                    : displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr) + " " + game.awayScoreText()
+                    + "–" + game.homeScoreText() + " " + displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr);
+            data.add(new GameContextCard(1, "GAME CONTEXT", head, sub, Color.rgb(244, 207, 100)));
+        }
         if (data.isEmpty()) return null;
 
         HorizontalScrollView scroller = new HorizontalScrollView(this);
