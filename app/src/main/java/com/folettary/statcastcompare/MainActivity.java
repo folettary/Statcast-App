@@ -78,6 +78,7 @@ public class MainActivity extends Activity {
     // reviewed against real data. Set back to false to restore normal behavior. (v277) =====
     static boolean DEBUG_FORCE_LIVE = true;
     static boolean DEBUG_TRACKING_WINDOW = true; // v375: show full pitch-tracking window bounds
+    private static final String PREF_TRACKING_WINDOW = "pitch_tracking_window_overlay";
     private enum StatScope { HIT_ONLY, PITCH_ONLY, BOTH }
     private static final int STATCAST_START_YEAR = 2015;
     private static boolean isDark = false;          // dark mode toggle – static survives recreate()
@@ -558,6 +559,7 @@ public class MainActivity extends Activity {
             getWindow().setDecorFitsSystemWindows(true);
         }
         isDark = false; // v28 uses one polished light theme.
+        DEBUG_TRACKING_WINDOW = getPreferences(MODE_PRIVATE).getBoolean(PREF_TRACKING_WINDOW, DEBUG_TRACKING_WINDOW);
         initColors();
         long maxKb = Runtime.getRuntime().maxMemory() / 1024;
         imageCache = new LruCache<String, Bitmap>((int) (maxKb / 8)) {
@@ -827,7 +829,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v394", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v395", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -23240,6 +23242,37 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         return shell;
     }
 
+
+    private TextView pitchTrackingWindowToggleChip(LiveGame game) {
+        boolean on = DEBUG_TRACKING_WINDOW;
+        int accent = on ? Color.rgb(82, 226, 176) : INK_DIM;
+        TextView t = text(on ? "Window On" : "Window Off", 8, on ? Color.rgb(8, 13, 22) : INK_SOFT, true);
+        t.setGravity(Gravity.CENTER);
+        t.setSingleLine(true);
+        t.setLetterSpacing(0.06f);
+        t.setPadding(dp(7), dp(4), dp(7), dp(4));
+        t.setBackground(on
+                ? roundedStroke(accent, Color.argb(0, 0, 0, 0), 999, 0)
+                : roundedStroke(Color.argb(34, 255, 255, 255), Color.argb(70, 255, 255, 255), 999, 1));
+        t.setForeground(ripple(true));
+        t.setClickable(true);
+        t.setOnClickListener(v -> {
+            DEBUG_TRACKING_WINDOW = !DEBUG_TRACKING_WINDOW;
+            getPreferences(MODE_PRIVATE).edit().putBoolean(PREF_TRACKING_WINDOW, DEBUG_TRACKING_WINDOW).apply();
+            LiveGame g = game != null ? game : activeLiveTrackerGame;
+            if (g != null && activeLiveTrackerHost != null && "tracker".equals(gameHubLiveSub)) {
+                rerenderTracker(g);
+            } else {
+                t.setText(DEBUG_TRACKING_WINDOW ? "Window On" : "Window Off");
+                t.setTextColor(DEBUG_TRACKING_WINDOW ? Color.rgb(8, 13, 22) : INK_SOFT);
+                t.setBackground(DEBUG_TRACKING_WINDOW
+                        ? roundedStroke(Color.rgb(82, 226, 176), Color.argb(0, 0, 0, 0), 999, 0)
+                        : roundedStroke(Color.argb(34, 255, 255, 255), Color.argb(70, 255, 255, 255), 999, 1));
+            }
+        });
+        return t;
+    }
+
     private View liveFocusHintRow() {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
@@ -23259,6 +23292,11 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         TextView right = text("›", 13, Color.argb(120, 255, 255, 255), true);
         right.setGravity(Gravity.CENTER);
         row.addView(right, new LinearLayout.LayoutParams(dp(18), -2));
+
+        TextView toggle = pitchTrackingWindowToggleChip(activeLiveGameMenu);
+        LinearLayout.LayoutParams twLp = new LinearLayout.LayoutParams(-2, -2);
+        twLp.setMargins(dp(8), 0, 0, 0);
+        row.addView(toggle, twLp);
         return row;
     }
 
@@ -23554,6 +23592,9 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         sub.addView(liveSubButton("Box Score", "box", game));
         if ("Final".equals(game.statusLabel())) sub.addView(liveSubButton("Final", "final", game));
         sub.addView(liveFocusButton(game));
+        TextView windowToggle = pitchTrackingWindowToggleChip(game);
+        windowToggle.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1));
+        sub.addView(windowToggle);
         return sub;
     }
 
