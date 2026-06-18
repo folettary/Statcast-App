@@ -826,7 +826,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v385", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v386", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20725,9 +20725,8 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         }
         if (data.isEmpty()) return null;
 
-        // v384: one moving context feed, not a doubled seamless ticker. The previous loop duplicated
-        // the card strip and could visually layer card copies during live rebuilds. This keeps exactly
-        // one row of cards and gently scrolls it; when it reaches the end, it snaps back cleanly.
+        // v386: moving context feed only, rebuilt as a single clipped marquee.
+        // One viewport. One strip. No duplicated loop strip. No saved scroll offset.
         java.util.LinkedHashMap<String, GameContextCard> uniqueCards = new java.util.LinkedHashMap<>();
         for (GameContextCard c : data) {
             String id = gameContextCardId(c);
@@ -20736,13 +20735,13 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         data = new java.util.ArrayList<>(uniqueCards.values());
         if (data.isEmpty()) return null;
 
-        HorizontalScrollView scroller = new HorizontalScrollView(this);
-        scroller.setHorizontalScrollBarEnabled(false);
-        scroller.setClipChildren(true);
-        scroller.setClipToPadding(true);
-        scroller.setPadding(0, 0, 0, 0);
+        final FrameLayout viewport = new FrameLayout(this);
+        viewport.setClipChildren(true);
+        viewport.setClipToPadding(true);
+        viewport.setPadding(0, 0, 0, 0);
+        viewport.setMinimumHeight(dp(104));
 
-        LinearLayout strip = new LinearLayout(this);
+        final LinearLayout strip = new LinearLayout(this);
         strip.setOrientation(LinearLayout.HORIZONTAL);
         strip.setClipChildren(true);
         strip.setClipToPadding(true);
@@ -20751,51 +20750,61 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         for (int i = 0; i < limit; i++) {
             GameContextCard c = data.get(i);
             int cardW = gameContextCardWidth(c);
-            int leftMargin = i == 0 ? 0 : dp(8);
             LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(cardW, dp(104));
-            clp.setMargins(leftMargin, 0, 0, 0);
+            clp.setMargins(i == 0 ? 0 : dp(8), 0, 0, 0);
             strip.addView(insightCard(c.eyebrow, c.headline, c.subline, c.accent), clp);
         }
 
-        scroller.setMinimumHeight(dp(104));
-        scroller.addView(strip, new FrameLayout.LayoutParams(-2, dp(104)));
-
-        final boolean[] userHolding = new boolean[] { false };
-        scroller.setOnTouchListener((v, ev) -> {
-            v.getParent().requestDisallowInterceptTouchEvent(true);
-            int action = ev.getAction();
-            if (action == android.view.MotionEvent.ACTION_DOWN || action == android.view.MotionEvent.ACTION_MOVE) {
-                userHolding[0] = true;
-            } else if (action == android.view.MotionEvent.ACTION_UP || action == android.view.MotionEvent.ACTION_CANCEL) {
-                userHolding[0] = false;
-                v.getParent().requestDisallowInterceptTouchEvent(false);
-            }
-            return false;
-        });
+        viewport.addView(strip, new FrameLayout.LayoutParams(-2, dp(104)));
 
         if (limit >= 2) {
-            final Runnable[] auto = new Runnable[1];
-            auto[0] = new Runnable() {
-                @Override public void run() {
-                    if (scroller.getParent() == null) return;
-                    if (strip.getWidth() <= 0 || scroller.getWidth() <= 0) {
-                        main.postDelayed(this, 150L);
-                        return;
-                    }
-                    if (!userHolding[0]) {
-                        int maxX = Math.max(0, strip.getWidth() - scroller.getWidth());
-                        if (maxX > 0) {
-                            int next = scroller.getScrollX() + 1;
-                            scroller.scrollTo(next >= maxX ? 0 : next, 0);
-                        }
-                    }
-                    main.postDelayed(this, 38L);
+            final boolean[] userHolding = new boolean[] { false };
+            final float[] x = new float[] { 0f };
+            viewport.setOnTouchListener((v, ev) -> {
+                int action = ev.getAction();
+                if (action == android.view.MotionEvent.ACTION_DOWN || action == android.view.MotionEvent.ACTION_MOVE) {
+                    userHolding[0] = true;
+                } else if (action == android.view.MotionEvent.ACTION_UP || action == android.view.MotionEvent.ACTION_CANCEL) {
+                    userHolding[0] = false;
                 }
-            };
-            scroller.postDelayed(auto[0], 450L);
+                return true;
+            });
+
+            viewport.post(() -> {
+                int vw = viewport.getWidth();
+                int sw = strip.getWidth();
+                if (vw <= 0 || sw <= vw) {
+                    strip.setTranslationX(0f);
+                    return;
+                }
+                // Start visible, then move left as one strip. When fully offscreen, restart cleanly.
+                x[0] = 0f;
+                strip.setTranslationX(x[0]);
+
+                final Runnable[] auto = new Runnable[1];
+                auto[0] = new Runnable() {
+                    @Override public void run() {
+                        if (viewport.getParent() == null || strip.getParent() == null) return;
+                        int curViewportW = viewport.getWidth();
+                        int curStripW = strip.getWidth();
+                        if (curViewportW <= 0 || curStripW <= curViewportW) {
+                            strip.setTranslationX(0f);
+                            main.postDelayed(this, 250L);
+                            return;
+                        }
+                        if (!userHolding[0]) {
+                            x[0] -= 0.75f;
+                            if (x[0] <= -curStripW) x[0] = curViewportW;
+                            strip.setTranslationX(x[0]);
+                        }
+                        main.postDelayed(this, 34L);
+                    }
+                };
+                main.postDelayed(auto[0], 500L);
+            });
         }
 
-        return scroller;
+        return viewport;
     }
 
     private java.util.ArrayList<GameContextCard> buildGameContextCards(LiveGame game, LiveAtBat ab, TeamPalette awayPal, TeamPalette homePal) {
