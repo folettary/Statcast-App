@@ -827,7 +827,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v390", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v391", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20823,19 +20823,19 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 float maxTextW = Math.max(1f, w - dp(20));
 
                 textPaint.setShader(null);
-                textPaint.setTypeface(TYPE_BOLD);
+                textPaint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
                 textPaint.setTextSize(sp(7));
                 textPaint.setColor(c.accent);
                 textPaint.setLetterSpacing(0.18f);
                 canvas.drawText(fitText(c.eyebrow, textPaint, maxTextW), tx, y + dp(20), textPaint);
 
                 textPaint.setLetterSpacing(0f);
-                textPaint.setTypeface(TYPE_BOLD);
+                textPaint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
                 textPaint.setTextSize(sp(12));
                 textPaint.setColor(INK);
                 canvas.drawText(fitText(c.headline, textPaint, maxTextW), tx, y + dp(50), textPaint);
 
-                textPaint.setTypeface(TYPE_BOLD);
+                textPaint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
                 textPaint.setTextSize(sp(8));
                 textPaint.setColor(INK_DIM);
                 java.util.ArrayList<String> subLines = fitTwoLines(c.subline, textPaint, maxTextW);
