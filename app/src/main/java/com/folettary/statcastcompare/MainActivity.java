@@ -826,7 +826,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v387", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v388", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20725,11 +20725,9 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         }
         if (data.isEmpty()) return null;
 
-        // v387: audited moving context feed.
-        // Root cause of v386: a WRAP_CONTENT strip inside a FrameLayout could measure no wider
-        // than the viewport, so the motion guard decided there was nothing to scroll. This version
-        // computes a real pixel cycle width, assigns an explicit strip width, and moves exactly one
-        // clipped strip with translationX. No scroll-widget ticker, no saved offset, no separate static layer.
+        // v388: clean marquee context feed. One viewport, one strip, one copy of each card.
+        // No repeated cards, no seamless duplicate loop, no saved offset, no static layer.
+        // The strip scrolls left, fully exits, then restarts offscreen to the right.
         java.util.LinkedHashMap<String, GameContextCard> uniqueCards = new java.util.LinkedHashMap<>();
         for (GameContextCard c : data) {
             String id = gameContextCardId(c);
@@ -20751,79 +20749,55 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         strip.setClipToPadding(true);
 
         int limit = Math.min(6, data.size());
-        int baseCycleW = 0;
-        java.util.ArrayList<Integer> cardWidths = new java.util.ArrayList<>();
+        int stripW = 0;
         for (int i = 0; i < limit; i++) {
             GameContextCard c = data.get(i);
             int cardW = gameContextCardWidth(c);
-            cardWidths.add(cardW);
-            baseCycleW += (i == 0 ? 0 : dp(8)) + cardW;
+            int leftMargin = i == 0 ? 0 : dp(8);
+            LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(cardW, rowH);
+            clp.setMargins(leftMargin, 0, 0, 0);
+            strip.addView(insightCard(c.eyebrow, c.headline, c.subline, c.accent), clp);
+            stripW += leftMargin + cardW;
         }
-        final int cycleW = Math.max(1, baseCycleW + dp(8)); // include the gap before the repeated cycle
 
-        // Add enough repeated cards to guarantee the single strip is wider than the viewport on all
-        // phone widths. Repeats live inside the SAME strip, so there is no second layer to overlap.
-        int targetMinW = getResources().getDisplayMetrics().widthPixels * 2 + cycleW;
-        int stripW = 0;
-        int loops = 0;
-        while (stripW < targetMinW && loops < 5) {
-            for (int i = 0; i < limit; i++) {
-                GameContextCard c = data.get(i);
-                int leftMargin = (strip.getChildCount() == 0) ? 0 : dp(8);
-                int cardW = cardWidths.get(i);
-                LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(cardW, rowH);
-                clp.setMargins(leftMargin, 0, 0, 0);
-                strip.addView(insightCard(c.eyebrow, c.headline, c.subline, c.accent), clp);
-                stripW += leftMargin + cardW;
+        final int measuredStripW = Math.max(1, stripW);
+        viewport.addView(strip, new FrameLayout.LayoutParams(measuredStripW, rowH));
+
+        final boolean[] userHolding = new boolean[] { false };
+        final float[] x = new float[] { 0f };
+
+        viewport.setOnTouchListener((v, ev) -> {
+            int action = ev.getAction();
+            if (action == android.view.MotionEvent.ACTION_DOWN || action == android.view.MotionEvent.ACTION_MOVE) {
+                userHolding[0] = true;
+            } else if (action == android.view.MotionEvent.ACTION_UP || action == android.view.MotionEvent.ACTION_CANCEL) {
+                userHolding[0] = false;
             }
-            loops++;
-        }
+            return true;
+        });
 
-        FrameLayout.LayoutParams stripLp = new FrameLayout.LayoutParams(Math.max(stripW, cycleW), rowH);
-        viewport.addView(strip, stripLp);
+        viewport.post(() -> {
+            int vw = Math.max(1, viewport.getWidth());
+            x[0] = 0f;
+            strip.setTranslationX(x[0]);
 
-        if (limit >= 2) {
-            final boolean[] userHolding = new boolean[] { false };
-            final float[] x = new float[] { 0f };
-            final int[] resolvedCycleW = new int[] { cycleW };
-
-            viewport.setOnTouchListener((v, ev) -> {
-                int action = ev.getAction();
-                if (action == android.view.MotionEvent.ACTION_DOWN || action == android.view.MotionEvent.ACTION_MOVE) {
-                    userHolding[0] = true;
-                } else if (action == android.view.MotionEvent.ACTION_UP || action == android.view.MotionEvent.ACTION_CANCEL) {
-                    userHolding[0] = false;
-                }
-                return true;
-            });
-
-            viewport.post(() -> {
-                strip.setTranslationX(0f);
-                x[0] = 0f;
-
-                final Runnable[] auto = new Runnable[1];
-                auto[0] = new Runnable() {
-                    @Override public void run() {
-                        if (viewport.getParent() == null || strip.getParent() == null) return;
-                        int viewportW = viewport.getWidth();
-                        int actualStripW = strip.getWidth();
-                        if (viewportW <= 0 || actualStripW <= viewportW || resolvedCycleW[0] <= 0) {
-                            main.postDelayed(this, 180L);
-                            return;
+            final Runnable[] auto = new Runnable[1];
+            auto[0] = new Runnable() {
+                @Override public void run() {
+                    if (viewport.getParent() == null || strip.getParent() == null) return;
+                    int viewportW = Math.max(1, viewport.getWidth());
+                    if (!userHolding[0]) {
+                        x[0] -= 0.85f;
+                        if (x[0] <= -measuredStripW) {
+                            x[0] = viewportW;
                         }
-                        if (!userHolding[0]) {
-                            x[0] -= 0.85f;
-                            if (x[0] <= -resolvedCycleW[0]) x[0] += resolvedCycleW[0];
-                            strip.setTranslationX(x[0]);
-                        }
-                        main.postDelayed(this, 34L);
+                        strip.setTranslationX(x[0]);
                     }
-                };
-                main.postDelayed(auto[0], 350L);
-            });
-        } else {
-            strip.setTranslationX(0f);
-        }
+                    main.postDelayed(this, 34L);
+                }
+            };
+            main.postDelayed(auto[0], 350L);
+        });
 
         return viewport;
     }
