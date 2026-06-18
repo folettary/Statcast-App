@@ -827,7 +827,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v393", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v394", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20073,6 +20073,9 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             // (a) host it in a clipping FrameLayout of exactly zoneH, and (b) hand it the vertical
             // gesture by disallowing the parent scroll from intercepting while the finger is on it.
             FrameLayout legendClip = new FrameLayout(this);
+            // v394: keep the tracking window size unchanged; nudge the pitch list left a hair
+            // so the larger v392 text doesn't clip on the screen's right edge.
+            legendClip.setTranslationX(-dp(4));
             legendClip.setClipChildren(true);
             ScrollView legendScroll = new ScrollView(this);
             legendScroll.setVerticalScrollBarEnabled(false);
@@ -21862,7 +21865,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         TextView num = text(String.valueOf(lp.number), 10, pitchMarkerTextColor(kind), true);
         num.setGravity(Gravity.CENTER);
         dotWrap.addView(num, new FrameLayout.LayoutParams(dp(20), dp(20)));
-        LinearLayout.LayoutParams dwl = new LinearLayout.LayoutParams(-2, -2); dwl.setMargins(0, 0, dp(5), 0);
+        LinearLayout.LayoutParams dwl = new LinearLayout.LayoutParams(-2, -2); dwl.setMargins(0, 0, dp(3), 0);
         row.addView(dotWrap, dwl);
         // stacked: "4-Seam · 102" then result/exit-velo beneath — column is weight-bounded so text
         // ellipsizes inside the list instead of overflowing off the right edge.
