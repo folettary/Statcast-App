@@ -827,7 +827,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v391", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v392", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20105,7 +20105,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             // Rail hugs the right edge: just wide enough for the dot + "Swinging Strike" on one line,
             // and no more, so the plot gets every other pixel. Flush to the card's right edge.
             int railW = Math.min(dp(98), Math.max(dp(90), screenW * 22 / 100));
-            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(railW, zoneCanvasH); lgLp.setMargins(dp(1), 0, -dp(12), 0);
+            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(railW, zoneCanvasH); lgLp.setMargins(-dp(2), 0, -dp(12), 0);
             zoneRow.addView(legendClip, lgLp);
             card.addView(zoneRow, zrLp);
 
@@ -21859,7 +21859,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         dot.setBackground(gd);
         FrameLayout.LayoutParams dl = new FrameLayout.LayoutParams(dp(20), dp(20));
         dotWrap.addView(dot, dl);
-        TextView num = text(String.valueOf(lp.number), 9, pitchMarkerTextColor(kind), true);
+        TextView num = text(String.valueOf(lp.number), 10, pitchMarkerTextColor(kind), true);
         num.setGravity(Gravity.CENTER);
         dotWrap.addView(num, new FrameLayout.LayoutParams(dp(20), dp(20)));
         LinearLayout.LayoutParams dwl = new LinearLayout.LayoutParams(-2, -2); dwl.setMargins(0, 0, dp(5), 0);
@@ -21870,14 +21870,14 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         col.setOrientation(LinearLayout.VERTICAL);
         String typeShort = pitchTypeShort(lp.typeCode, lp.typeName);
         String speed = lp.speed > 0 ? String.format(Locale.US, "%.0f", lp.speed) : "";
-        TextView t = text(typeShort + (speed.isEmpty() ? "" : " · " + speed), 9, INK, true);
+        TextView t = text(typeShort + (speed.isEmpty() ? "" : " · " + speed), 10, INK, true);
         t.setSingleLine(true); t.setEllipsize(TextUtils.TruncateAt.END);
         col.addView(t, matchWrap());
         String res = safe(lp.result);
         if (lp.isInPlay && !Double.isNaN(lp.exitVelo)) {
             res = String.format(Locale.US, "In play · %.0f EV", lp.exitVelo);
         }
-        TextView r = text(res, 8, INK_DIM, false);
+        TextView r = text(res, 9, INK_DIM, false);
         r.setSingleLine(false); r.setMaxLines(2); r.setEllipsize(TextUtils.TruncateAt.END);
         col.addView(r, matchWrap());
         row.addView(col, new LinearLayout.LayoutParams(0, -2, 1));
