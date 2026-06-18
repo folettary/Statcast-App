@@ -826,7 +826,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v378", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v379", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -19422,7 +19422,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             final float zoneSpanZ2 = zoneTop - zoneBot;       // 1.90 ft
             // Tracking room beyond the zone on the SHORT (horizontal) axis, in feet. Smaller → bigger
             // zone visual. The taller axis gets proportionally more room at the same scale.
-            float trackMargin = 0.72f;
+            float trackMargin = 0.76f;
             float halfShortFt = zoneHalfWidth + trackMargin;  // half horizontal span (short axis)
             float ftPerPx = (2f * halfShortFt) / plotW;       // shared scale, set by the short axis
             float halfX = (plotW * ftPerPx) / 2f;
@@ -19442,7 +19442,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             float scale = Math.min(plotW / spanX, plotH / spanZ);
             float drawW = spanX * scale;
             float drawH = spanZ * scale;
-            float drawL = padL; // reach the left edge of the plot region
+            float drawL = padL + Math.max(0f, (plotW - drawW) / 2f); // center the tracking window
             float drawT = padT; // tight to the top
 
             float zoneL = mapX(-zoneHalfWidth, xMin, xMax, drawL, drawW);
@@ -19994,8 +19994,8 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             boolean bSecond = liveAb ? game.onSecond : (ab != null && ab.onSecond);
             boolean bThird = liveAb ? game.onThird : (ab != null && ab.onThird);
             BaseDiamondView dia = new BaseDiamondView(this, bFirst, bSecond, bThird, abBatColor);
-            LinearLayout.LayoutParams diaLp = new LinearLayout.LayoutParams(dp(38), dp(38));
-            diaLp.gravity = Gravity.CENTER_HORIZONTAL; diaLp.setMargins(0, 0, 0, dp(1));
+            LinearLayout.LayoutParams diaLp = new LinearLayout.LayoutParams(dp(36), dp(36));
+            diaLp.gravity = Gravity.CENTER_HORIZONTAL; diaLp.setMargins(0, -dp(2), 0, 0);
             center.addView(dia, diaLp);
             // outs — 3 dots
             LinearLayout outsRow = new LinearLayout(this);
@@ -20012,7 +20012,9 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 LinearLayout.LayoutParams dl = new LinearLayout.LayoutParams(dp(6), dp(6)); dl.setMargins(dp(2), 0, dp(2), 0);
                 outsRow.addView(dot, dl);
             }
-            center.addView(outsRow, matchWrap());
+            LinearLayout.LayoutParams outsLp = matchWrap();
+            outsLp.setMargins(0, -dp(1), 0, 0);
+            center.addView(outsRow, outsLp);
 
         }
         matchRow.addView(center, new LinearLayout.LayoutParams(0, -2, 1.2f));
@@ -20027,7 +20029,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             LinearLayout abNav = new LinearLayout(this);
             abNav.setOrientation(LinearLayout.VERTICAL);
             abNav.setGravity(Gravity.CENTER_HORIZONTAL);
-            LinearLayout.LayoutParams abLp = matchWrap(); abLp.setMargins(0, -dp(2), 0, dp(1));
+            LinearLayout.LayoutParams abLp = matchWrap(); abLp.setMargins(0, -dp(4), 0, 0);
             // title row
             // v373: remove the historical AB inning/score + batter-vs-pitcher header. It restated
             // information already shown by the scoreboard and portraits, caused a height jump when
@@ -20053,11 +20055,11 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             zoneRow.setGravity(Gravity.TOP);
             zoneRow.setClipChildren(false);
             zoneRow.setClipToPadding(false);
-            // v378: preserve the expanded pitch-tracking runway, but keep the count/bases/outs
-            // and pitcher line fully above it. The top metadata is tightened so this extra canvas
-            // does not need to sit underneath the header.
-            int trackingTopRunway = dp(18);
-            LinearLayout.LayoutParams zrLp = matchWrap(); zrLp.setMargins(-dp(8), 0, -dp(2), 0);
+            // v379: keep the count anchored, tighten the bases/outs/pitcher line beneath it, and
+            // reclaim those pixels as real tracking runway. The tracker tucks closer to the pitcher
+            // line without putting the metadata inside the dashed tracking area.
+            int trackingTopRunway = dp(22);
+            LinearLayout.LayoutParams zrLp = matchWrap(); zrLp.setMargins(-dp(8), -dp(2), -dp(2), 0);
             int zoneH = dp(264);
             int zoneCanvasH = zoneH + trackingTopRunway;
             StrikeZoneView zone = new StrikeZoneView(this, ab.pitches, ab, strikeZoneBoundsForFeed(feed));
@@ -20099,8 +20101,8 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             int screenW = getResources().getDisplayMetrics().widthPixels;
             // Rail hugs the right edge: just wide enough for the dot + "Swinging Strike" on one line,
             // and no more, so the plot gets every other pixel. Flush to the card's right edge.
-            int railW = Math.min(dp(104), Math.max(dp(96), screenW * 24 / 100));
-            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(railW, zoneCanvasH); lgLp.setMargins(dp(4), 0, -dp(10), 0);
+            int railW = Math.min(dp(98), Math.max(dp(90), screenW * 22 / 100));
+            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(railW, zoneCanvasH); lgLp.setMargins(dp(1), 0, -dp(12), 0);
             zoneRow.addView(legendClip, lgLp);
             card.addView(zoneRow, zrLp);
 
