@@ -77,7 +77,7 @@ public class MainActivity extends Activity {
     // ===== TEMP PREVIEW: treat completed games as live so the live tracker design can be
     // reviewed against real data. Set back to false to restore normal behavior. (v277) =====
     static boolean DEBUG_FORCE_LIVE = true;
-    static boolean DEBUG_TRACKING_WINDOW = true; // v375: show full pitch-tracking window bounds
+    static boolean DEBUG_TRACKING_WINDOW = false; // v375: show full pitch-tracking window bounds
     private enum StatScope { HIT_ONLY, PITCH_ONLY, BOTH }
     private static final int STATCAST_START_YEAR = 2015;
     private static boolean isDark = false;          // dark mode toggle – static survives recreate()
@@ -826,7 +826,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v383", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v385", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -19995,7 +19995,9 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             boolean bThird = liveAb ? game.onThird : (ab != null && ab.onThird);
             BaseDiamondView dia = new BaseDiamondView(this, bFirst, bSecond, bThird, abBatColor);
             LinearLayout.LayoutParams diaLp = new LinearLayout.LayoutParams(dp(44), dp(44));
-            diaLp.gravity = Gravity.CENTER_HORIZONTAL; diaLp.setMargins(0, -dp(3), 0, 0);
+            // v385: move the bases+outs block upward as a unit so it sits centered between the
+            // count and pitcher line. Keep the base size unchanged.
+            diaLp.gravity = Gravity.CENTER_HORIZONTAL; diaLp.setMargins(0, -dp(7), 0, 0);
             center.addView(dia, diaLp);
             // outs — 3 dots
             LinearLayout outsRow = new LinearLayout(this);
@@ -20723,8 +20725,9 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         }
         if (data.isEmpty()) return null;
 
-        // v383: moving context feed only. No static row. De-dupe card types, then duplicate the strip
-        // once inside a single HorizontalScrollView so it can auto-scroll seamlessly.
+        // v384: one moving context feed, not a doubled seamless ticker. The previous loop duplicated
+        // the card strip and could visually layer card copies during live rebuilds. This keeps exactly
+        // one row of cards and gently scrolls it; when it reaches the end, it snaps back cleanly.
         java.util.LinkedHashMap<String, GameContextCard> uniqueCards = new java.util.LinkedHashMap<>();
         for (GameContextCard c : data) {
             String id = gameContextCardId(c);
@@ -20741,32 +20744,21 @@ private View liveGameCard(LiveGame game, int slateIndex) {
 
         LinearLayout strip = new LinearLayout(this);
         strip.setOrientation(LinearLayout.HORIZONTAL);
-        strip.setClipChildren(false);
-        strip.setClipToPadding(false);
+        strip.setClipChildren(true);
+        strip.setClipToPadding(true);
 
         int limit = Math.min(6, data.size());
-        boolean autoLoop = limit >= 2;
-        int loops = autoLoop ? 2 : 1;
-        final int[] cycleWidthPx = new int[] { 0 };
-
-        for (int loop = 0; loop < loops; loop++) {
-            for (int i = 0; i < limit; i++) {
-                GameContextCard c = data.get(i);
-                int cardW = gameContextCardWidth(c);
-                int leftMargin = (loop == 0 && i == 0) ? 0 : dp(8);
-                LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(cardW, dp(104));
-                clp.setMargins(leftMargin, 0, 0, 0);
-                strip.addView(insightCard(c.eyebrow, c.headline, c.subline, c.accent), clp);
-                if (loop == 0) cycleWidthPx[0] += leftMargin + cardW;
-            }
+        for (int i = 0; i < limit; i++) {
+            GameContextCard c = data.get(i);
+            int cardW = gameContextCardWidth(c);
+            int leftMargin = i == 0 ? 0 : dp(8);
+            LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(cardW, dp(104));
+            clp.setMargins(leftMargin, 0, 0, 0);
+            strip.addView(insightCard(c.eyebrow, c.headline, c.subline, c.accent), clp);
         }
 
         scroller.setMinimumHeight(dp(104));
         scroller.addView(strip, new FrameLayout.LayoutParams(-2, dp(104)));
-
-        if (cycleWidthPx[0] > 0 && liveContextCarouselScrollX > 0) {
-            scroller.scrollTo(liveContextCarouselScrollX % cycleWidthPx[0], 0);
-        }
 
         final boolean[] userHolding = new boolean[] { false };
         scroller.setOnTouchListener((v, ev) -> {
@@ -20774,46 +20766,33 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             int action = ev.getAction();
             if (action == android.view.MotionEvent.ACTION_DOWN || action == android.view.MotionEvent.ACTION_MOVE) {
                 userHolding[0] = true;
-                liveContextCarouselScrollX = scroller.getScrollX();
             } else if (action == android.view.MotionEvent.ACTION_UP || action == android.view.MotionEvent.ACTION_CANCEL) {
                 userHolding[0] = false;
-                liveContextCarouselScrollX = scroller.getScrollX();
                 v.getParent().requestDisallowInterceptTouchEvent(false);
             }
             return false;
         });
 
-        scroller.post(() -> {
-            if (cycleWidthPx[0] > 0) {
-                liveContextCarouselCycleWidth = cycleWidthPx[0];
-                int x = liveContextCarouselScrollX % cycleWidthPx[0];
-                if (x < 0) x += cycleWidthPx[0];
-                scroller.scrollTo(x, 0);
-            }
-        });
-
-        if (autoLoop) {
+        if (limit >= 2) {
             final Runnable[] auto = new Runnable[1];
             auto[0] = new Runnable() {
                 @Override public void run() {
                     if (scroller.getParent() == null) return;
-                    if (strip.getWidth() <= 0 || scroller.getWidth() <= 0 || cycleWidthPx[0] <= 0) {
-                        main.postDelayed(this, 120L);
+                    if (strip.getWidth() <= 0 || scroller.getWidth() <= 0) {
+                        main.postDelayed(this, 150L);
                         return;
                     }
-                    int cycleW = Math.max(1, cycleWidthPx[0]);
-                    if (scroller.getScrollX() >= cycleW) {
-                        scroller.scrollTo(scroller.getScrollX() - cycleW, 0);
-                    }
                     if (!userHolding[0]) {
-                        scroller.scrollBy(1, 0);
-                        liveContextCarouselScrollX = scroller.getScrollX();
-                        liveContextCarouselCycleWidth = cycleW;
+                        int maxX = Math.max(0, strip.getWidth() - scroller.getWidth());
+                        if (maxX > 0) {
+                            int next = scroller.getScrollX() + 1;
+                            scroller.scrollTo(next >= maxX ? 0 : next, 0);
+                        }
                     }
-                    main.postDelayed(this, 34L);
+                    main.postDelayed(this, 38L);
                 }
             };
-            scroller.postDelayed(auto[0], 250L);
+            scroller.postDelayed(auto[0], 450L);
         }
 
         return scroller;
