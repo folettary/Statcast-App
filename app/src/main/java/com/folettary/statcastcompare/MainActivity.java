@@ -826,7 +826,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v382", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v383", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20013,7 +20013,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 outsRow.addView(dot, dl);
             }
             LinearLayout.LayoutParams outsLp = matchWrap();
-            outsLp.setMargins(0, -dp(2), 0, 0);
+            outsLp.setMargins(0, -dp(5), 0, 0);
             center.addView(outsRow, outsLp);
 
         }
@@ -20723,8 +20723,8 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         }
         if (data.isEmpty()) return null;
 
-        // v382: true static context row. No duplicated ticker strip, no saved scroll offset, no
-        // overlaying moving/static layers. Show the top two unique cards as stable readable cards.
+        // v383: moving context feed only. No static row. De-dupe card types, then duplicate the strip
+        // once inside a single HorizontalScrollView so it can auto-scroll seamlessly.
         java.util.LinkedHashMap<String, GameContextCard> uniqueCards = new java.util.LinkedHashMap<>();
         for (GameContextCard c : data) {
             String id = gameContextCardId(c);
@@ -20733,18 +20733,90 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         data = new java.util.ArrayList<>(uniqueCards.values());
         if (data.isEmpty()) return null;
 
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setClipChildren(true);
-        row.setClipToPadding(true);
-        int limit = Math.min(2, data.size());
-        for (int i = 0; i < limit; i++) {
-            GameContextCard c = data.get(i);
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(104), 1f);
-            if (i > 0) lp.setMargins(dp(8), 0, 0, 0);
-            row.addView(insightCard(c.eyebrow, c.headline, c.subline, c.accent), lp);
+        HorizontalScrollView scroller = new HorizontalScrollView(this);
+        scroller.setHorizontalScrollBarEnabled(false);
+        scroller.setClipChildren(true);
+        scroller.setClipToPadding(true);
+        scroller.setPadding(0, 0, 0, 0);
+
+        LinearLayout strip = new LinearLayout(this);
+        strip.setOrientation(LinearLayout.HORIZONTAL);
+        strip.setClipChildren(false);
+        strip.setClipToPadding(false);
+
+        int limit = Math.min(6, data.size());
+        boolean autoLoop = limit >= 2;
+        int loops = autoLoop ? 2 : 1;
+        final int[] cycleWidthPx = new int[] { 0 };
+
+        for (int loop = 0; loop < loops; loop++) {
+            for (int i = 0; i < limit; i++) {
+                GameContextCard c = data.get(i);
+                int cardW = gameContextCardWidth(c);
+                int leftMargin = (loop == 0 && i == 0) ? 0 : dp(8);
+                LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(cardW, dp(104));
+                clp.setMargins(leftMargin, 0, 0, 0);
+                strip.addView(insightCard(c.eyebrow, c.headline, c.subline, c.accent), clp);
+                if (loop == 0) cycleWidthPx[0] += leftMargin + cardW;
+            }
         }
-        return row;
+
+        scroller.setMinimumHeight(dp(104));
+        scroller.addView(strip, new FrameLayout.LayoutParams(-2, dp(104)));
+
+        if (cycleWidthPx[0] > 0 && liveContextCarouselScrollX > 0) {
+            scroller.scrollTo(liveContextCarouselScrollX % cycleWidthPx[0], 0);
+        }
+
+        final boolean[] userHolding = new boolean[] { false };
+        scroller.setOnTouchListener((v, ev) -> {
+            v.getParent().requestDisallowInterceptTouchEvent(true);
+            int action = ev.getAction();
+            if (action == android.view.MotionEvent.ACTION_DOWN || action == android.view.MotionEvent.ACTION_MOVE) {
+                userHolding[0] = true;
+                liveContextCarouselScrollX = scroller.getScrollX();
+            } else if (action == android.view.MotionEvent.ACTION_UP || action == android.view.MotionEvent.ACTION_CANCEL) {
+                userHolding[0] = false;
+                liveContextCarouselScrollX = scroller.getScrollX();
+                v.getParent().requestDisallowInterceptTouchEvent(false);
+            }
+            return false;
+        });
+
+        scroller.post(() -> {
+            if (cycleWidthPx[0] > 0) {
+                liveContextCarouselCycleWidth = cycleWidthPx[0];
+                int x = liveContextCarouselScrollX % cycleWidthPx[0];
+                if (x < 0) x += cycleWidthPx[0];
+                scroller.scrollTo(x, 0);
+            }
+        });
+
+        if (autoLoop) {
+            final Runnable[] auto = new Runnable[1];
+            auto[0] = new Runnable() {
+                @Override public void run() {
+                    if (scroller.getParent() == null) return;
+                    if (strip.getWidth() <= 0 || scroller.getWidth() <= 0 || cycleWidthPx[0] <= 0) {
+                        main.postDelayed(this, 120L);
+                        return;
+                    }
+                    int cycleW = Math.max(1, cycleWidthPx[0]);
+                    if (scroller.getScrollX() >= cycleW) {
+                        scroller.scrollTo(scroller.getScrollX() - cycleW, 0);
+                    }
+                    if (!userHolding[0]) {
+                        scroller.scrollBy(1, 0);
+                        liveContextCarouselScrollX = scroller.getScrollX();
+                        liveContextCarouselCycleWidth = cycleW;
+                    }
+                    main.postDelayed(this, 34L);
+                }
+            };
+            scroller.postDelayed(auto[0], 250L);
+        }
+
+        return scroller;
     }
 
     private java.util.ArrayList<GameContextCard> buildGameContextCards(LiveGame game, LiveAtBat ab, TeamPalette awayPal, TeamPalette homePal) {
