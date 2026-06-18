@@ -77,7 +77,7 @@ public class MainActivity extends Activity {
     // ===== TEMP PREVIEW: treat completed games as live so the live tracker design can be
     // reviewed against real data. Set back to false to restore normal behavior. (v277) =====
     static boolean DEBUG_FORCE_LIVE = true;
-    static boolean DEBUG_TRACKING_WINDOW = false; // v375: show full pitch-tracking window bounds
+    static boolean DEBUG_TRACKING_WINDOW = true; // v375: show full pitch-tracking window bounds
     private enum StatScope { HIT_ONLY, PITCH_ONLY, BOTH }
     private static final int STATCAST_START_YEAR = 2015;
     private static boolean isDark = false;          // dark mode toggle – static survives recreate()
@@ -827,7 +827,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v392", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v393", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
