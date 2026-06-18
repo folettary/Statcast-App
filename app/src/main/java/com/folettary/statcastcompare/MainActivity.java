@@ -145,6 +145,7 @@ public class MainActivity extends Activity {
     private final Map<String, ArrayList<BitmapCallback>> preparedTeamLogoWaiters = Collections.synchronizedMap(new HashMap<>());
     private final Map<Integer, ArrayList<LeaderboardEntry>> leaderboardCache = Collections.synchronizedMap(new HashMap<>());
     private final Map<Integer, ArrayList<LeaderboardEntry>> pitchingLeaderboardCache = Collections.synchronizedMap(new HashMap<>());
+    private final java.util.Set<Integer> liveInsightWarmSeasons = java.util.Collections.synchronizedSet(new java.util.HashSet<>());
     // v149: stat QA pass - official team games are now used for team record/rate repair.
     // v139: align stat browsing categories with comparison presets.
     // v138: cache full 30-team season stat maps so team ranks/quality percentiles are
@@ -829,7 +830,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v395", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v396", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20902,14 +20903,17 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         java.util.ArrayList<GameContextCard> cards = new java.util.ArrayList<>();
         if (game == null) return cards;
 
+        // v396: Insight Engine v1. The carousel is locked; this only changes the card source.
+        // Standard: every primary card should contain a player/pitcher stat, a matchup collision,
+        // a run-expectancy delta, or a baseline comparison — not just the visible game state.
+        warmLiveInsightStats();
+
         boolean battingHome = battingTeamIsHome(game, ab);
-        String batAbbr = battingHome ? displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr)
-                                     : displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr);
-        String defAbbr = battingHome ? displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr)
-                                     : displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr);
         int batAccent = ensureReadableColor((battingHome ? homePal : awayPal) != null ? (battingHome ? homePal : awayPal).primary : neutralPalette().primary, 150);
         int defAccent = ensureReadableColor((battingHome ? awayPal : homePal) != null ? (battingHome ? awayPal : homePal).primary : neutralPalette().secondary, 150);
         int neutralAccent = Color.rgb(244, 207, 100);
+        int tealAccent = Color.rgb(120, 220, 207);
+        int orangeAccent = Color.rgb(255, 155, 92);
 
         int inning = game.sitInning > 0 ? game.sitInning : (ab == null ? 0 : ab.inning);
         int outs = Math.max(0, Math.min(3, game.sitOuts));
@@ -20919,145 +20923,320 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         int margin = liveScoreMargin(game);
         boolean close = margin >= 0 && margin <= 3;
         boolean late = inning >= 7;
-        boolean middleLate = inning >= 5;
+
         String baseOut = liveBaseOutSummary(game);
         String batterName = liveBatterName(game, ab);
         String pitcherName = livePitcherName(game, ab);
-        String batterLine = currentBatterLine(game, ab);
-        String pitcherLine = currentPitcherLine(game, ab);
+        String batLast = lastNameOnly(batterName);
+        String pitLast = lastNameOnly(pitcherName);
         int pitchCount = currentPitcherPitchCount(game, ab);
-        int halfTraffic = currentHalfTraffic(game, ab);
-        int recentHard = recentHardContactCount(game, 4);
+        int recentHard = recentHardContactCount(game, 5);
         LivePitch lastHard = latestHardContact(game);
+        LivePitch latest = latestPitchForAtBat(ab);
+
+        int balls = latest == null ? 0 : Math.max(0, latest.balls);
+        int strikes = latest == null ? 0 : Math.max(0, latest.strikes);
+        boolean livePa = latest != null && ab != null && !ab.complete;
+        boolean threeBall = livePa && balls >= 3;
+        boolean twoStrike = livePa && strikes >= 2;
+        boolean hitterAhead = livePa && (balls - strikes >= 2 || (balls >= 3 && strikes <= 1));
+        boolean pitcherAhead = livePa && (strikes - balls >= 1 || (strikes >= 2 && balls <= 1));
+
+        Stats batStats = cachedLiveHitterStats(game, ab);
+        Stats pitStats = cachedLivePitcherStats(game, ab);
+        java.util.HashSet<String> used = new java.util.HashSet<>();
+
+        Double batObp = liveStat(batStats, "obp", "xOBP");
+        Double batSlg = liveStat(batStats, "xSLG", "slg");
+        Double batXwoba = liveStat(batStats, "xwOBA", "wOBA");
+        Double batBb = liveStat(batStats, "bbPct");
+        Double batK = liveStat(batStats, "kPct");
+        Double batWhiff = liveStat(batStats, "whiffPct");
+        Double batChase = liveStat(batStats, "chasePct");
+        Double batZoneContact = liveStat(batStats, "zoneContactPct", "izContactPct");
+        Double batHard = liveStat(batStats, "hardHitPct");
+        Double batBarrel = liveStat(batStats, "barrelPct");
+        Double batGb = liveStat(batStats, "gbPct");
+
+        Double pitK = liveStat(pitStats, "pitchKPct");
+        Double pitBb = liveStat(pitStats, "pitchBBPct");
+        Double pitKbb = liveStat(pitStats, "pitchKMinusBBPct");
+        Double pitWhiff = liveStat(pitStats, "pWhiffPct");
+        Double pitChase = liveStat(pitStats, "pChasePct");
+        Double pitHard = liveStat(pitStats, "pHardHitPct");
+        Double pitBarrel = liveStat(pitStats, "pBarrelPct");
+        Double pitXwoba = liveStat(pitStats, "pxwOBA", "pwOBA");
+        Double pitAvgEv = liveStat(pitStats, "pAvgEV");
+
+        // Count-specific cards use the exact count as the trigger, but only show when backed by
+        // season profile stats. This is a stepping stone until true count-split tables are added.
+        if (threeBall && (batObp != null || batBb != null)) {
+            String head = !batLast.isEmpty() && batObp != null ? batLast + " " + liveRate(batObp) + " OBP"
+                    : (!batLast.isEmpty() && batBb != null ? batLast + " " + livePct(batBb) + " BB" : livePct(batBb) + " BB profile");
+            String sub = (balls + "-" + strikes) + " spot"
+                    + (batBb != null ? " · season " + livePct(batBb) + " BB" : " · season on-base profile");
+            addInsightCard(cards, used, 134, "COUNT EDGE", head, sub, batAccent);
+        }
+
+        if (threeBall && pitBb != null) {
+            String head = (!pitLast.isEmpty() ? pitLast + " " : "") + livePct(pitBb) + " BB rate";
+            String sub = (balls + "-" + strikes) + " count · pitcher walk profile";
+            addInsightCard(cards, used, 130, "WALK PROFILE", head, sub, defAccent);
+        }
+
+        if (twoStrike && pitK != null) {
+            String head = (!pitLast.isEmpty() ? pitLast + " " : "") + livePct(pitK) + " K rate";
+            String sub = (pitWhiff != null ? livePct(pitWhiff) + " whiff · " : "") + "two-strike spot";
+            addInsightCard(cards, used, 132, "PUT-AWAY PROFILE", head, sub, defAccent);
+        }
+
+        if (twoStrike && (batK != null || batWhiff != null || batZoneContact != null)) {
+            String head = batK != null ? (!batLast.isEmpty() ? batLast + " " : "") + livePct(batK) + " K rate"
+                    : (batWhiff != null ? (!batLast.isEmpty() ? batLast + " " : "") + livePct(batWhiff) + " whiff"
+                    : (!batLast.isEmpty() ? batLast + " " : "") + livePct(batZoneContact) + " zone contact");
+            String sub = "Two-strike profile"
+                    + (batWhiff != null && batK != null ? " · " + livePct(batWhiff) + " whiff" : "");
+            addInsightCard(cards, used, 126, "BATTER SURVIVAL", head, sub, batAccent);
+        }
+
+        if (hitterAhead && (batSlg != null || batXwoba != null || batHard != null)) {
+            String head = batSlg != null ? (!batLast.isEmpty() ? batLast + " " : "") + liveRate(batSlg) + " xSLG"
+                    : (batXwoba != null ? (!batLast.isEmpty() ? batLast + " " : "") + liveRate(batXwoba) + " xwOBA"
+                    : (!batLast.isEmpty() ? batLast + " " : "") + livePct(batHard) + " hard-hit");
+            String sub = (balls + "-" + strikes) + " count · damage profile when pitcher attacks";
+            addInsightCard(cards, used, 124, "DAMAGE PROFILE", head, sub, batAccent);
+        }
+
+        if (pitcherAhead && (pitWhiff != null || pitChase != null || pitKbb != null)) {
+            String head = pitWhiff != null ? (!pitLast.isEmpty() ? pitLast + " " : "") + livePct(pitWhiff) + " whiff"
+                    : (pitChase != null ? (!pitLast.isEmpty() ? pitLast + " " : "") + livePct(pitChase) + " chase"
+                    : (!pitLast.isEmpty() ? pitLast + " " : "") + livePct(pitKbb) + " K-BB");
+            String sub = (balls + "-" + strikes) + " count · pitcher profile favors expansion";
+            addInsightCard(cards, used, 122, "CHASE PROFILE", head, sub, defAccent);
+        }
+
+        // Matchup collision cards: these are the most useful v1 cards because they combine both
+        // player profiles with the current situation.
+        if (twoStrike && batK != null && pitK != null) {
+            String head = "K rates stack up";
+            String sub = (!batLast.isEmpty() ? batLast + " " : "Batter ") + livePct(batK)
+                    + " · " + (!pitLast.isEmpty() ? pitLast + " " : "pitcher ") + livePct(pitK);
+            addInsightCard(cards, used, 128, "WHIFF COLLISION", head, sub, orangeAccent);
+        }
+
+        if ((hitterAhead || runners > 0 || close) && batHard != null && pitHard != null) {
+            String head = "Hard contact collision";
+            String sub = (!batLast.isEmpty() ? batLast + " " : "Bat ") + livePct(batHard)
+                    + " · " + (!pitLast.isEmpty() ? pitLast + " allows " : "P allows ") + livePct(pitHard);
+            addInsightCard(cards, used, 118, "CONTACT COLLISION", head, sub, orangeAccent);
+        }
+
+        if (threeBall && batBb != null && pitBb != null) {
+            String head = "Walk pressure stacked";
+            String sub = (!batLast.isEmpty() ? batLast + " " : "Bat ") + livePct(batBb)
+                    + " · " + (!pitLast.isEmpty() ? pitLast + " " : "P ") + livePct(pitBb) + " BB";
+            addInsightCard(cards, used, 127, "WALK COLLISION", head, sub, neutralAccent);
+        }
+
+        // Base/out stats: use run expectancy deltas so these are quantitative, not labels.
+        int baseMask = liveBaseMask(game);
+        double currentRe = runExpectancyValue(baseMask, outs);
+        double walkDelta = walkRunBonus(baseMask) + runExpectancyValue(walkBaseMask(baseMask), outs) - currentRe;
+        if ((threeBall || runners > 0 || close) && walkDelta >= 0.12d) {
+            addInsightCard(cards, used, 121, "RUN VALUE", "Walk " + liveSignedRunValue(walkDelta) + " RE", baseOut, neutralAccent);
+        }
+
+        if (outs < 3 && (risp || thirdLessThanTwo || twoStrike || close)) {
+            double outRe = outs >= 2 ? 0d : runExpectancyValue(baseMask, outs + 1);
+            double outDelta = outRe - currentRe;
+            if (outDelta <= -0.10d) {
+                addInsightCard(cards, used, 116, "OUT COST", "Out " + liveSignedRunValue(outDelta) + " RE", baseOut, neutralAccent);
+            }
+        }
+
+        if (game.onFirst && outs < 2 && batGb != null) {
+            String head = (!batLast.isEmpty() ? batLast + " " : "") + livePct(batGb) + " GB rate";
+            addInsightCard(cards, used, 114, "DP PROFILE", head, "Runner on 1st · fewer than 2 outs", batAccent);
+        }
+
+        if (thirdLessThanTwo && (batK != null || batZoneContact != null)) {
+            String head = batK != null ? (!batLast.isEmpty() ? batLast + " " : "") + livePct(batK) + " K rate"
+                    : (!batLast.isEmpty() ? batLast + " " : "") + livePct(batZoneContact) + " zone contact";
+            addInsightCard(cards, used, 113, "CONTACT PROFILE", head, "Runner on 3rd · fewer than 2 outs", batAccent);
+        }
+
+        // Current-game contact is allowed, but it has to connect to a profile stat or a measured trend.
+        if (recentHard >= 2 && (pitHard != null || batHard != null || lastHard != null)) {
+            String head = recentHard + " hard-hit BIP lately";
+            String sub = pitHard != null ? (!pitLast.isEmpty() ? pitLast + " allows " : "Pitcher allows ") + livePct(pitHard)
+                    : (batHard != null ? (!batLast.isEmpty() ? batLast + " " : "Batter ") + livePct(batHard) + " hard-hit"
+                    : Math.round(lastHard.exitVelo) + " mph latest EV");
+            addInsightCard(cards, used, 111, "CONTACT QUALITY", head, sub, orangeAccent);
+        }
+
+        if (pitchCount >= 75 && pitKbb != null) {
+            String head = (!pitLast.isEmpty() ? pitLast + " " : "") + livePct(pitKbb) + " K-BB";
+            String sub = pitchCount + " pitches · baseline command profile";
+            addInsightCard(cards, used, 104 + (pitchCount >= 90 ? 8 : 0), "HOOK WATCH", head, sub, tealAccent);
+        }
+
+        if (late && close && (batSlg != null || batBarrel != null || pitXwoba != null)) {
+            String head = batSlg != null ? (!batLast.isEmpty() ? batLast + " " : "") + liveRate(batSlg) + " xSLG"
+                    : (batBarrel != null ? (!batLast.isEmpty() ? batLast + " " : "") + livePct(batBarrel) + " barrel"
+                    : (!pitLast.isEmpty() ? pitLast + " " : "") + liveRate(pitXwoba) + " xwOBA allowed");
+            String sub = "Late close game · one swing has leverage";
+            addInsightCard(cards, used, 106, "LEVERAGE BAT", head, sub, batAccent);
+        }
+
         float lastWpSwing = latestWinProbSwing(game);
         String lastBigPlay = latestWinProbDescription(game);
-        boolean stress = runners >= 2 || (runners > 0 && outs < 2) || pitchCount >= 75 || halfTraffic >= 3;
-
-        // Highest-leverage live situations — display the actual base/out/score evidence first.
-        if ((late && close) || (close && risp) || (inning >= 6 && runners >= 2)) {
-            String head = baseOut;
-            String why = (margin >= 0 ? "Margin " + margin + " · " : "")
-                    + (batterName.isEmpty() ? "current matchup matters" : lastNameOnly(batterName) + " up");
-            cards.add(new GameContextCard(120 + runners * 8 + (late ? 12 : 0), "PRESSURE SPOT", head, why, batAccent));
-        }
-
-        // Runner(s) in scoring position or multiple runners on.
-        if (risp || runners >= 2) {
-            String head = baseOut;
-            String why = !batterLine.isEmpty() ? lastNameOnly(batterName) + " today: " + batterLine
-                    : (!batterName.isEmpty() ? lastNameOnly(batterName) + " up" : batAbbr + " chance");
-            cards.add(new GameContextCard(108 + runners * 10 + (thirdLessThanTwo ? 10 : 0), "TRAFFIC THREAT", head, why, batAccent));
-        }
-
-        // Specific baseball situation: runner on third with fewer than two outs.
-        if (thirdLessThanTwo) {
-            String head = "Runner on 3rd · " + outs + " out" + (outs == 1 ? "" : "s");
-            String why = outs == 0 ? "Contact can score a run without a hit"
-                                   : "Contact still matters before two outs";
-            cards.add(new GameContextCard(116, "CONTACT NEEDED", head, why, batAccent));
-        }
-
-        // Current count leverage from the latest pitch.
-        LivePitch latest = latestPitchForAtBat(ab);
-        if (latest != null && ab != null && !ab.complete) {
-            String count = latest.balls + "-" + latest.strikes;
-            if (latest.balls >= 3 && latest.strikes <= 1) {
-                cards.add(new GameContextCard(104, "HITTER COUNT", count + " count", (batterName.isEmpty() ? "Batter" : lastNameOnly(batterName)) + " ahead · walk risk", batAccent));
-            } else if (latest.strikes >= 2 && latest.balls <= 1) {
-                cards.add(new GameContextCard(102, "PUT-AWAY SPOT", count + " count", (pitcherName.isEmpty() ? "Pitcher" : lastNameOnly(pitcherName)) + " can defuse it", defAccent));
-            } else if (latest.balls == 3 && latest.strikes == 2) {
-                cards.add(new GameContextCard(106, "FULL COUNT", count + " payoff pitch", "Runner movement/base state can flip", neutralAccent));
-            }
-        }
-
-        // Pitcher stress: traffic, pitch count, repeated baserunners in the inning.
-        if (stress && !pitcherName.isEmpty()) {
-            StringBuilder why = new StringBuilder();
-            if (pitchCount > 0) why.append(pitchCount).append(" pitches");
-            if (halfTraffic >= 3) {
-                if (why.length() > 0) why.append(" · ");
-                why.append("traffic in this half-inning");
-            } else if (runners > 0) {
-                if (why.length() > 0) why.append(" · ");
-                why.append(baseOut);
-            }
-            if (why.length() == 0 && !pitcherLine.isEmpty()) why.append(pitcherLine);
-            String head = pitchCount > 0 ? pitchCount + " pitches" : baseOut;
-            String sub = !pitcherLine.isEmpty() ? pitcherLine : why.toString();
-            cards.add(new GameContextCard(98 + runners * 6 + (pitchCount >= 85 ? 10 : 0), "PITCHER STRESS", head, sub, defAccent));
-        }
-
-        // Bullpen decision starts appearing as the game gets into starter-change territory.
-        if (middleLate && close && (stress || pitchCount >= 70 || inning >= 6)) {
-            String why = inning >= 7 ? "Late close game · leverage arms may decide it"
-                                     : "Starter-change window approaching";
-            String head = pitchCount > 0 ? pitchCount + " pitches" : liveInningHeroLabel(game);
-            cards.add(new GameContextCard(90 + (late ? 12 : 0), "BULLPEN DECISION", head, why, Color.rgb(120, 220, 207)));
-        }
-
-        // Late-game edge is different from bullpen decision: it frames the whole endgame.
-        if (late && close) {
-            String head = margin == 0 ? "Tie game" : "Margin " + margin;
-            cards.add(new GameContextCard(88, "LATE GAME EDGE", head + " · " + liveInningHeroLabel(game), baseOut, Color.rgb(120, 220, 207)));
-        }
-
-        // Recent hard contact from the actual live feed.
-        if (recentHard >= 2) {
-            String head = recentHard + " recent hard-hit BIP";
-            String why = lastHard != null && !Double.isNaN(lastHard.exitVelo) ? Math.round(lastHard.exitVelo) + " mph latest EV" : "95+ mph contact trend";
-            cards.add(new GameContextCard(86, "HARD CONTACT", head, why, Color.rgb(255, 155, 92)));
-        } else if (lastHard != null && !Double.isNaN(lastHard.exitVelo) && lastHard.exitVelo >= 100d) {
-            cards.add(new GameContextCard(84, "LOUD CONTACT", Math.round(lastHard.exitVelo) + " mph EV", "Recent ball in play was hit hard", Color.rgb(255, 155, 92)));
-        }
-
-        // Win probability / momentum. This stays in the strip, but with a "so what" framing.
-        if (game.wpHomeSeries != null && !game.wpHomeSeries.isEmpty()) {
-            float homeWp = game.wpHomeSeries.get(game.wpHomeSeries.size() - 1);
-            int homePct = Math.round(homeWp);
-            String fav = homePct >= 50 ? displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr)
-                                       : displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr);
-            int favPct = homePct >= 50 ? homePct : (100 - homePct);
-            String why = close ? "Margin " + margin + " · " + liveInningHeroLabel(game) : liveInningHeroLabel(game) + " · live win path";
-            cards.add(new GameContextCard(74, "WIN PATH", fav + " " + favPct + "%", why, neutralAccent));
-        }
         if (!Float.isNaN(lastWpSwing) && lastWpSwing >= 8f) {
-            String head = "Last swing " + Math.round(lastWpSwing) + " pts";
             String why = safe(lastBigPlay);
             if (why.length() > 58) why = why.substring(0, 56) + "…";
             if (why.isEmpty()) why = "Recent play meaningfully moved the game";
-            cards.add(new GameContextCard(92, "MOMENTUM SWING", head, why, neutralAccent));
+            addInsightCard(cards, used, 103, "WPA SWING", "Last swing " + Math.round(lastWpSwing) + " pts", why, neutralAccent);
         }
 
-        // Current batter/pitcher cards now only appear when they add context to a live situation.
-        if (runners > 0 && !batterName.isEmpty() && !batterLine.isEmpty()) {
-            cards.add(new GameContextCard(70, "BATTER CONTEXT", lastNameOnly(batterName), "today: " + batterLine, batAccent));
+        // Fill to at least five when possible using stat-backed profiles, not obvious labels.
+        if (cards.size() < 5 && batXwoba != null) {
+            addInsightCard(cards, used, 64, "BATTER BASELINE", (!batLast.isEmpty() ? batLast + " " : "") + liveRate(batXwoba) + " xwOBA", "Season quality of contact/on-base profile", batAccent);
         }
-        if ((stress || inning >= 6) && !pitcherName.isEmpty() && !pitcherLine.isEmpty()) {
-            cards.add(new GameContextCard(68, "MOUND CONTEXT", lastNameOnly(pitcherName), pitcherLine, defAccent));
+        if (cards.size() < 5 && batHard != null) {
+            addInsightCard(cards, used, 62, "HARD-HIT BASE", (!batLast.isEmpty() ? batLast + " " : "") + livePct(batHard) + " hard-hit", "Season batted-ball profile", batAccent);
+        }
+        if (cards.size() < 5 && pitXwoba != null) {
+            addInsightCard(cards, used, 60, "PITCHER BASELINE", (!pitLast.isEmpty() ? pitLast + " " : "") + liveRate(pitXwoba) + " xwOBA", "Season contact allowed profile", defAccent);
+        }
+        if (cards.size() < 5 && pitWhiff != null) {
+            addInsightCard(cards, used, 58, "WHIFF BASELINE", (!pitLast.isEmpty() ? pitLast + " " : "") + livePct(pitWhiff) + " whiff", "Season swing-miss profile", defAccent);
+        }
+        if (cards.size() < 5 && pitAvgEv != null) {
+            addInsightCard(cards, used, 56, "EV ALLOWED", liveOneDecimal(pitAvgEv) + " mph avg EV", (!pitLast.isEmpty() ? pitLast : "Pitcher") + " season contact allowed", defAccent);
+        }
+        if (cards.size() < 5 && currentRe > 0.05d) {
+            addInsightCard(cards, used, 54, "BASE-OUT VALUE", liveOneDecimal(currentRe) + " expected runs", baseOut, neutralAccent);
         }
 
-        // Between-inning / next-wave context. Pulls out during normal AB action unless due-up matters.
-        String st = safe(game.sitInningState).toLowerCase(Locale.US);
-        boolean betweenInnings = st.contains("middle") || st.contains("end");
-        if (betweenInnings && game.dueUp != null && !game.dueUp.isEmpty()) {
-            StringBuilder names = new StringBuilder();
-            for (int i = 0; i < Math.min(3, game.dueUp.size()); i++) {
-                if (names.length() > 0) names.append(", ");
-                names.append(game.dueUp.get(i).name);
-            }
-            cards.add(new GameContextCard(82, "NEXT WAVE", names.toString(), liveInningHeroLabel(game), batAccent));
-        }
-
-        // Stable fallback: never show box-score totals, but always keep at least one contextual card.
+        // Last resort: if stat caches are still warming, keep one honest card rather than filling
+        // with shallow observations. The feed will replace it as soon as cached stats arrive.
         if (cards.isEmpty()) {
-            String head = inning > 0 ? liveInningHeroLabel(game) : "Game context";
-            String why = ab != null && !safe(ab.batter).isEmpty()
-                    ? lastNameOnly(ab.batter) + " vs " + lastNameOnly(ab.pitcher)
-                    : baseOut;
-            cards.add(new GameContextCard(10, "GAME CONTEXT", head, why, neutralAccent));
+            String head = "Advanced cards loading";
+            String sub = livePa ? (balls + "-" + strikes) + " · waiting on split/profile cache" : "waiting on split/profile cache";
+            addInsightCard(cards, used, 10, "INSIGHT ENGINE", head, sub, neutralAccent);
         }
 
+        java.util.Collections.sort(cards, (a, b) -> b.priority - a.priority);
         return cards;
+    }
+
+    private void warmLiveInsightStats() {
+        final int season = currentSeason();
+        if (leaderboardCache.get(season) != null && pitchingLeaderboardCache.get(season) != null) return;
+        if (!liveInsightWarmSeasons.add(season)) return;
+        fanout.submit(() -> {
+            try { fetchLeaderboard(season); } catch (Exception ignored) {}
+            try { fetchPitchingLeaderboard(season); } catch (Exception ignored) {}
+        });
+    }
+
+    private Stats cachedLiveHitterStats(LiveGame game, LiveAtBat ab) {
+        int id = game != null && game.sitBatterId > 0 ? game.sitBatterId : (ab == null ? 0 : ab.batterId);
+        return cachedStatsByPlayerId(leaderboardCache.get(currentSeason()), id);
+    }
+
+    private Stats cachedLivePitcherStats(LiveGame game, LiveAtBat ab) {
+        int id = game != null && game.sitPitcherId > 0 ? game.sitPitcherId : (ab == null ? 0 : ab.pitcherId);
+        return cachedStatsByPlayerId(pitchingLeaderboardCache.get(currentSeason()), id);
+    }
+
+    private Stats cachedStatsByPlayerId(java.util.ArrayList<LeaderboardEntry> entries, int playerId) {
+        if (playerId <= 0 || entries == null) return null;
+        for (LeaderboardEntry e : entries) {
+            if (e != null && e.playerId == playerId) return e.stats;
+        }
+        return null;
+    }
+
+    private Double liveStat(Stats s, String... keys) {
+        if (s == null || keys == null) return null;
+        for (String k : keys) {
+            if (k == null) continue;
+            Double v = s.get(k);
+            if (v != null && !Double.isNaN(v)) return v;
+        }
+        return null;
+    }
+
+    private void addInsightCard(java.util.ArrayList<GameContextCard> cards, java.util.HashSet<String> used, int priority, String eyebrow, String headline, String subline, int accent) {
+        String id = safe(eyebrow).toUpperCase(Locale.US);
+        if (cards == null || used == null || id.isEmpty() || used.contains(id)) return;
+        String head = safe(headline);
+        String sub = safe(subline);
+        if (head.isEmpty()) return;
+        used.add(id);
+        cards.add(new GameContextCard(priority, id, head, sub, accent));
+    }
+
+    private String livePct(Double v) {
+        if (v == null || Double.isNaN(v)) return "";
+        double x = v;
+        if (Math.abs(x) <= 1.0d) x *= 100d;
+        return String.format(Locale.US, "%.1f%%", x);
+    }
+
+    private String liveRate(Double v) {
+        if (v == null || Double.isNaN(v)) return "";
+        double x = v;
+        if (x > 10d) x = x / 1000d;
+        String s = String.format(Locale.US, "%.3f", x);
+        return s.startsWith("0") ? s.substring(1) : s;
+    }
+
+    private String liveOneDecimal(Double v) {
+        if (v == null || Double.isNaN(v)) return "";
+        return String.format(Locale.US, "%.1f", v);
+    }
+
+    private String liveSignedRunValue(double v) {
+        return (v >= 0 ? "+" : "") + String.format(Locale.US, "%.2f", v);
+    }
+
+    private int liveBaseMask(LiveGame game) {
+        if (game == null) return 0;
+        int mask = 0;
+        if (game.onFirst) mask |= 1;
+        if (game.onSecond) mask |= 2;
+        if (game.onThird) mask |= 4;
+        return mask;
+    }
+
+    private int walkBaseMask(int mask) {
+        boolean first = (mask & 1) != 0;
+        boolean second = (mask & 2) != 0;
+        boolean third = (mask & 4) != 0;
+        boolean newFirst = true;
+        boolean newSecond = second || first;
+        boolean newThird = third || (first && second);
+        int out = 0;
+        if (newFirst) out |= 1;
+        if (newSecond) out |= 2;
+        if (newThird) out |= 4;
+        return out;
+    }
+
+    private double walkRunBonus(int mask) {
+        return mask == 7 ? 1.0d : 0.0d;
+    }
+
+    private double runExpectancyValue(int mask, int outs) {
+        outs = Math.max(0, Math.min(2, outs));
+        mask = Math.max(0, Math.min(7, mask));
+        final double[][] re = new double[][] {
+                {0.50d, 0.90d, 1.15d, 1.50d, 1.35d, 1.75d, 2.05d, 2.25d},
+                {0.27d, 0.53d, 0.68d, 0.90d, 0.95d, 1.15d, 1.35d, 1.55d},
+                {0.10d, 0.22d, 0.32d, 0.43d, 0.38d, 0.47d, 0.55d, 0.75d}
+        };
+        return re[outs][mask];
     }
 
     private boolean battingTeamIsHome(LiveGame game, LiveAtBat ab) {
