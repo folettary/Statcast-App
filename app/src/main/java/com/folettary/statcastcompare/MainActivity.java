@@ -325,6 +325,7 @@ public class MainActivity extends Activity {
     private int liveContextCarouselGamePk = -1;                 // v358: preserve ticker continuity across tracker rebuilds
     private int liveContextCarouselScrollX = 0;
     private int liveContextCarouselCycleWidth = 0;
+    private long liveContextTickerEpochMs = 0L;
     private final java.util.ArrayList<GameContextCard> liveContextCarouselStableCards = new java.util.ArrayList<>();
 
     private View gameHubTabBarView = null;                   // v301: tab bar, to snap to on tab switch
@@ -826,7 +827,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v389", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v390", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20676,6 +20677,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             liveContextCarouselGamePk = gamePk;
             liveContextCarouselScrollX = 0;
             liveContextCarouselCycleWidth = 0;
+            liveContextTickerEpochMs = android.os.SystemClock.uptimeMillis();
             liveContextCarouselStableCards.clear();
         }
 
@@ -20725,102 +20727,170 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         }
         if (data.isEmpty()) return null;
 
-        // v389: true no-layer context feed.
-        // Audit finding: even a single horizontal strip still made several partial cards/text runs
-        // visible at once, which looked layered. This version removes the strip entirely.
-        // It shows exactly one full-width context card at rest, then slides to the next full-width
-        // card. No duplicate card copies, no adjacent partial cards, no saved offset, no static layer.
+        // v390: slow continuous game-context ticker, drawn as ONE canvas view.
+        // This avoids layered child views while preserving the original feel: variable-width cards,
+        // multiple cards visible as needed, and a steady leftward crawl.
         java.util.LinkedHashMap<String, GameContextCard> uniqueCards = new java.util.LinkedHashMap<>();
         for (GameContextCard c : data) {
             String id = gameContextCardId(c);
             if (!uniqueCards.containsKey(id)) uniqueCards.put(id, c);
         }
-        data = new java.util.ArrayList<>(uniqueCards.values());
-        if (data.isEmpty()) return null;
+        final java.util.ArrayList<GameContextCard> cards = new java.util.ArrayList<>(uniqueCards.values());
+        if (cards.isEmpty()) return null;
+        while (cards.size() > 6) cards.remove(cards.size() - 1);
+
+        if (liveContextTickerEpochMs <= 0L) liveContextTickerEpochMs = android.os.SystemClock.uptimeMillis();
 
         final int rowH = dp(104);
-        final java.util.ArrayList<GameContextCard> cards = new java.util.ArrayList<>();
-        int limit = Math.min(6, data.size());
-        for (int i = 0; i < limit; i++) cards.add(data.get(i));
-
-        final FrameLayout viewport = new FrameLayout(this);
-        viewport.setClipChildren(true);
-        viewport.setClipToPadding(true);
-        viewport.setPadding(0, 0, 0, 0);
-        viewport.setMinimumHeight(rowH);
-
-        GameContextCard first = cards.get(0);
-        View firstCard = insightCard(first.eyebrow, first.headline, first.subline, first.accent);
-        viewport.addView(firstCard, new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, rowH));
-
-        if (cards.size() >= 2 && animationsAllowed) {
-            final int[] current = new int[] { 0 };
-            final boolean[] holding = new boolean[] { false };
-            final boolean[] animating = new boolean[] { false };
-
-            viewport.setOnTouchListener((v, ev) -> {
-                int action = ev.getAction();
-                if (action == android.view.MotionEvent.ACTION_DOWN || action == android.view.MotionEvent.ACTION_MOVE) {
-                    holding[0] = true;
-                } else if (action == android.view.MotionEvent.ACTION_UP || action == android.view.MotionEvent.ACTION_CANCEL) {
-                    holding[0] = false;
-                }
-                return true;
-            });
-
-            viewport.post(() -> {
-                final Runnable[] auto = new Runnable[1];
-                auto[0] = new Runnable() {
-                    @Override public void run() {
-                        if (viewport.getParent() == null) return;
-                        if (holding[0] || animating[0] || viewport.getWidth() <= 0) {
-                            main.postDelayed(this, 450L);
-                            return;
-                        }
-
-                        final int nextIndex = (current[0] + 1) % cards.size();
-                        final GameContextCard c = cards.get(nextIndex);
-                        final View oldCard = viewport.getChildCount() > 0 ? viewport.getChildAt(0) : null;
-                        final View nextCard = insightCard(c.eyebrow, c.headline, c.subline, c.accent);
-                        final int w = Math.max(1, viewport.getWidth());
-
-                        nextCard.setTranslationX(w);
-                        viewport.addView(nextCard, new FrameLayout.LayoutParams(
-                                FrameLayout.LayoutParams.MATCH_PARENT, rowH));
-
-                        animating[0] = true;
-                        if (oldCard != null) {
-                            oldCard.animate()
-                                    .translationX(-w)
-                                    .alpha(0.98f)
-                                    .setDuration(420)
-                                    .setInterpolator(new android.view.animation.DecelerateInterpolator())
-                                    .withEndAction(() -> {
-                                        if (oldCard.getParent() == viewport) viewport.removeView(oldCard);
-                                    })
-                                    .start();
-                        }
-
-                        nextCard.animate()
-                                .translationX(0f)
-                                .alpha(1f)
-                                .setDuration(420)
-                                .setInterpolator(new android.view.animation.DecelerateInterpolator())
-                                .withEndAction(() -> {
-                                    current[0] = nextIndex;
-                                    animating[0] = false;
-                                })
-                                .start();
-
-                        main.postDelayed(this, 3200L);
-                    }
-                };
-                main.postDelayed(auto[0], 2200L);
-            });
+        final int gap = dp(8);
+        final java.util.ArrayList<Integer> widths = new java.util.ArrayList<>();
+        int cycle = 0;
+        for (int i = 0; i < cards.size(); i++) {
+            int w = gameContextCardWidth(cards.get(i));
+            widths.add(w);
+            cycle += w + gap;
         }
+        final int cycleW = Math.max(1, cycle);
 
-        return viewport;
+        View ticker = new View(this) {
+            private final Paint fillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            private final Paint strokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            private final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            private final RectF rect = new RectF();
+            private boolean attached = false;
+
+            private float sp(float v) {
+                return v * getResources().getDisplayMetrics().scaledDensity;
+            }
+
+            private String fitText(String raw, Paint p, float maxW) {
+                String s = safe(raw).replace('\n', ' ').trim();
+                if (s.isEmpty()) return "";
+                if (p.measureText(s) <= maxW) return s;
+                String ell = "…";
+                float ellW = p.measureText(ell);
+                int end = s.length();
+                while (end > 0 && p.measureText(s, 0, end) + ellW > maxW) end--;
+                return end <= 0 ? ell : s.substring(0, end).trim() + ell;
+            }
+
+            private java.util.ArrayList<String> fitTwoLines(String raw, Paint p, float maxW) {
+                java.util.ArrayList<String> out = new java.util.ArrayList<>();
+                String s = safe(raw).replace('\n', ' ').trim();
+                if (s.isEmpty()) return out;
+                String[] words = s.split("\\s+");
+                String line = "";
+                int i = 0;
+                for (; i < words.length; i++) {
+                    String next = line.isEmpty() ? words[i] : line + " " + words[i];
+                    if (p.measureText(next) <= maxW) {
+                        line = next;
+                    } else {
+                        break;
+                    }
+                }
+                if (!line.isEmpty()) out.add(line);
+                StringBuilder rest = new StringBuilder();
+                for (; i < words.length; i++) {
+                    if (rest.length() > 0) rest.append(' ');
+                    rest.append(words[i]);
+                }
+                if (rest.length() > 0) out.add(fitText(rest.toString(), p, maxW));
+                if (out.isEmpty()) out.add(fitText(s, p, maxW));
+                while (out.size() > 2) out.remove(out.size() - 1);
+                return out;
+            }
+
+            private void drawCard(Canvas canvas, GameContextCard c, float x, float y, float w, float h) {
+                rect.set(x, y, x + w, y + h);
+                fillPaint.setStyle(Paint.Style.FILL);
+                fillPaint.setShader(new LinearGradient(x, y, x + w, y + h,
+                        Color.argb(46, Color.red(c.accent), Color.green(c.accent), Color.blue(c.accent)),
+                        Color.argb(14, Color.red(c.accent), Color.green(c.accent), Color.blue(c.accent)),
+                        Shader.TileMode.CLAMP));
+                canvas.drawRoundRect(rect, dp(14), dp(14), fillPaint);
+                fillPaint.setShader(null);
+
+                strokePaint.setStyle(Paint.Style.STROKE);
+                strokePaint.setStrokeWidth(dp(1));
+                strokePaint.setColor(Color.argb(112, Color.red(c.accent), Color.green(c.accent), Color.blue(c.accent)));
+                canvas.drawRoundRect(rect, dp(14), dp(14), strokePaint);
+
+                int save = canvas.save();
+                canvas.clipRect(x + dp(8), y + dp(6), x + w - dp(8), y + h - dp(6));
+
+                float tx = x + dp(10);
+                float maxTextW = Math.max(1f, w - dp(20));
+
+                textPaint.setShader(null);
+                textPaint.setTypeface(TYPE_BOLD);
+                textPaint.setTextSize(sp(7));
+                textPaint.setColor(c.accent);
+                textPaint.setLetterSpacing(0.18f);
+                canvas.drawText(fitText(c.eyebrow, textPaint, maxTextW), tx, y + dp(20), textPaint);
+
+                textPaint.setLetterSpacing(0f);
+                textPaint.setTypeface(TYPE_BOLD);
+                textPaint.setTextSize(sp(12));
+                textPaint.setColor(INK);
+                canvas.drawText(fitText(c.headline, textPaint, maxTextW), tx, y + dp(50), textPaint);
+
+                textPaint.setTypeface(TYPE_BOLD);
+                textPaint.setTextSize(sp(8));
+                textPaint.setColor(INK_DIM);
+                java.util.ArrayList<String> subLines = fitTwoLines(c.subline, textPaint, maxTextW);
+                if (subLines.size() > 0) canvas.drawText(subLines.get(0), tx, y + dp(75), textPaint);
+                if (subLines.size() > 1) canvas.drawText(subLines.get(1), tx, y + dp(89), textPaint);
+
+                canvas.restoreToCount(save);
+            }
+
+            @Override protected void onAttachedToWindow() {
+                super.onAttachedToWindow();
+                attached = true;
+                invalidate();
+            }
+
+            @Override protected void onDetachedFromWindow() {
+                attached = false;
+                super.onDetachedFromWindow();
+            }
+
+            @Override protected void onDraw(Canvas canvas) {
+                super.onDraw(canvas);
+                int vw = getWidth();
+                if (vw <= 0 || cards.isEmpty()) return;
+
+                canvas.save();
+                canvas.clipRect(0, 0, vw, rowH);
+
+                long now = android.os.SystemClock.uptimeMillis();
+                float speedPxPerMs = Math.max(0.012f, dp(8) / 1000f); // slow, steady crawl
+                float offset = cards.size() >= 2 ? ((now - liveContextTickerEpochMs) * speedPxPerMs) % cycleW : 0f;
+
+                float startX = -offset;
+                while (startX > 0) startX -= cycleW;
+
+                for (float cycleStart = startX; cycleStart < vw; cycleStart += cycleW) {
+                    float x = cycleStart;
+                    for (int i = 0; i < cards.size(); i++) {
+                        int w = widths.get(i);
+                        if (x < vw && x + w > 0) drawCard(canvas, cards.get(i), x, 0, w, rowH);
+                        x += w + gap;
+                    }
+                }
+
+                canvas.restore();
+
+                if (attached && cards.size() >= 2) {
+                    if (Build.VERSION.SDK_INT >= 16) postInvalidateOnAnimation();
+                    else postInvalidateDelayed(16L);
+                }
+            }
+        };
+        ticker.setMinimumHeight(rowH);
+        ticker.setClipToOutline(false);
+        return ticker;
     }
 
     private java.util.ArrayList<GameContextCard> buildGameContextCards(LiveGame game, LiveAtBat ab, TeamPalette awayPal, TeamPalette homePal) {
