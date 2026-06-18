@@ -826,7 +826,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v388", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v389", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20725,9 +20725,11 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         }
         if (data.isEmpty()) return null;
 
-        // v388: clean marquee context feed. One viewport, one strip, one copy of each card.
-        // No repeated cards, no seamless duplicate loop, no saved offset, no static layer.
-        // The strip scrolls left, fully exits, then restarts offscreen to the right.
+        // v389: true no-layer context feed.
+        // Audit finding: even a single horizontal strip still made several partial cards/text runs
+        // visible at once, which looked layered. This version removes the strip entirely.
+        // It shows exactly one full-width context card at rest, then slides to the next full-width
+        // card. No duplicate card copies, no adjacent partial cards, no saved offset, no static layer.
         java.util.LinkedHashMap<String, GameContextCard> uniqueCards = new java.util.LinkedHashMap<>();
         for (GameContextCard c : data) {
             String id = gameContextCardId(c);
@@ -20737,67 +20739,86 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         if (data.isEmpty()) return null;
 
         final int rowH = dp(104);
+        final java.util.ArrayList<GameContextCard> cards = new java.util.ArrayList<>();
+        int limit = Math.min(6, data.size());
+        for (int i = 0; i < limit; i++) cards.add(data.get(i));
+
         final FrameLayout viewport = new FrameLayout(this);
         viewport.setClipChildren(true);
         viewport.setClipToPadding(true);
         viewport.setPadding(0, 0, 0, 0);
         viewport.setMinimumHeight(rowH);
 
-        final LinearLayout strip = new LinearLayout(this);
-        strip.setOrientation(LinearLayout.HORIZONTAL);
-        strip.setClipChildren(true);
-        strip.setClipToPadding(true);
+        GameContextCard first = cards.get(0);
+        View firstCard = insightCard(first.eyebrow, first.headline, first.subline, first.accent);
+        viewport.addView(firstCard, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, rowH));
 
-        int limit = Math.min(6, data.size());
-        int stripW = 0;
-        for (int i = 0; i < limit; i++) {
-            GameContextCard c = data.get(i);
-            int cardW = gameContextCardWidth(c);
-            int leftMargin = i == 0 ? 0 : dp(8);
-            LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(cardW, rowH);
-            clp.setMargins(leftMargin, 0, 0, 0);
-            strip.addView(insightCard(c.eyebrow, c.headline, c.subline, c.accent), clp);
-            stripW += leftMargin + cardW;
-        }
+        if (cards.size() >= 2 && animationsAllowed) {
+            final int[] current = new int[] { 0 };
+            final boolean[] holding = new boolean[] { false };
+            final boolean[] animating = new boolean[] { false };
 
-        final int measuredStripW = Math.max(1, stripW);
-        viewport.addView(strip, new FrameLayout.LayoutParams(measuredStripW, rowH));
-
-        final boolean[] userHolding = new boolean[] { false };
-        final float[] x = new float[] { 0f };
-
-        viewport.setOnTouchListener((v, ev) -> {
-            int action = ev.getAction();
-            if (action == android.view.MotionEvent.ACTION_DOWN || action == android.view.MotionEvent.ACTION_MOVE) {
-                userHolding[0] = true;
-            } else if (action == android.view.MotionEvent.ACTION_UP || action == android.view.MotionEvent.ACTION_CANCEL) {
-                userHolding[0] = false;
-            }
-            return true;
-        });
-
-        viewport.post(() -> {
-            int vw = Math.max(1, viewport.getWidth());
-            x[0] = 0f;
-            strip.setTranslationX(x[0]);
-
-            final Runnable[] auto = new Runnable[1];
-            auto[0] = new Runnable() {
-                @Override public void run() {
-                    if (viewport.getParent() == null || strip.getParent() == null) return;
-                    int viewportW = Math.max(1, viewport.getWidth());
-                    if (!userHolding[0]) {
-                        x[0] -= 0.85f;
-                        if (x[0] <= -measuredStripW) {
-                            x[0] = viewportW;
-                        }
-                        strip.setTranslationX(x[0]);
-                    }
-                    main.postDelayed(this, 34L);
+            viewport.setOnTouchListener((v, ev) -> {
+                int action = ev.getAction();
+                if (action == android.view.MotionEvent.ACTION_DOWN || action == android.view.MotionEvent.ACTION_MOVE) {
+                    holding[0] = true;
+                } else if (action == android.view.MotionEvent.ACTION_UP || action == android.view.MotionEvent.ACTION_CANCEL) {
+                    holding[0] = false;
                 }
-            };
-            main.postDelayed(auto[0], 350L);
-        });
+                return true;
+            });
+
+            viewport.post(() -> {
+                final Runnable[] auto = new Runnable[1];
+                auto[0] = new Runnable() {
+                    @Override public void run() {
+                        if (viewport.getParent() == null) return;
+                        if (holding[0] || animating[0] || viewport.getWidth() <= 0) {
+                            main.postDelayed(this, 450L);
+                            return;
+                        }
+
+                        final int nextIndex = (current[0] + 1) % cards.size();
+                        final GameContextCard c = cards.get(nextIndex);
+                        final View oldCard = viewport.getChildCount() > 0 ? viewport.getChildAt(0) : null;
+                        final View nextCard = insightCard(c.eyebrow, c.headline, c.subline, c.accent);
+                        final int w = Math.max(1, viewport.getWidth());
+
+                        nextCard.setTranslationX(w);
+                        viewport.addView(nextCard, new FrameLayout.LayoutParams(
+                                FrameLayout.LayoutParams.MATCH_PARENT, rowH));
+
+                        animating[0] = true;
+                        if (oldCard != null) {
+                            oldCard.animate()
+                                    .translationX(-w)
+                                    .alpha(0.98f)
+                                    .setDuration(420)
+                                    .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                                    .withEndAction(() -> {
+                                        if (oldCard.getParent() == viewport) viewport.removeView(oldCard);
+                                    })
+                                    .start();
+                        }
+
+                        nextCard.animate()
+                                .translationX(0f)
+                                .alpha(1f)
+                                .setDuration(420)
+                                .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                                .withEndAction(() -> {
+                                    current[0] = nextIndex;
+                                    animating[0] = false;
+                                })
+                                .start();
+
+                        main.postDelayed(this, 3200L);
+                    }
+                };
+                main.postDelayed(auto[0], 2200L);
+            });
+        }
 
         return viewport;
     }
