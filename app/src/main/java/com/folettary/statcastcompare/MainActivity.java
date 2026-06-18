@@ -826,7 +826,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v381", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v382", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -19994,7 +19994,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             boolean bSecond = liveAb ? game.onSecond : (ab != null && ab.onSecond);
             boolean bThird = liveAb ? game.onThird : (ab != null && ab.onThird);
             BaseDiamondView dia = new BaseDiamondView(this, bFirst, bSecond, bThird, abBatColor);
-            LinearLayout.LayoutParams diaLp = new LinearLayout.LayoutParams(dp(38), dp(38));
+            LinearLayout.LayoutParams diaLp = new LinearLayout.LayoutParams(dp(44), dp(44));
             diaLp.gravity = Gravity.CENTER_HORIZONTAL; diaLp.setMargins(0, -dp(3), 0, 0);
             center.addView(dia, diaLp);
             // outs — 3 dots
@@ -20029,7 +20029,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             LinearLayout abNav = new LinearLayout(this);
             abNav.setOrientation(LinearLayout.VERTICAL);
             abNav.setGravity(Gravity.CENTER_HORIZONTAL);
-            LinearLayout.LayoutParams abLp = matchWrap(); abLp.setMargins(0, -dp(15), 0, 0);
+            LinearLayout.LayoutParams abLp = matchWrap(); abLp.setMargins(0, -dp(12), 0, 0);
             // title row
             // v373: remove the historical AB inning/score + batter-vs-pitcher header. It restated
             // information already shown by the scoreboard and portraits, caused a height jump when
@@ -20055,11 +20055,11 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             zoneRow.setGravity(Gravity.TOP);
             zoneRow.setClipChildren(false);
             zoneRow.setClipToPadding(false);
-            // v381: restore full-size bases, pull the pitcher line up using spacing only, and
-            // reclaim that saved header space as real tracking runway. Keep the v379 horizontal
-            // geometry/centering intact.
+            // v382: restore full-size bases and keep the pitcher line close to the outs, but do
+            // not let the tracking window cover the pitcher line. The window hugs the line with a
+            // tiny clean gap while preserving the reclaimed tracking runway.
             int trackingTopRunway = dp(29);
-            LinearLayout.LayoutParams zrLp = matchWrap(); zrLp.setMargins(-dp(8), -dp(4), -dp(2), 0);
+            LinearLayout.LayoutParams zrLp = matchWrap(); zrLp.setMargins(-dp(8), dp(2), -dp(2), 0);
             int zoneH = dp(264);
             int zoneCanvasH = zoneH + trackingTopRunway;
             StrikeZoneView zone = new StrikeZoneView(this, ab.pitches, ab, strikeZoneBoundsForFeed(feed));
@@ -20166,7 +20166,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         if (!"Final".equals(game.statusLabel())) {
             View sc = situationalCarousel(game, ab, activeLiveTrackerAwayPal, activeLiveTrackerHomePal);
             if (sc != null) {
-                LinearLayout.LayoutParams scLp = new LinearLayout.LayoutParams(-1, dp(102)); scLp.setMargins(0, dp(6), 0, 0);
+                LinearLayout.LayoutParams scLp = new LinearLayout.LayoutParams(-1, dp(104)); scLp.setMargins(0, dp(6), 0, 0);
                 card.addView(sc, scLp);
             }
         }
@@ -20723,6 +20723,8 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         }
         if (data.isEmpty()) return null;
 
+        // v382: true static context row. No duplicated ticker strip, no saved scroll offset, no
+        // overlaying moving/static layers. Show the top two unique cards as stable readable cards.
         java.util.LinkedHashMap<String, GameContextCard> uniqueCards = new java.util.LinkedHashMap<>();
         for (GameContextCard c : data) {
             String id = gameContextCardId(c);
@@ -20731,86 +20733,18 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         data = new java.util.ArrayList<>(uniqueCards.values());
         if (data.isEmpty()) return null;
 
-        HorizontalScrollView scroller = new HorizontalScrollView(this);
-        scroller.setHorizontalScrollBarEnabled(false);
-        scroller.setClipToPadding(false);
-        scroller.setPadding(0, 0, 0, 0);
-        LinearLayout strip = new LinearLayout(this);
-        strip.setOrientation(LinearLayout.HORIZONTAL);
-        int limit = Math.min(8, data.size());
-        // v381: no auto-loop duplication. The looped ticker was showing duplicate cards and made
-        // the context row look broken; keep a stable, manually scrollable row instead.
-        boolean autoLoop = false;
-        int loops = 1;
-        final int[] cycleWidthPx = new int[] { 0 };
-        for (int loop = 0; loop < loops; loop++) {
-            for (int i = 0; i < limit; i++) {
-                GameContextCard c = data.get(i);
-                int cardW = gameContextCardWidth(c);
-                int leftMargin = (loop == 0 && i == 0) ? 0 : dp(8);
-                LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(cardW, dp(102));
-                clp.setMargins(leftMargin, 0, 0, 0);
-                strip.addView(insightCard(c.eyebrow, c.headline, c.subline, c.accent), clp);
-                if (loop == 0) cycleWidthPx[0] += leftMargin + cardW;
-            }
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setClipChildren(true);
+        row.setClipToPadding(true);
+        int limit = Math.min(2, data.size());
+        for (int i = 0; i < limit; i++) {
+            GameContextCard c = data.get(i);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(104), 1f);
+            if (i > 0) lp.setMargins(dp(8), 0, 0, 0);
+            row.addView(insightCard(c.eyebrow, c.headline, c.subline, c.accent), lp);
         }
-        scroller.setMinimumHeight(dp(102));
-        liveContextCarouselScrollX = 0;
-        scroller.addView(strip, new FrameLayout.LayoutParams(-2, dp(102)));
-        // v381: static context row starts cleanly; no saved ticker offset.
-
-        final boolean[] userHolding = new boolean[] { false };
-        scroller.setOnTouchListener((v, ev) -> {
-            v.getParent().requestDisallowInterceptTouchEvent(true);
-            int action = ev.getAction();
-            if (action == android.view.MotionEvent.ACTION_DOWN || action == android.view.MotionEvent.ACTION_MOVE) {
-                userHolding[0] = true;
-                liveContextCarouselScrollX = scroller.getScrollX();
-            } else if (action == android.view.MotionEvent.ACTION_UP || action == android.view.MotionEvent.ACTION_CANCEL) {
-                userHolding[0] = false;
-                liveContextCarouselScrollX = scroller.getScrollX();
-                v.getParent().requestDisallowInterceptTouchEvent(false);
-            }
-            return false;
-        });
-
-        // Restore immediately after layout so live pitch refreshes don't visibly jump back to zero.
-        scroller.post(() -> {
-            if (cycleWidthPx[0] > 0) {
-                liveContextCarouselCycleWidth = cycleWidthPx[0];
-                int x = liveContextCarouselScrollX % cycleWidthPx[0];
-                if (x < 0) x += cycleWidthPx[0];
-                scroller.scrollTo(x, 0);
-            }
-        });
-
-        // v358: ticker continuity. Rebuilds reuse the saved scroll offset; new cards append to the
-        // off-screen tail and become visible as the carousel naturally cycles.
-        if (autoLoop) {
-            final Runnable[] auto = new Runnable[1];
-            auto[0] = new Runnable() {
-                @Override public void run() {
-                    if (scroller.getParent() == null) return;
-                    if (strip.getWidth() <= 0 || scroller.getWidth() <= 0 || cycleWidthPx[0] <= 0) {
-                        main.postDelayed(this, 120L);
-                        return;
-                    }
-                    int cycleW = Math.max(1, cycleWidthPx[0]);
-                    if (scroller.getScrollX() >= cycleW) {
-                        scroller.scrollTo(scroller.getScrollX() - cycleW, 0);
-                    }
-                    if (!userHolding[0]) {
-                        scroller.scrollBy(1, 0);
-                        liveContextCarouselScrollX = scroller.getScrollX();
-                        liveContextCarouselCycleWidth = cycleW;
-                    }
-                    main.postDelayed(this, 34L);
-                }
-            };
-            scroller.postDelayed(auto[0], 250L);
-        }
-
-        return scroller;
+        return row;
     }
 
     private java.util.ArrayList<GameContextCard> buildGameContextCards(LiveGame game, LiveAtBat ab, TeamPalette awayPal, TeamPalette homePal) {
@@ -21118,7 +21052,9 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setPadding(dp(10), dp(8), dp(10), dp(8));
-        card.setMinimumHeight(dp(102));
+        card.setMinimumHeight(dp(104));
+        card.setClipChildren(true);
+        card.setClipToPadding(true);
         card.setGravity(Gravity.CENTER_VERTICAL);
         card.setBackground(roundedGradientStroke(new int[] {
                 Color.argb(46, Color.red(accent), Color.green(accent), Color.blue(accent)),
