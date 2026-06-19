@@ -833,7 +833,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v397", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v398", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20675,15 +20675,31 @@ private View liveGameCard(LiveGame game, int slateIndex) {
     }
 
     private int gameContextCardWidth(GameContextCard c) {
-        if (c == null) return dp(132);
-        String eb = safe(c.eyebrow);
-        String head = safe(c.headline);
+        if (c == null) return dp(120);
+        // v398: measure the actual rendered widths so each card uses only the space it needs,
+        // giving a natural variety of sizes instead of a wide uniform floor.
+        Paint pEb = new Paint(Paint.ANTI_ALIAS_FLAG);
+        pEb.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+        pEb.setTextSize(7 * getResources().getDisplayMetrics().scaledDensity);
+        pEb.setLetterSpacing(0.18f);
+        Paint pHead = new Paint(Paint.ANTI_ALIAS_FLAG);
+        pHead.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+        pHead.setTextSize(12 * getResources().getDisplayMetrics().scaledDensity);
+        Paint pSub = new Paint(Paint.ANTI_ALIAS_FLAG);
+        pSub.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+        pSub.setTextSize(8 * getResources().getDisplayMetrics().scaledDensity);
+
+        float ebW = pEb.measureText(safe(c.eyebrow));
+        float headW = pHead.measureText(safe(c.headline));
+        // sublines wrap to two lines, so use roughly half the sub width as the contribution
         String sub = safe(c.subline);
-        int maxLine = Math.max(eb.length(), Math.max(head.length(), sub.length()));
-        // v371: Focus Mode uses the same compact context-card sizing as normal mode; the win is
-        // removing nav/chrome and clipping, not inventing a second oversized layout.
-        int w = dp(82) + Math.min(dp(124), Math.max(0, maxLine) * dp(4));
-        return Math.max(dp(118), Math.min(dp(232), w));
+        float subW = pSub.measureText(sub);
+        float subContribution = subW > dp(150) ? subW * 0.6f : subW;
+
+        float contentW = Math.max(ebW, Math.max(headW, subContribution));
+        int w = (int) contentW + dp(24); // padding both sides
+        // compact floor, generous-but-bounded ceiling; variety lives in between
+        return Math.max(dp(96), Math.min(dp(220), w));
     }
 
     // v397: rotation epoch — advances which discovery cards are visible over time so the strip
@@ -20812,6 +20828,19 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         }
         final int cycleW = Math.max(1, cycle);
 
+        // v398: preserve the crawl position across rebuilds. The offset is derived from elapsed time
+        // modulo the cycle width — but the cycle width changes when cards rotate or resize, which
+        // made the strip visibly jump every poll. We re-anchor the epoch so the new view's first
+        // frame lands on the same pixel offset the previous view last drew.
+        final float speedPxPerMs = Math.max(0.012f, dp(8) / 1000f);
+        long nowAnchor = android.os.SystemClock.uptimeMillis();
+        if (liveContextCarouselCycleWidth > 0) {
+            float desiredOffset = liveContextCarouselScrollX % cycleW;
+            // solve epoch such that ((now - epoch) * speed) % cycleW == desiredOffset
+            liveContextTickerEpochMs = nowAnchor - (long) (desiredOffset / speedPxPerMs);
+        }
+        liveContextCarouselCycleWidth = cycleW;
+
         View ticker = new View(this) {
             private final Paint fillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
             private final Paint strokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -20925,8 +20954,9 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 canvas.clipRect(0, 0, vw, rowH);
 
                 long now = android.os.SystemClock.uptimeMillis();
-                float speedPxPerMs = Math.max(0.012f, dp(8) / 1000f); // slow, steady crawl
                 float offset = cards.size() >= 2 ? ((now - liveContextTickerEpochMs) * speedPxPerMs) % cycleW : 0f;
+                // remember the current offset so a rebuild can resume from the same position
+                liveContextCarouselScrollX = (int) offset;
 
                 float startX = -offset;
                 while (startX > 0) startX -= cycleW;
@@ -21250,14 +21280,66 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 String head = Math.round(minV) + "–" + Math.round(maxV) + " mph spread";
                 addInsightCard(cards, used, 108, "VELOCITY BAND", head, (!pitLast.isEmpty() ? pitLast + " " : "") + "mixing speeds this AB", tealAccent);
             }
-            // last pitch detail
-            LivePitch lp = ab.pitches.get(ab.pitches.size() - 1);
-            if (lp.speed > 0 && !safe(lp.typeName).isEmpty()) {
-                String head = "Last: " + pitchTypeShort(lp.typeCode, lp.typeName) + " " + Math.round(lp.speed);
-                String detail = !safe(lp.result).isEmpty() ? lp.result : (balls + "-" + strikes);
-                String sub = detail + (!Double.isNaN(lp.spinRate) && lp.spinRate > 0 ? " · " + Math.round(lp.spinRate) + " rpm" : "");
-                addInsightCard(cards, used, 146, "LAST PITCH", head, sub, orangeAccent);
+        }
+
+        // --- More situational insight cards (v398) ---
+        // Count value: the run/wOBA tilt of the exact current count.
+        if (livePa) {
+            double cv = countWobaValue(balls, strikes);
+            if (Math.abs(cv) >= 0.02d) {
+                boolean favorsHitter = cv > 0;
+                String head = (balls + "-" + strikes) + (favorsHitter ? " favors hitter" : " favors pitcher");
+                String sub = "League wOBA in this count: " + liveRate(0.320d + cv);
+                addInsightCard(cards, used, 145, "COUNT VALUE", head, sub, favorsHitter ? batAccent : defAccent);
             }
+        }
+
+        // Times through the order: penalty grows each time a pitcher sees the lineup.
+        int tto = timesThroughOrderEstimate(game, ab, pitcherId);
+        if (tto >= 2 && pitchCount >= 40) {
+            String head = pitLast.isEmpty() ? (tto + ordinalSuffix(tto) + " time through") : (pitLast + " " + tto + ordinalSuffix(tto) + " time through");
+            String sub = tto >= 3 ? "3rd-time penalty · OPS rises sharply" : "2nd time through the order";
+            addInsightCard(cards, used, 117, "TIMES THROUGH", head, sub, tealAccent);
+        }
+
+        // Pitch-mix tendency this game: most-used pitch so far.
+        String topPitch = mostUsedPitchThisGame(game, pitcherId);
+        if (!topPitch.isEmpty()) {
+            addInsightCard(cards, used, 88, "PITCH MIX", (pitLast.isEmpty() ? "" : pitLast + " ") + "leans " + topPitch, "Most-used pitch this start", defAccent);
+        }
+
+        // 2-out RISP — a distinct clutch context.
+        if (risp && outs == 2 && batterId > 0) {
+            Stats sp = liveSplit(batterId, true, "risp2");
+            Double avg = liveStat(sp, "avg");
+            if (avg != null) {
+                String head = (!batLast.isEmpty() ? batLast + " " : "") + liveRate(avg) + " AVG, 2-out RISP";
+                addInsightCard(cards, used, 140, "TWO-OUT RISP", head, "The toughest clutch split" + (sp != null && sp.pa > 0 ? " · " + sp.pa + " PA" : ""), batAccent);
+            }
+        }
+
+        // Leadoff / bases empty profile when no one is on.
+        if (runners == 0 && batterId > 0) {
+            Stats sp = liveSplit(batterId, true, "empty");
+            Double ops = liveStat(sp, "ops");
+            if (ops != null) {
+                String head = (!batLast.isEmpty() ? batLast + " " : "") + liveRate(ops) + " OPS, bases empty";
+                addInsightCard(cards, used, 84, "BASES EMPTY", head, "Hitting with the bags clear", batAccent);
+            }
+        }
+
+        // Pitcher fatigue: deep into the outing with a velocity dip vs his early-game average.
+        double veloDrop = pitcherVeloDrop(game, ab);
+        if (pitchCount >= 70 && veloDrop >= 1.0d) {
+            String head = (pitLast.isEmpty() ? "" : pitLast + " ") + "down " + liveOneDecimal(veloDrop) + " mph";
+            addInsightCard(cards, used, 110, "FATIGUE WATCH", head, pitchCount + " pitches · velocity fading", orangeAccent);
+        }
+
+        // High leverage: late, close, runners on — flag the moment itself.
+        if (late && close && runners > 0) {
+            String head = "High-leverage spot";
+            String sub = liveBaseOutSummary(game) + " · " + ordinalNum(inning) + (margin == 0 ? " · tied" : " · " + margin + "-run game");
+            addInsightCard(cards, used, 133, "LEVERAGE", head, sub, neutralAccent);
         }
 
         float lastWpSwing = latestWinProbSwing(game);
@@ -21645,6 +21727,83 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             }
         }
         return traffic;
+    }
+
+    // v398: league-average wOBA delta for a ball-strike count (relative to overall ~.320). Positive
+    // favors the hitter. Values are the well-established count-leverage tendencies.
+    private double countWobaValue(int balls, int strikes) {
+        int b = Math.max(0, Math.min(3, balls));
+        int s = Math.max(0, Math.min(2, strikes));
+        double[][] v = {
+            // s=0     s=1     s=2
+            { 0.000, -0.030, -0.090 }, // b=0
+            { 0.035,  0.000, -0.055 }, // b=1
+            { 0.090,  0.045, -0.015 }, // b=2
+            { 0.230,  0.140,  0.045 }  // b=3
+        };
+        return v[b][s];
+    }
+
+    private String ordinalSuffix(int n) {
+        if (n >= 11 && n <= 13) return "th";
+        switch (n % 10) {
+            case 1: return "st"; case 2: return "nd"; case 3: return "rd"; default: return "th";
+        }
+    }
+
+    // Estimate times through the order: how many times this pitcher has faced this batter already
+    // this game, plus one (the current PA). Counts distinct prior PAs by the same batter id.
+    private int timesThroughOrderEstimate(LiveGame game, LiveAtBat ab, int pitcherId) {
+        if (game == null || game.liveFeed == null || game.liveFeed.atBats == null || pitcherId <= 0) return 0;
+        int batterId = game.sitBatterId > 0 ? game.sitBatterId : (ab == null ? 0 : ab.batterId);
+        if (batterId <= 0) return 0;
+        int seen = 0;
+        for (LiveAtBat x : game.liveFeed.atBats) {
+            if (x != null && x.pitcherId == pitcherId && x.batterId == batterId) seen++;
+        }
+        return Math.max(1, seen);
+    }
+
+    // Most-used pitch type for a pitcher this game (short label like "Slider").
+    private String mostUsedPitchThisGame(LiveGame game, int pitcherId) {
+        if (game == null || game.liveFeed == null || game.liveFeed.atBats == null || pitcherId <= 0) return "";
+        java.util.HashMap<String, Integer> counts = new java.util.HashMap<>();
+        int total = 0;
+        for (LiveAtBat x : game.liveFeed.atBats) {
+            if (x == null || x.pitcherId != pitcherId || x.pitches == null) continue;
+            for (LivePitch lp : x.pitches) {
+                String t = pitchTypeShort(lp.typeCode, lp.typeName);
+                if (t.isEmpty()) continue;
+                counts.merge(t, 1, Integer::sum);
+                total++;
+            }
+        }
+        if (total < 8) return ""; // not enough sample to characterize a lean
+        String best = ""; int bestN = 0;
+        for (java.util.Map.Entry<String, Integer> e : counts.entrySet()) {
+            if (e.getValue() > bestN) { bestN = e.getValue(); best = e.getKey(); }
+        }
+        if (best.isEmpty() || total == 0) return "";
+        int pct = Math.round(bestN * 100f / total);
+        return best + " " + pct + "%";
+    }
+
+    // Pitcher velocity drop: average of last 5 fastball-ish pitches vs first 5 of the outing.
+    private double pitcherVeloDrop(LiveGame game, LiveAtBat ab) {
+        int pid = game != null && game.sitPitcherId > 0 ? game.sitPitcherId : (ab == null ? 0 : ab.pitcherId);
+        if (game == null || game.liveFeed == null || game.liveFeed.atBats == null || pid <= 0) return 0d;
+        java.util.ArrayList<Double> velos = new java.util.ArrayList<>();
+        for (LiveAtBat x : game.liveFeed.atBats) {
+            if (x == null || x.pitcherId != pid || x.pitches == null) continue;
+            for (LivePitch lp : x.pitches) {
+                if (lp.speed >= 88d) velos.add(lp.speed); // fastball band only, to compare like-for-like
+            }
+        }
+        if (velos.size() < 10) return 0d;
+        double early = 0, late = 0;
+        for (int i = 0; i < 5; i++) early += velos.get(i);
+        for (int i = velos.size() - 5; i < velos.size(); i++) late += velos.get(i);
+        return (early / 5d) - (late / 5d);
     }
 
     private LivePitch latestHardContact(LiveGame game) {
