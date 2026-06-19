@@ -146,6 +146,9 @@ public class MainActivity extends Activity {
     private final Map<Integer, ArrayList<LeaderboardEntry>> leaderboardCache = Collections.synchronizedMap(new HashMap<>());
     private final Map<Integer, ArrayList<LeaderboardEntry>> pitchingLeaderboardCache = Collections.synchronizedMap(new HashMap<>());
     private final java.util.Set<Integer> liveInsightWarmSeasons = java.util.Collections.synchronizedSet(new java.util.HashSet<>());
+    // v397: live splits cache — keyed "playerId:hitting|pitching", value = map of sitCode → Stats.
+    private final java.util.Map<String, java.util.Map<String, Stats>> liveSplitsCache = java.util.Collections.synchronizedMap(new java.util.HashMap<>());
+    private final java.util.Set<String> liveSplitsInFlight = java.util.Collections.synchronizedSet(new java.util.HashSet<>());
     // v149: stat QA pass - official team games are now used for team record/rate repair.
     // v139: align stat browsing categories with comparison presets.
     // v138: cache full 30-team season stat maps so team ranks/quality percentiles are
@@ -830,7 +833,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v396", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v397", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -19217,6 +19220,13 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 JSONObject person = pl.optJSONObject("person");
                 int id = person == null ? 0 : person.optInt("id", 0);
                 if (id == 0) continue;
+                // v397: capture handedness for live splits (vs LHP/RHP).
+                if (person != null) {
+                    JSONObject bs = person.optJSONObject("batSide");
+                    if (bs != null) { String c = bs.optString("code", ""); if (!c.isEmpty()) game.batSideById.put(id, c); }
+                    JSONObject ph = person.optJSONObject("pitchHand");
+                    if (ph != null) { String c = ph.optString("code", ""); if (!c.isEmpty()) game.pitchHandById.put(id, c); }
+                }
                 JSONObject bat = pl.optJSONObject("stats") == null ? null : pl.optJSONObject("stats").optJSONObject("batting");
                 lineById.put(id, batLineFromStats(bat));
                 game.batterGameLines.put(id, batLineFromStats(bat));
@@ -19230,6 +19240,9 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             String line = lineById.get(db.id);
             if (line != null) db.line = line;
         }
+        // v397: resolve handedness for the live batter/pitcher so splits can pick the right side.
+        if (game.sitBatterId > 0) { String s = game.batSideById.get(game.sitBatterId); if (s != null) game.sitBatSide = s; }
+        if (game.sitPitcherId > 0) { String s = game.pitchHandById.get(game.sitPitcherId); if (s != null) game.sitPitchHand = s; }
     }
 
     // Compact pitcher game line from a boxscore pitching stats node.
@@ -20673,6 +20686,11 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         return Math.max(dp(118), Math.min(dp(232), w));
     }
 
+    // v397: rotation epoch — advances which discovery cards are visible over time so the strip
+    // keeps changing even when the game state is momentarily static.
+    private long liveContextRotationEpochMs = 0L;
+    private int liveContextRotationStep = 0;
+
     private java.util.ArrayList<GameContextCard> stableGameContextCards(LiveGame game, java.util.ArrayList<GameContextCard> fresh) {
         java.util.ArrayList<GameContextCard> sorted = new java.util.ArrayList<>();
         if (fresh != null) sorted.addAll(fresh);
@@ -20684,35 +20702,71 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             liveContextCarouselScrollX = 0;
             liveContextCarouselCycleWidth = 0;
             liveContextTickerEpochMs = android.os.SystemClock.uptimeMillis();
+            liveContextRotationEpochMs = android.os.SystemClock.uptimeMillis();
+            liveContextRotationStep = 0;
             liveContextCarouselStableCards.clear();
         }
 
+        // v397: PINNED vs DISCOVERY. Pinned (live-state) cards always show, content-updated in
+        // place; discovery cards rotate through a window so the carousel feels alive even between
+        // pitches. The rotation advances on a timer, independent of game updates.
+        final int PIN_THRESHOLD = 130;
+        java.util.ArrayList<GameContextCard> pinned = new java.util.ArrayList<>();
+        java.util.ArrayList<GameContextCard> discovery = new java.util.ArrayList<>();
+        for (GameContextCard c : sorted) {
+            if (c.priority >= PIN_THRESHOLD) pinned.add(c); else discovery.add(c);
+        }
+
+        // advance rotation step once per poll cycle (poll is 15s; 14s ensures a fresh step each time)
+        long now = android.os.SystemClock.uptimeMillis();
+        if (liveContextRotationEpochMs <= 0L) liveContextRotationEpochMs = now;
+        long elapsed = now - liveContextRotationEpochMs;
+        liveContextRotationStep = (int) (elapsed / 14000L);
+
+        // Build the visible set: all pinned (capped), then a rotating window of discovery cards.
+        java.util.ArrayList<GameContextCard> visible = new java.util.ArrayList<>();
+        int pinCap = Math.min(pinned.size(), 4);
+        for (int i = 0; i < pinCap; i++) visible.add(pinned.get(i));
+
+        int target = Math.max(6, Math.min(7, pinCap + 3)); // aim for 6–7 unique on the strip
+        int discSlots = Math.max(0, target - visible.size());
+        if (!discovery.isEmpty() && discSlots > 0) {
+            int n = discovery.size();
+            int start = (liveContextRotationStep * Math.max(1, discSlots)) % n;
+            java.util.HashSet<String> seen = new java.util.HashSet<>();
+            for (GameContextCard c : visible) seen.add(gameContextCardId(c));
+            int added = 0, scan = 0;
+            while (added < discSlots && scan < n) {
+                GameContextCard c = discovery.get((start + scan) % n);
+                String id = gameContextCardId(c);
+                if (!seen.contains(id)) { visible.add(c); seen.add(id); added++; }
+                scan++;
+            }
+        }
+
+        // First time: seed and return.
         if (liveContextCarouselStableCards.isEmpty()) {
-            for (int i = 0; i < Math.min(6, sorted.size()); i++) liveContextCarouselStableCards.add(sorted.get(i));
+            liveContextCarouselStableCards.addAll(visible);
             return new java.util.ArrayList<>(liveContextCarouselStableCards);
         }
 
-        java.util.HashMap<String, GameContextCard> freshById = new java.util.HashMap<>();
-        for (GameContextCard c : sorted) freshById.put(gameContextCardId(c), c);
+        // Merge: keep moving order stable, update content in place for cards still present, append
+        // any newly-visible cards to the tail so they slide in rather than popping at the front.
+        java.util.HashMap<String, GameContextCard> visById = new java.util.HashMap<>();
+        for (GameContextCard c : visible) visById.put(gameContextCardId(c), c);
 
         java.util.ArrayList<GameContextCard> merged = new java.util.ArrayList<>();
-        // Keep the currently moving order stable; update each card's content in place when the
-        // same card type still exists. This prevents new pitch updates from reshuffling the strip.
+        java.util.HashSet<String> kept = new java.util.HashSet<>();
         for (GameContextCard old : liveContextCarouselStableCards) {
-            GameContextCard updated = freshById.remove(gameContextCardId(old));
-            if (updated != null) merged.add(updated);
+            String id = gameContextCardId(old);
+            GameContextCard updated = visById.get(id);
+            if (updated != null) { merged.add(updated); kept.add(id); }
         }
-        // Newly-needed cards are appended to the off-screen tail, so they enter naturally as the
-        // ticker keeps moving instead of popping in at the front.
-        for (GameContextCard c : sorted) {
+        for (GameContextCard c : visible) {
             String id = gameContextCardId(c);
-            if (freshById.containsKey(id)) {
-                merged.add(c);
-                freshById.remove(id);
-            }
+            if (!kept.contains(id)) { merged.add(c); kept.add(id); }
             if (merged.size() >= 8) break;
         }
-        // If everything expired at once, fall back to the fresh sorted set.
         if (merged.isEmpty()) {
             for (int i = 0; i < Math.min(6, sorted.size()); i++) merged.add(sorted.get(i));
         }
@@ -21088,6 +21142,124 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             addInsightCard(cards, used, 106, "LEVERAGE BAT", head, sub, batAccent);
         }
 
+        // ===== Insight Engine v2: live splits + pitch-sequence cards (v397) =====
+        warmLiveSplits(game, ab);
+        int batterId = game.sitBatterId > 0 ? game.sitBatterId : (ab == null ? 0 : ab.batterId);
+        int pitcherId = game.sitPitcherId > 0 ? game.sitPitcherId : (ab == null ? 0 : ab.pitcherId);
+        String pHand = safe(game.sitPitchHand);   // L / R
+        String bHand = safe(game.sitBatSide);      // L / R / S
+
+        // --- Batter splits ---
+        // vs this pitcher's hand
+        if (batterId > 0 && (pHand.equals("L") || pHand.equals("R"))) {
+            String code = pHand.equals("L") ? "vl" : "vr";
+            Stats sp = liveSplit(batterId, true, code);
+            Double ops = liveStat(sp, "ops");
+            if (ops != null) {
+                String hand = pHand.equals("L") ? "vs LHP" : "vs RHP";
+                String head = (!batLast.isEmpty() ? batLast + " " : "") + liveRate(ops) + " OPS " + hand;
+                Double k = liveStat(sp, "kPct");
+                String sub = "Season split " + hand + (k != null ? " · " + livePct(k) + " K" : "")
+                        + (sp != null && sp.pa > 0 ? " · " + sp.pa + " PA" : "");
+                addInsightCard(cards, used, 142, "PLATOON SPLIT", head, sub, batAccent);
+            }
+        }
+        // with RISP (only when relevant)
+        if (batterId > 0 && risp) {
+            Stats sp = liveSplit(batterId, true, "risp");
+            Double avg = liveStat(sp, "avg");
+            Double ops = liveStat(sp, "ops");
+            if (avg != null || ops != null) {
+                String head = (!batLast.isEmpty() ? batLast + " " : "")
+                        + (avg != null ? liveRate(avg) + " AVG" : liveRate(ops) + " OPS") + " w/RISP";
+                String sub = "Runners in scoring position" + (sp != null && sp.pa > 0 ? " · " + sp.pa + " PA" : "");
+                addInsightCard(cards, used, 138, "CLUTCH SPLIT", head, sub, batAccent);
+            }
+        }
+        // runners on (men_on) when men are on but not necessarily RISP
+        if (batterId > 0 && runners > 0 && !risp) {
+            Stats sp = liveSplit(batterId, true, "men_on");
+            Double ops = liveStat(sp, "ops");
+            if (ops != null) {
+                String head = (!batLast.isEmpty() ? batLast + " " : "") + liveRate(ops) + " OPS, men on";
+                addInsightCard(cards, used, 120, "MEN-ON SPLIT", head, "Hitting with runners aboard", batAccent);
+            }
+        }
+        // recency: last 30 days form
+        if (batterId > 0) {
+            Stats sp = liveSplit(batterId, true, "l30");
+            Double ops = liveStat(sp, "ops");
+            if (ops != null) {
+                String head = (!batLast.isEmpty() ? batLast + " " : "") + liveRate(ops) + " OPS, L30";
+                addInsightCard(cards, used, 95, "RECENT FORM", head, "Last 30 days" + (sp != null && sp.pa > 0 ? " · " + sp.pa + " PA" : ""), batAccent);
+            }
+        }
+
+        // --- Pitcher splits ---
+        // vs this batter's hand (for switch hitters, use the side they'll bat from = opposite pHand)
+        if (pitcherId > 0) {
+            String effBat = bHand.equals("S") ? (pHand.equals("L") ? "R" : "L") : bHand;
+            if (effBat.equals("L") || effBat.equals("R")) {
+                String code = effBat.equals("L") ? "vl" : "vr";
+                Stats sp = liveSplit(pitcherId, false, code);
+                Double ops = liveStat(sp, "ops");
+                if (ops != null) {
+                    String hand = effBat.equals("L") ? "vs LHB" : "vs RHB";
+                    String head = (!pitLast.isEmpty() ? pitLast + " " : "") + liveRate(ops) + " OPS " + hand;
+                    addInsightCard(cards, used, 136, "PITCHER PLATOON", head, "Opponent OPS " + hand + (sp != null && sp.pa > 0 ? " · " + sp.pa + " BF" : ""), defAccent);
+                }
+            }
+        }
+        // pitcher with RISP
+        if (pitcherId > 0 && risp) {
+            Stats sp = liveSplit(pitcherId, false, "risp");
+            Double avg = liveStat(sp, "avg");
+            if (avg != null) {
+                String head = (!pitLast.isEmpty() ? pitLast + " " : "") + liveRate(avg) + " AVG w/RISP";
+                addInsightCard(cards, used, 119, "PITCHER CLUTCH", head, "Opponent average w/RISP", defAccent);
+            }
+        }
+
+        // --- Live pitch-sequence cards (change every pitch) ---
+        if (ab != null && ab.pitches != null && !ab.pitches.isEmpty()) {
+            // pitch mix this AB
+            java.util.LinkedHashMap<String, Integer> mix = new java.util.LinkedHashMap<>();
+            double maxV = 0, minV = 999; String fastType = "";
+            for (LivePitch lp : ab.pitches) {
+                String t = pitchTypeShort(lp.typeCode, lp.typeName);
+                if (!t.isEmpty()) mix.merge(t, 1, Integer::sum);
+                if (lp.speed > maxV) { maxV = lp.speed; }
+                if (lp.speed > 0 && lp.speed < minV) minV = lp.speed;
+            }
+            int seqN = ab.pitches.size();
+            if (seqN >= 2) {
+                StringBuilder seq = new StringBuilder();
+                int shown = 0;
+                for (int i = Math.max(0, seqN - 4); i < seqN; i++) {
+                    if (seq.length() > 0) seq.append(" ");
+                    seq.append(pitchTypeShort(ab.pitches.get(i).typeCode, ab.pitches.get(i).typeName));
+                    shown++;
+                }
+                String head = "This AB: " + seq;
+                String sub = seqN + " pitch" + (seqN == 1 ? "" : "es")
+                        + (maxV > 0 ? " · up to " + Math.round(maxV) + " mph" : "");
+                addInsightCard(cards, used, 150, "PITCH SEQUENCE", head, sub, orangeAccent);
+            }
+            // velocity spread if there's a notable gap (fastball vs offspeed)
+            if (maxV > 0 && minV < 999 && (maxV - minV) >= 8) {
+                String head = Math.round(minV) + "–" + Math.round(maxV) + " mph spread";
+                addInsightCard(cards, used, 108, "VELOCITY BAND", head, (!pitLast.isEmpty() ? pitLast + " " : "") + "mixing speeds this AB", tealAccent);
+            }
+            // last pitch detail
+            LivePitch lp = ab.pitches.get(ab.pitches.size() - 1);
+            if (lp.speed > 0 && !safe(lp.typeName).isEmpty()) {
+                String head = "Last: " + pitchTypeShort(lp.typeCode, lp.typeName) + " " + Math.round(lp.speed);
+                String detail = !safe(lp.result).isEmpty() ? lp.result : (balls + "-" + strikes);
+                String sub = detail + (!Double.isNaN(lp.spinRate) && lp.spinRate > 0 ? " · " + Math.round(lp.spinRate) + " rpm" : "");
+                addInsightCard(cards, used, 146, "LAST PITCH", head, sub, orangeAccent);
+            }
+        }
+
         float lastWpSwing = latestWinProbSwing(game);
         String lastBigPlay = latestWinProbDescription(game);
         if (!Float.isNaN(lastWpSwing) && lastWpSwing >= 8f) {
@@ -21137,6 +21309,143 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             try { fetchLeaderboard(season); } catch (Exception ignored) {}
             try { fetchPitchingLeaderboard(season); } catch (Exception ignored) {}
         });
+    }
+
+    // v397: the sitCodes we pull for live splits. These map to MLB statSplits situation codes and
+    // give the carousel genuinely situational numbers (vs hand, RISP, men on, ahead/behind, recency).
+    // hitting: vl/vr (vs LHP/RHP), risp, runners on (men_on), bases empty, 2-out RISP, last 30 days.
+    private static final String HITTER_SIT_CODES = "vl,vr,risp,men_on,empty,risp2,h,a,l30";
+    private static final String PITCHER_SIT_CODES = "vl,vr,risp,men_on,empty,risp2,h,a,l30";
+
+    private String liveSplitsKey(int playerId, boolean hitting) { return playerId + ":" + (hitting ? "h" : "p"); }
+
+    // Kick off (once) a background fetch of the live batter's and pitcher's situational splits.
+    private void warmLiveSplits(LiveGame game, LiveAtBat ab) {
+        if (game == null) return;
+        final int season = currentSeason();
+        final int batterId = game.sitBatterId > 0 ? game.sitBatterId : (ab == null ? 0 : ab.batterId);
+        final int pitcherId = game.sitPitcherId > 0 ? game.sitPitcherId : (ab == null ? 0 : ab.pitcherId);
+        if (batterId > 0) warmOneSplit(batterId, true, season);
+        if (pitcherId > 0) warmOneSplit(pitcherId, false, season);
+    }
+
+    private void warmOneSplit(int playerId, boolean hitting, int season) {
+        final String key = liveSplitsKey(playerId, hitting);
+        if (liveSplitsCache.containsKey(key)) return;
+        if (!liveSplitsInFlight.add(key)) return;
+        fanout.submit(() -> {
+            try {
+                java.util.Map<String, Stats> parsed = fetchLiveSplits(playerId, hitting, season);
+                if (parsed != null && !parsed.isEmpty()) liveSplitsCache.put(key, parsed);
+                else liveSplitsCache.put(key, new java.util.HashMap<>()); // mark fetched-empty so we don't refetch
+            } catch (Exception ignored) {
+                liveSplitsCache.put(key, new java.util.HashMap<>());
+            } finally {
+                liveSplitsInFlight.remove(key);
+                // nudge a refresh so the new cards can appear
+                main.post(this::refreshLiveContextCarouselIfVisible);
+            }
+        });
+    }
+
+    private java.util.Map<String, Stats> fetchLiveSplits(int playerId, boolean hitting, int season) throws Exception {
+        String group = hitting ? "hitting" : "pitching";
+        String codes = hitting ? HITTER_SIT_CODES : PITCHER_SIT_CODES;
+        String url = "https://statsapi.mlb.com/api/v1/people/" + playerId
+                + "/stats?stats=statSplits&group=" + group + "&season=" + season + "&sitCodes=" + codes;
+        String body = httpGet(url);
+        if (body == null || body.trim().isEmpty()) return null;
+        JSONObject root = new JSONObject(body);
+        JSONArray stats = root.optJSONArray("stats");
+        if (stats == null) return null;
+        java.util.Map<String, Stats> out = new java.util.HashMap<>();
+        for (int i = 0; i < stats.length(); i++) {
+            JSONObject block = stats.optJSONObject(i);
+            if (block == null) continue;
+            JSONArray splits = block.optJSONArray("splits");
+            if (splits == null) continue;
+            for (int j = 0; j < splits.length(); j++) {
+                JSONObject sp = splits.optJSONObject(j);
+                if (sp == null) continue;
+                JSONObject split = sp.optJSONObject("split");
+                String code = split == null ? "" : split.optString("code", "");
+                if (code.isEmpty()) continue;
+                JSONObject st = sp.optJSONObject("stat");
+                if (st == null) continue;
+                Stats parsed = parseSplitStat(st, hitting);
+                if (parsed != null) out.put(code.toLowerCase(Locale.US), parsed);
+            }
+        }
+        return out;
+    }
+
+    // Parse a single statSplits "stat" node into our Stats map (traditional rate stats are present
+    // in statSplits; xStats are not, so split cards use AVG/OBP/SLG/OPS/K%/BB% etc.).
+    private Stats parseSplitStat(JSONObject st, boolean hitting) {
+        if (st == null) return null;
+        Stats s = new Stats();
+        int pa = st.optInt("plateAppearances", st.optInt("battersFaced", 0));
+        s.pa = pa;
+        putNum(s, "avg", st.optString("avg", ""));
+        putNum(s, "obp", st.optString("obp", ""));
+        putNum(s, "slg", st.optString("slg", ""));
+        putNum(s, "ops", st.optString("ops", ""));
+        double ab = st.optDouble("atBats", 0);
+        double so = st.optDouble("strikeOuts", 0);
+        double bb = st.optDouble("baseOnBalls", 0);
+        double hr = st.optDouble("homeRuns", 0);
+        double h = st.optDouble("hits", 0);
+        if (pa > 0) {
+            s.put("kPct", so / pa * 100d);
+            s.put("bbPct", bb / pa * 100d);
+        }
+        if (ab > 0) {
+            s.put("hrPerAb", hr / ab * 100d);
+            s.put("iso", clampIso(st));
+        }
+        s.put("hits", h);
+        s.put("hr", hr);
+        s.put("paCount", (double) pa);
+        return s;
+    }
+
+    private double clampIso(JSONObject st) {
+        try {
+            double slg = parseDoubleSafe(st.optString("slg", ""));
+            double avg = parseDoubleSafe(st.optString("avg", ""));
+            if (!Double.isNaN(slg) && !Double.isNaN(avg)) return slg - avg;
+        } catch (Exception ignored) {}
+        return Double.NaN;
+    }
+
+    private void putNum(Stats s, String key, String raw) {
+        double v = parseDoubleSafe(raw);
+        if (!Double.isNaN(v)) s.put(key, v);
+    }
+
+    private double parseDoubleSafe(String raw) {
+        if (raw == null) return Double.NaN;
+        raw = raw.trim();
+        if (raw.isEmpty() || raw.equals("-") || raw.equals(".---")) return Double.NaN;
+        try {
+            // MLB returns leading-dot rates like ".315"
+            if (raw.startsWith(".")) raw = "0" + raw;
+            return Double.parseDouble(raw);
+        } catch (Exception e) { return Double.NaN; }
+    }
+
+    // Accessor: get a specific split's Stats for the live batter/pitcher, or null if not loaded.
+    private Stats liveSplit(int playerId, boolean hitting, String sitCode) {
+        java.util.Map<String, Stats> m = liveSplitsCache.get(liveSplitsKey(playerId, hitting));
+        if (m == null) return null;
+        return m.get(sitCode.toLowerCase(Locale.US));
+    }
+
+    private void refreshLiveContextCarouselIfVisible() {
+        // Lightweight: if a live game menu is open, rebuild it so new split cards surface.
+        if (activeLiveGameMenu != null) {
+            try { renderLiveGameMenu(activeLiveGameMenu); } catch (Exception ignored) {}
+        }
     }
 
     private Stats cachedLiveHitterStats(LiveGame game, LiveAtBat ab) {
@@ -29917,6 +30226,10 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         boolean onFirst = false, onSecond = false, onThird = false;
         String sitBatter = "", sitOnDeck = "", sitPitcher = "";
         int sitBatterId = 0, sitPitcherId = 0; // v273: ids for portraits
+        // v397: handedness for live splits (vs LHP/RHP). "L"/"R"/"S" for batter, "L"/"R" for pitcher.
+        String sitBatSide = "", sitPitchHand = "";
+        java.util.HashMap<Integer, String> batSideById = new java.util.HashMap<>();
+        java.util.HashMap<Integer, String> pitchHandById = new java.util.HashMap<>();
         // v328: next 3 batters due up (shown between innings), each with today's batting line.
         java.util.ArrayList<DueUpBatter> dueUp = new java.util.ArrayList<>();
         // v329: current pitcher's game line (e.g. "5.1 IP · 7 K · 3 H · 1 ER"), id-keyed cache.
