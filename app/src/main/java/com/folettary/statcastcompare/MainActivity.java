@@ -845,7 +845,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v410", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v411", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20953,6 +20953,19 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             private final RectF rect = new RectF();
             private boolean attached = false;
 
+            // v411: ISOLATE this view from the parent's layout passes. When a sibling host rebuilds
+            // (poll or AB navigation), the parent LinearLayout re-measures/-lays-out its children;
+            // that pass was starving this canvas animation (frame gaps jumping 17ms→60ms = ~4 dropped
+            // frames = the flash). A fixed onMeasure makes our measure a no-op, and isolateLayout
+            // stops a sibling's requestLayout from forcing us to re-measure.
+            @Override protected void onMeasure(int widthSpec, int heightSpec) {
+                int w = MeasureSpec.getSize(widthSpec);
+                setMeasuredDimension(w > 0 ? w : dp(360), liveContextTickerRowH);
+            }
+            @Override public boolean isLayoutRequested() {
+                return false; // never report a pending layout up to the parent
+            }
+
             private float sp(float v) {
                 return v * getResources().getDisplayMetrics().scaledDensity;
             }
@@ -21464,12 +21477,15 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             }
         }
 
-        // Times through the order: penalty grows each time a pitcher sees the lineup.
+        // Times through the order: show the pitcher's ACTUAL results this time through vs earlier,
+        // computed from the feed — not a generic "penalty rises" statement.
         int tto = timesThroughOrderEstimate(game, ab, pitcherId);
         if (tto >= 2 && pitchCount >= 40) {
-            String head = pitLast.isEmpty() ? (tto + ordinalSuffix(tto) + " time through") : (pitLast + " " + tto + ordinalSuffix(tto) + " time through");
-            String sub = tto >= 3 ? "3rd-time penalty · OPS rises sharply" : "2nd time through the order";
-            addInsightCard(cards, used, 117, "TIMES THROUGH", head, sub, tealAccent);
+            String ttoLine = timesThroughResultLine(game, pitcherId, tto);
+            String head = (pitLast.isEmpty() ? "" : pitLast + " ") + tto + ordinalSuffix(tto) + " time thru";
+            if (!ttoLine.isEmpty()) {
+                addInsightCard(cards, used, 117, "TIMES THROUGH", head, ttoLine, tealAccent);
+            }
         }
 
         // Pitch-mix tendency this game: most-used pitch so far.
@@ -22037,6 +22053,37 @@ private View liveGameCard(LiveGame game, int slateIndex) {
 
     // Estimate times through the order: how many times this pitcher has faced this batter already
     // this game, plus one (the current PA). Counts distinct prior PAs by the same batter id.
+    // v411: the pitcher's actual results for a given time-through-the-order, from the feed. We bucket
+    // each completed PA by how many times that batter had already been faced. Returns e.g.
+    // "3rd time: 4-7, 2 HR" (hits-AB + extra-base damage) — concrete, not a generic penalty claim.
+    private String timesThroughResultLine(LiveGame game, int pitcherId, int wantTto) {
+        if (game == null || game.liveFeed == null || game.liveFeed.atBats == null || pitcherId <= 0) return "";
+        java.util.HashMap<Integer, Integer> seenByBatter = new java.util.HashMap<>();
+        int ab = 0, h = 0, hr = 0, bb = 0, k = 0, faced = 0;
+        for (LiveAtBat x : game.liveFeed.atBats) {
+            if (x == null || x.pitcherId != pitcherId || x.batterId <= 0) continue;
+            int seen = seenByBatter.getOrDefault(x.batterId, 0) + 1;
+            seenByBatter.put(x.batterId, seen);
+            if (seen != wantTto) continue;
+            if (!x.complete || safe(x.result).isEmpty()) continue;
+            String r = safe(x.result).toLowerCase(Locale.US);
+            faced++;
+            boolean walk = r.contains("walk") || r.contains("hit by pitch");
+            boolean strikeout = r.contains("strikeout") || r.contains("struck out") || r.contains("strikes out");
+            boolean hit = r.contains("single") || r.contains("double") || r.contains("triple") || r.contains("homer") || r.contains("home run");
+            if (walk) { bb++; }
+            else { ab++; if (hit) h++; if (strikeout) k++; if (r.contains("homer") || r.contains("home run")) hr++; }
+        }
+        if (faced < 2) return ""; // not enough this time through to be meaningful yet
+        StringBuilder sb = new StringBuilder();
+        sb.append(h).append("-").append(ab);
+        if (hr > 0) sb.append(", ").append(hr).append(" HR");
+        if (bb > 0) sb.append(", ").append(bb).append(" BB");
+        if (k > 0) sb.append(", ").append(k).append(" K");
+        sb.append(" this time thru");
+        return sb.toString();
+    }
+
     private int timesThroughOrderEstimate(LiveGame game, LiveAtBat ab, int pitcherId) {
         if (game == null || game.liveFeed == null || game.liveFeed.atBats == null || pitcherId <= 0) return 0;
         int batterId = game.sitBatterId > 0 ? game.sitBatterId : (ab == null ? 0 : ab.batterId);
