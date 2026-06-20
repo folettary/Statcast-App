@@ -833,7 +833,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v400", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v401", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20662,6 +20662,8 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         final String subline;
         final int accent;
         String contextSig = ""; // v399: base/out/count signature; stale cards are dropped on change
+        String subject = "";    // v401: player/subject this card is about; folded into the ID so a
+                                 // new batter's card is distinct (crawls in) instead of swapping in place
         GameContextCard(int priority, String eyebrow, String headline, String subline, int accent) {
             this.priority = priority;
             this.eyebrow = eyebrow;
@@ -20681,7 +20683,10 @@ private View liveGameCard(LiveGame game, int slateIndex) {
     }
 
     private String gameContextCardId(GameContextCard c) {
-        return safe(c == null ? "" : c.eyebrow).toUpperCase(Locale.US);
+        if (c == null) return "";
+        String base = safe(c.eyebrow).toUpperCase(Locale.US);
+        String subj = safe(c.subject);
+        return subj.isEmpty() ? base : base + "#" + subj;
     }
 
     private int gameContextCardWidth(GameContextCard c) {
@@ -20853,7 +20858,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         // modulo the cycle width — but the cycle width changes when cards rotate or resize, which
         // made the strip visibly jump every poll. We re-anchor the epoch so the new view's first
         // frame lands on the same pixel offset the previous view last drew.
-        final float speedPxPerMs = Math.max(0.020f, dp(14) / 1000f); // v399: faster, steadier crawl
+        final float speedPxPerMs = Math.max(0.028f, dp(19) / 1000f); // v401: faster crawl
         long nowAnchor = android.os.SystemClock.uptimeMillis();
         if (liveContextCarouselCycleWidth > 0) {
             float desiredOffset = liveContextCarouselScrollX % cycleW;
@@ -21468,7 +21473,17 @@ private View liveGameCard(LiveGame game, int slateIndex) {
 
         java.util.Collections.sort(cards, (a, b) -> b.priority - a.priority);
         String sig = liveContextSignature(game);
-        for (GameContextCard c : cards) c.contextSig = sig;
+        // v401: stamp a per-player subject so that when the batter or pitcher changes, that player's
+        // cards become distinct IDs — the old player's cards crawl off the tail and the new player's
+        // crawl in, instead of swapping content in place (which read as a flash).
+        String batSubj = batLast.isEmpty() ? "" : ("B" + (game.sitBatterId > 0 ? game.sitBatterId : 0) + ":" + batLast);
+        String pitSubj = pitLast.isEmpty() ? "" : ("P" + (game.sitPitcherId > 0 ? game.sitPitcherId : 0) + ":" + pitLast);
+        for (GameContextCard c : cards) {
+            c.contextSig = sig;
+            String head = safe(c.headline);
+            if (!batLast.isEmpty() && head.contains(batLast)) c.subject = batSubj;
+            else if (!pitLast.isEmpty() && head.contains(pitLast)) c.subject = pitSubj;
+        }
         return cards;
     }
 
