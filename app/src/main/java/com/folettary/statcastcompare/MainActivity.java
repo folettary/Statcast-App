@@ -341,6 +341,8 @@ public class MainActivity extends Activity {
     // wrapped against the current cycle width. Immune to cycle-width changes on pitch updates.
     private float liveContextScrollPos = 0f;
     private long liveContextLastFrameMs = 0L;
+    private long liveContextDebugMaxGap = 0L;      // DEBUG v410: largest frame gap in last 3s
+    private long liveContextDebugGapResetMs = 0L;
     private final java.util.ArrayList<GameContextCard> liveContextCarouselStableCards = new java.util.ArrayList<>();
 
     private View gameHubTabBarView = null;                   // v301: tab bar, to snap to on tab switch
@@ -843,7 +845,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v409", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v410", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -21071,6 +21073,9 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 if (liveContextLastFrameMs <= 0L) liveContextLastFrameMs = now;
                 long dt = now - liveContextLastFrameMs;
                 if (dt < 0) dt = 0;
+                // DEBUG v410: track the largest recent frame gap to diagnose the per-pitch hitch.
+                if (dt > liveContextDebugMaxGap) liveContextDebugMaxGap = dt;
+                if (now - liveContextDebugGapResetMs > 3000L) { liveContextDebugMaxGap = dt; liveContextDebugGapResetMs = now; }
                 if (dt > 100) dt = 16; // a stall (poll/GC) must not teleport the strip; cap the step
                 liveContextLastFrameMs = now;
                 liveContextScrollPos += dt * speedPxPerMs;
@@ -21093,6 +21098,14 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 }
 
                 canvas.restore();
+
+                // DEBUG v410: max recent frame gap, top-left. Spikes lining up with pitches = the
+                // rebuild's layout pass starves the animation. Steady ~16ms = draw is fine.
+                textPaint.setColor(Color.argb(220, 255, 90, 90));
+                textPaint.setTextSize(sp(9));
+                textPaint.setTextAlign(Paint.Align.LEFT);
+                textPaint.setShader(null);
+                canvas.drawText("gap " + liveContextDebugMaxGap + "ms", dp(3), sp(11), textPaint);
 
                 if (attached && cards.size() >= 2) {
                     if (Build.VERSION.SDK_INT >= 16) postInvalidateOnAnimation();
