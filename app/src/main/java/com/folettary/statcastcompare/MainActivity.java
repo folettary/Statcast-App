@@ -845,7 +845,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v411", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v412", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -19873,20 +19873,21 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                     boolean followingLive = (g.viewAtBatIndex < 0) || (f != null && f.loaded && g.viewAtBatIndex >= f.atBats.size() - 1);
                     if (followingLive) g.viewAtBatIndex = -1;
                     refreshActiveLiveScoreHero(g);
-                    host.removeAllViews();
-                    liveUpdateRebuild = true;
-                    host.addView(buildTrackerPager(g), matchWrap());
-                    liveUpdateRebuild = false;
+                    // v412: only rebuild the tracker pager when its state actually changed (count,
+                    // score, bases, outs, AB, pitch). Skipping unchanged polls removes the heavy
+                    // main-thread layout pass that froze the carousel crawl.
+                    String trackerSig = trackerStateSignature(g);
+                    if (!trackerSig.equals(liveTrackerRenderSig) || host.getChildCount() == 0) {
+                        liveTrackerRenderSig = trackerSig;
+                        host.removeAllViews();
+                        liveUpdateRebuild = true;
+                        host.addView(buildTrackerPager(g), matchWrap());
+                        liveUpdateRebuild = false;
+                    }
                     // v406: refresh the persistent carousel's data in place — never recreates its view.
                     updateCarouselData(g, currentTrackerAtBat(g));
-                    // v407: rebuild the play feed (its own host, below the carousel).
-                    if (activePlayFeedHost != null) {
-                        activePlayFeedHost.removeAllViews();
-                        LinearLayout pfCard = new LinearLayout(MainActivity.this);
-                        pfCard.setOrientation(LinearLayout.VERTICAL);
-                        buildPlayFeedInto(pfCard, g, g.liveFeed, activeLiveTrackerAwayPal, activeLiveTrackerHomePal);
-                        activePlayFeedHost.addView(pfCard, matchWrap());
-                    }
+                    // v412: only rebuilds when the feed actually changed (guard inside).
+                    rebuildPlayFeedHost(g, false);
                     if (!g.isLive()) { stopLiveTrackerPolling(); return; }
                     main.postDelayed(liveTrackerPollRunnable, 15000L);
                 });
@@ -19924,13 +19925,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 host.addView(buildTrackerPager(game), matchWrap());
                 liveUpdateRebuild = false;
                 updateCarouselData(game, currentTrackerAtBat(game)); // v406: fill carousel once data is in
-                if (activePlayFeedHost != null) {
-                    activePlayFeedHost.removeAllViews();
-                    LinearLayout pfCard = new LinearLayout(this);
-                    pfCard.setOrientation(LinearLayout.VERTICAL);
-                    buildPlayFeedInto(pfCard, game, game.liveFeed, activeLiveTrackerAwayPal, activeLiveTrackerHomePal);
-                    activePlayFeedHost.addView(pfCard, matchWrap());
-                }
+                rebuildPlayFeedHost(game, true); // v412: initial render
                 if (liveFocusMode && mainScroll != null) main.post(() -> mainScroll.scrollTo(0, 0));
                 host.setVisibility(View.VISIBLE);
                 host.setAlpha(0f);
@@ -20302,6 +20297,58 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 card.addView(less, lessLp);
             }
         }
+    }
+
+    // v412: rebuild the play-feed host only when its content actually changed. Polls fire every 15s
+    // but plays are less frequent, so most polls leave the feed identical — skipping the rebuild then
+    // removes a heavy main-thread layout pass that was starving the carousel animation (the flash).
+    private String liveFeedRenderSig = "";
+    private String liveTrackerRenderSig = ""; // v412: skip tracker rebuild when state is unchanged
+
+    private String trackerStateSignature(LiveGame game) {
+        if (game == null) return "null";
+        StringBuilder sb = new StringBuilder();
+        sb.append(game.viewAtBatIndex).append('|')
+          .append(game.sitInning).append(safe(game.sitInningState)).append('|')
+          .append(game.awayScore).append('-').append(game.homeScore).append('|')
+          .append(game.sitOuts).append('|')
+          .append(game.onFirst ? 1 : 0).append(game.onSecond ? 1 : 0).append(game.onThird ? 1 : 0).append('|')
+          .append(game.sitBatterId).append('|').append(game.sitPitcherId).append('|')
+          .append(safe(game.statusLabel()));
+        // include the current count + pitch tally via the live feed's latest AB
+        LiveAtBat ab = currentTrackerAtBat(game);
+        if (ab != null) {
+            sb.append('|').append(ab.abNumber).append('|').append(ab.pitches == null ? 0 : ab.pitches.size())
+              .append('|').append(safe(ab.result));
+        }
+        return sb.toString();
+    }
+
+    private String playFeedSignature(LiveGame game) {
+        if (game == null || game.liveFeed == null || game.liveFeed.feed == null) return "empty";
+        LiveFeed feed = game.liveFeed;
+        StringBuilder sb = new StringBuilder();
+        sb.append(feed.feed.size()).append('|').append(liveFeedInningFilter).append('|').append(liveFeedPlaysExpanded).append('|');
+        int from = Math.max(0, feed.feed.size() - 8);
+        for (int i = from; i < feed.feed.size(); i++) {
+            LiveFeedEntry fe = feed.feed.get(i);
+            if (fe == null) continue;
+            sb.append(fe.inning).append(fe.topHalf ? 'T' : 'B')
+              .append(safe(fe.headline)).append('~').append(safe(fe.detail)).append(';');
+        }
+        return sb.toString();
+    }
+
+    private void rebuildPlayFeedHost(LiveGame game, boolean force) {
+        if (activePlayFeedHost == null) return;
+        String sig = playFeedSignature(game);
+        if (!force && sig.equals(liveFeedRenderSig) && activePlayFeedHost.getChildCount() > 0) return;
+        liveFeedRenderSig = sig;
+        activePlayFeedHost.removeAllViews();
+        LinearLayout pfCard = new LinearLayout(MainActivity.this);
+        pfCard.setOrientation(LinearLayout.VERTICAL);
+        buildPlayFeedInto(pfCard, game, game.liveFeed, activeLiveTrackerAwayPal, activeLiveTrackerHomePal);
+        activePlayFeedHost.addView(pfCard, matchWrap());
     }
 
     private TextView inningChip(String label, boolean active, View.OnClickListener click) {
@@ -22376,14 +22423,11 @@ private View liveGameCard(LiveGame game, int slateIndex) {
 
     private void rerenderTracker(LiveGame game) {
         if (game == null || activeLiveTrackerHost == null) return;
+        liveTrackerRenderSig = trackerStateSignature(game); // v412: keep guard in sync
         activeLiveTrackerHost.removeAllViews();
         activeLiveTrackerHost.addView(buildTrackerPager(game), matchWrap());
         if (activePlayFeedHost != null) {
-            activePlayFeedHost.removeAllViews();
-            LinearLayout pfCard = new LinearLayout(this);
-            pfCard.setOrientation(LinearLayout.VERTICAL);
-            buildPlayFeedInto(pfCard, game, game.liveFeed, activeLiveTrackerAwayPal, activeLiveTrackerHomePal);
-            activePlayFeedHost.addView(pfCard, matchWrap());
+            rebuildPlayFeedHost(game, true); // v412: nav/filter changed → force
         }
         updateCarouselData(game, currentTrackerAtBat(game));
         if (liveFocusMode && mainScroll != null) main.post(() -> mainScroll.scrollTo(0, 0));
@@ -24665,6 +24709,8 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
             LinearLayout.LayoutParams thLp = matchWrap(); thLp.setMargins(dp(4), 0, dp(4), dp(2));
             panel.addView(trackerHost, thLp);
             activeLiveTrackerHost = trackerHost;
+            liveTrackerRenderSig = ""; // v412: force first render
+            liveFeedRenderSig = "";
 
             if (!"Final".equals(game.statusLabel())) {
                 FrameLayout carouselHost = new FrameLayout(this);
