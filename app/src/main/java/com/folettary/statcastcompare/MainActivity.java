@@ -337,6 +337,10 @@ public class MainActivity extends Activity {
     private int liveContextCarouselScrollX = 0;
     private int liveContextCarouselCycleWidth = 0;
     private long liveContextTickerEpochMs = 0L;
+    // v409: frame-delta crawl accumulator — the absolute scroll position, advanced per frame and
+    // wrapped against the current cycle width. Immune to cycle-width changes on pitch updates.
+    private float liveContextScrollPos = 0f;
+    private long liveContextLastFrameMs = 0L;
     private final java.util.ArrayList<GameContextCard> liveContextCarouselStableCards = new java.util.ArrayList<>();
 
     private View gameHubTabBarView = null;                   // v301: tab bar, to snap to on tab switch
@@ -839,7 +843,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v408", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v409", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20773,6 +20777,8 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             liveContextCarouselScrollX = 0;
             liveContextCarouselCycleWidth = 0;
             liveContextTickerEpochMs = android.os.SystemClock.uptimeMillis();
+            liveContextScrollPos = 0f;
+            liveContextLastFrameMs = 0L;
             liveContextRotationEpochMs = android.os.SystemClock.uptimeMillis();
             liveContextRotationStep = 0;
             liveContextCarouselStableCards.clear();
@@ -21057,8 +21063,21 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 canvas.clipRect(0, 0, vw, rowH);
 
                 long now = android.os.SystemClock.uptimeMillis();
-                float offset = cards.size() >= 2 ? ((now - liveContextTickerEpochMs) * speedPxPerMs) % cycleW : 0f;
-                // remember the current offset so a rebuild can resume from the same position
+                // v409: advance the scroll by the per-FRAME delta, not by absolute-time-modulo. The
+                // old formula ((now-epoch)*speed) % cycleW jumped whenever cycleW changed (which
+                // happens on every pitch as card widths change), because the same time mapped to a
+                // different remainder. A frame-delta accumulator keeps the absolute position
+                // continuous: when cards resize, the crawl simply keeps going from where it was.
+                if (liveContextLastFrameMs <= 0L) liveContextLastFrameMs = now;
+                long dt = now - liveContextLastFrameMs;
+                if (dt < 0) dt = 0;
+                if (dt > 100) dt = 16; // a stall (poll/GC) must not teleport the strip; cap the step
+                liveContextLastFrameMs = now;
+                liveContextScrollPos += dt * speedPxPerMs;
+                // wrap softly against the CURRENT cycle width
+                while (liveContextScrollPos >= cycleW) liveContextScrollPos -= cycleW;
+                while (liveContextScrollPos < 0) liveContextScrollPos += cycleW;
+                float offset = cards.size() >= 2 ? liveContextScrollPos : 0f;
                 liveContextCarouselScrollX = (int) offset;
 
                 float startX = -offset;
