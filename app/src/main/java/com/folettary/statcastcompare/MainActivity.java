@@ -19876,7 +19876,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                     // v407: rebuild the play feed (its own host, below the carousel).
                     if (activePlayFeedHost != null) {
                         activePlayFeedHost.removeAllViews();
-                        LinearLayout pfCard = new LinearLayout(this);
+                        LinearLayout pfCard = new LinearLayout(MainActivity.this);
                         pfCard.setOrientation(LinearLayout.VERTICAL);
                         buildPlayFeedInto(pfCard, g, g.liveFeed, activeLiveTrackerAwayPal, activeLiveTrackerHomePal);
                         activePlayFeedHost.addView(pfCard, matchWrap());
