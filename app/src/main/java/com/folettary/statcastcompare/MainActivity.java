@@ -833,7 +833,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v404", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v405", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20722,8 +20722,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
     private long liveContextRotationEpochMs = 0L;
     private int liveContextRotationStep = 0;
     // v399: reuse the same ticker view across rebuilds to eliminate the replace-on-poll flash.
-    // v402: ticker draws from these instance fields so onDraw always reflects the latest data.
-    private View liveContextPersistentTicker = null; // single instance, reused to avoid any flash
+    // v405: ticker draws from these instance fields so onDraw always reflects the latest data.
     private final java.util.ArrayList<GameContextCard> liveContextTickerCards = new java.util.ArrayList<>();
     private final java.util.ArrayList<Integer> liveContextTickerWidths = new java.util.ArrayList<>();
     private int liveContextTickerCycleW = 1;
@@ -20744,7 +20743,6 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             liveContextTickerEpochMs = android.os.SystemClock.uptimeMillis();
             liveContextRotationEpochMs = android.os.SystemClock.uptimeMillis();
             liveContextRotationStep = 0;
-            liveContextPersistentTicker = null; // new game → fresh ticker (different teams/colors)
             liveContextCarouselStableCards.clear();
         }
 
@@ -20895,19 +20893,6 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         liveContextTickerGap = gap;
         liveContextTickerSpeed = speedPxPerMs;
 
-        // v402: REUSE one persistent ticker view. The tracker card is fully rebuilt on every poll/
-        // pitch (host.removeAllViews + rebuild), which is what made the whole strip flash. By keeping
-        // ONE ticker instance and only re-parenting it into the freshly built card, the canvas view
-        // is never destroyed — it keeps drawing its continuous crawl with zero flash. Data is read
-        // live from instance fields, so updated cards appear without recreating the view.
-        if (liveContextPersistentTicker != null) {
-            android.view.ViewParent vp = liveContextPersistentTicker.getParent();
-            if (vp instanceof android.view.ViewGroup) ((android.view.ViewGroup) vp).removeView(liveContextPersistentTicker);
-            liveContextPersistentTicker.setMinimumHeight(rowH);
-            liveContextPersistentTicker.invalidate();
-            return liveContextPersistentTicker;
-        }
-
         View ticker = new View(this) {
             private final Paint fillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
             private final Paint strokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -21053,7 +21038,6 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         };
         ticker.setMinimumHeight(rowH);
         ticker.setClipToOutline(false);
-        liveContextPersistentTicker = ticker;
         return ticker;
     }
 
