@@ -343,6 +343,9 @@ public class MainActivity extends Activity {
     // wrapped against the current cycle width. Immune to cycle-width changes on pitch updates.
     private float liveContextScrollPos = 0f;
     private long liveContextLastFrameMs = 0L;
+    // v415: ids the render thread has observed scroll fully off-screen while departing; the next
+    // merge prunes them. Synchronized via liveContextDrawLock.
+    private final java.util.Set<String> liveContextDepartedIds = java.util.Collections.synchronizedSet(new java.util.HashSet<>());
     private final java.util.ArrayList<GameContextCard> liveContextCarouselStableCards = new java.util.ArrayList<>();
 
     private View gameHubTabBarView = null;                   // v301: tab bar, to snap to on tab switch
@@ -845,7 +848,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v414", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v415", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20754,6 +20757,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         String contextSig = ""; // v399: base/out/count signature; stale cards are dropped on change
         String subject = "";    // v401: player/subject this card is about; folded into the ID so a
                                  // new batter's card is distinct (crawls in) instead of swapping in place
+        boolean departing = false; // v415: marked stale; stays drawn until it scrolls off, then removed
         GameContextCard(int priority, String eyebrow, String headline, String subline, int accent) {
             this.priority = priority;
             this.eyebrow = eyebrow;
@@ -20880,37 +20884,71 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             }
         }
 
-        // First time: seed and return.
+        // v415: SLOT MODEL. The carousel keeps a persistent, ordered list of cards ("slots"). The
+        // golden rule: never remove or reorder a card that is currently on screen. Instead:
+        //   • a card whose situation is still valid updates its content IN its existing slot,
+        //   • a card that's no longer valid is MARKED departing (kept drawn until it scrolls off),
+        //   • a newly-relevant card is APPENDED to the tail (it crawls in from off-screen right).
+        // Departed cards are pruned only once the crawl has carried them fully past the left edge,
+        // so the visible window never reflows — eliminating the per-pitch/per-AB jump.
+        java.util.HashMap<String, GameContextCard> desiredById = new java.util.HashMap<>();
+        for (GameContextCard c : visible) desiredById.put(gameContextCardId(c), c);
+
+        // First time: seed the slots and return.
         if (liveContextCarouselStableCards.isEmpty()) {
             liveContextCarouselStableCards.addAll(visible);
             return new java.util.ArrayList<>(liveContextCarouselStableCards);
         }
 
-        // Merge: keep moving order stable, update content in place for cards still present, append
-        // any newly-visible cards to the tail so they slide in rather than popping at the front.
-        java.util.HashMap<String, GameContextCard> visById = new java.util.HashMap<>();
-        for (GameContextCard c : visible) visById.put(gameContextCardId(c), c);
-
-        java.util.ArrayList<GameContextCard> merged = new java.util.ArrayList<>();
-        java.util.HashSet<String> kept = new java.util.HashSet<>();
-        String curSig = liveContextSignature(game);
+        java.util.ArrayList<GameContextCard> slots = new java.util.ArrayList<>();
+        java.util.HashSet<String> present = new java.util.HashSet<>();
         for (GameContextCard old : liveContextCarouselStableCards) {
             String id = gameContextCardId(old);
-            GameContextCard updated = visById.get(id);
-            // only keep if still present in the fresh set AND its content matches the current
-            // situation (the updated card carries the current signature by construction).
-            if (updated != null && safe(updated.contextSig).equals(curSig)) { merged.add(updated); kept.add(id); }
+            if (present.contains(id)) continue; // de-dupe defensively
+            GameContextCard desired = desiredById.get(id);
+            if (desired != null) {
+                // still relevant → update content in place, keep its slot/position, clear departing
+                desired.departing = false;
+                slots.add(desired);
+            } else {
+                // no longer relevant → keep drawing it but mark departing so it cycles out off-screen
+                old.departing = true;
+                slots.add(old);
+            }
+            present.add(id);
         }
+        // Append newly-relevant cards to the tail (they enter from off-screen right).
         for (GameContextCard c : visible) {
             String id = gameContextCardId(c);
-            if (!kept.contains(id)) { merged.add(c); kept.add(id); }
-            if (merged.size() >= 8) break;
+            if (!present.contains(id)) { c.departing = false; slots.add(c); present.add(id); }
         }
-        if (merged.isEmpty()) {
-            for (int i = 0; i < Math.min(6, sorted.size()); i++) merged.add(sorted.get(i));
+        // Prune departing cards that the draw loop has flagged as fully off-screen (offscreenDeparted).
+        // Cap total slots so the ring can't grow unbounded if many situations churn at once.
+        java.util.ArrayList<GameContextCard> pruned = new java.util.ArrayList<>();
+        for (GameContextCard c : slots) {
+            if (c.departing && liveContextDepartedIds.contains(gameContextCardId(c))) continue; // fully gone
+            pruned.add(c);
+        }
+        liveContextDepartedIds.clear();
+        // Hard cap: keep at most 14 slots; if over, drop the lowest-priority departing ones first.
+        if (pruned.size() > 14) {
+            java.util.ArrayList<GameContextCard> departingFirst = new java.util.ArrayList<>(pruned);
+            java.util.Collections.sort(departingFirst, (a, b) -> {
+                if (a.departing != b.departing) return a.departing ? -1 : 1;
+                return a.priority - b.priority;
+            });
+            java.util.HashSet<String> drop = new java.util.HashSet<>();
+            int toDrop = pruned.size() - 14;
+            for (int i = 0; i < departingFirst.size() && drop.size() < toDrop; i++) drop.add(gameContextCardId(departingFirst.get(i)));
+            java.util.ArrayList<GameContextCard> capped = new java.util.ArrayList<>();
+            for (GameContextCard c : pruned) if (!drop.contains(gameContextCardId(c))) capped.add(c);
+            pruned = capped;
+        }
+        if (pruned.isEmpty()) {
+            for (int i = 0; i < Math.min(6, sorted.size()); i++) pruned.add(sorted.get(i));
         }
         liveContextCarouselStableCards.clear();
-        liveContextCarouselStableCards.addAll(merged);
+        liveContextCarouselStableCards.addAll(pruned);
         return new java.util.ArrayList<>(liveContextCarouselStableCards);
     }
 
@@ -20962,7 +21000,9 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             if (!uniqueCards.containsKey(id)) uniqueCards.put(id, c);
         }
         java.util.ArrayList<GameContextCard> cards = new java.util.ArrayList<>(uniqueCards.values());
-        while (cards.size() > 6) cards.remove(cards.size() - 1);
+        // v415: do NOT hard-cap here. The slot model (stableGameContextCards) governs how many cards
+        // exist and lets stale ones cycle off-screen gracefully; chopping the list here would yank
+        // cards out abruptly and reintroduce the jump.
 
         if (liveContextTickerEpochMs <= 0L) liveContextTickerEpochMs = android.os.SystemClock.uptimeMillis();
         int rowH = dp(104), gap = dp(8);
@@ -21104,14 +21144,38 @@ private View liveGameCard(LiveGame game, int slateIndex) {
 
             float startX = -offset;
             while (startX > 0) startX -= cycleW;
+            // v415: track which departing cards have fully exited the left edge this frame, so the
+            // next merge can prune them. A departing card is drawn only in the leftmost cycle pass
+            // (where it's exiting); it is never redrawn as the strip loops, so it can't pop back in
+            // on the right — it simply slides off and is gone.
+            java.util.HashSet<String> departedThisFrame = null;
+            boolean firstPass = true;
             for (float cycleStart = startX; cycleStart < vw; cycleStart += cycleW) {
                 float x = cycleStart;
                 for (int i = 0; i < cards.size(); i++) {
+                    GameContextCard card = cards.get(i);
                     int w = widths.get(i);
-                    if (x < vw && x + w > 0) drawCard(canvas, cards.get(i), x, 0, w, rowH);
+                    boolean onScreen = x < vw && x + w > 0;
+                    if (card.departing) {
+                        // only ever draw a departing card in the first (leftmost) cycle pass
+                        if (firstPass) {
+                            if (onScreen) {
+                                drawCard(canvas, card, x, 0, w, rowH);
+                            } else if (x + w <= 0) {
+                                // fully past the left edge → it's gone; flag for pruning
+                                if (departedThisFrame == null) departedThisFrame = new java.util.HashSet<>();
+                                departedThisFrame.add(gameContextCardId(card));
+                            }
+                        }
+                        // in later passes (loop repeats), skip departing cards entirely
+                    } else {
+                        if (onScreen) drawCard(canvas, card, x, 0, w, rowH);
+                    }
                     x += w + gap;
                 }
+                firstPass = false;
             }
+            if (departedThisFrame != null) liveContextDepartedIds.addAll(departedThisFrame);
             canvas.restore();
         }
 
