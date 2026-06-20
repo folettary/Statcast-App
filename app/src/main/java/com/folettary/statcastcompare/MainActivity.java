@@ -833,7 +833,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v398", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v399", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20661,6 +20661,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         final String headline;
         final String subline;
         final int accent;
+        String contextSig = ""; // v399: base/out/count signature; stale cards are dropped on change
         GameContextCard(int priority, String eyebrow, String headline, String subline, int accent) {
             this.priority = priority;
             this.eyebrow = eyebrow;
@@ -20668,6 +20669,15 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             this.subline = subline;
             this.accent = accent;
         }
+    }
+
+    // v399: signature of the live situation a card depends on. If the situation changes, any card
+    // built for the old signature is discarded rather than lingering (fixes RISP cards showing when
+    // the base state has since changed).
+    private String liveContextSignature(LiveGame game) {
+        if (game == null) return "";
+        int baseMask = (game.onFirst ? 1 : 0) | (game.onSecond ? 2 : 0) | (game.onThird ? 4 : 0);
+        return baseMask + "|" + Math.max(0, Math.min(3, game.sitOuts)) + "|" + game.sitInning + "|" + safe(game.sitInningState);
     }
 
     private String gameContextCardId(GameContextCard c) {
@@ -20706,6 +20716,14 @@ private View liveGameCard(LiveGame game, int slateIndex) {
     // keeps changing even when the game state is momentarily static.
     private long liveContextRotationEpochMs = 0L;
     private int liveContextRotationStep = 0;
+    // v399: reuse the same ticker view across rebuilds to eliminate the replace-on-poll flash.
+    private View liveContextTickerView = null;
+    private final java.util.ArrayList<GameContextCard> liveContextTickerCards = new java.util.ArrayList<>();
+    private final java.util.ArrayList<Integer> liveContextTickerWidths = new java.util.ArrayList<>();
+    private int liveContextTickerCycleW = 1;
+    private int liveContextTickerRowH = 1;
+    private int liveContextTickerGap = 0;
+    private float liveContextTickerSpeed = 0.02f;
 
     private java.util.ArrayList<GameContextCard> stableGameContextCards(LiveGame game, java.util.ArrayList<GameContextCard> fresh) {
         java.util.ArrayList<GameContextCard> sorted = new java.util.ArrayList<>();
@@ -20720,6 +20738,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             liveContextTickerEpochMs = android.os.SystemClock.uptimeMillis();
             liveContextRotationEpochMs = android.os.SystemClock.uptimeMillis();
             liveContextRotationStep = 0;
+            liveContextTickerView = null; // v399: drop the reused view when switching games
             liveContextCarouselStableCards.clear();
         }
 
@@ -20773,10 +20792,13 @@ private View liveGameCard(LiveGame game, int slateIndex) {
 
         java.util.ArrayList<GameContextCard> merged = new java.util.ArrayList<>();
         java.util.HashSet<String> kept = new java.util.HashSet<>();
+        String curSig = liveContextSignature(game);
         for (GameContextCard old : liveContextCarouselStableCards) {
             String id = gameContextCardId(old);
             GameContextCard updated = visById.get(id);
-            if (updated != null) { merged.add(updated); kept.add(id); }
+            // only keep if still present in the fresh set AND its content matches the current
+            // situation (the updated card carries the current signature by construction).
+            if (updated != null && safe(updated.contextSig).equals(curSig)) { merged.add(updated); kept.add(id); }
         }
         for (GameContextCard c : visible) {
             String id = gameContextCardId(c);
@@ -20832,7 +20854,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         // modulo the cycle width — but the cycle width changes when cards rotate or resize, which
         // made the strip visibly jump every poll. We re-anchor the epoch so the new view's first
         // frame lands on the same pixel offset the previous view last drew.
-        final float speedPxPerMs = Math.max(0.012f, dp(8) / 1000f);
+        final float speedPxPerMs = Math.max(0.020f, dp(14) / 1000f); // v399: faster, steadier crawl
         long nowAnchor = android.os.SystemClock.uptimeMillis();
         if (liveContextCarouselCycleWidth > 0) {
             float desiredOffset = liveContextCarouselScrollX % cycleW;
@@ -20840,6 +20862,27 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             liveContextTickerEpochMs = nowAnchor - (long) (desiredOffset / speedPxPerMs);
         }
         liveContextCarouselCycleWidth = cycleW;
+
+        // v399: store the data in instance fields and REUSE the ticker view across rebuilds. Creating
+        // a fresh View each poll caused a one-frame blink as the old view was swapped out; reusing
+        // the same instance and just updating its data removes that flash entirely.
+        liveContextTickerCards.clear();
+        liveContextTickerCards.addAll(cards);
+        liveContextTickerWidths.clear();
+        liveContextTickerWidths.addAll(widths);
+        liveContextTickerCycleW = cycleW;
+        liveContextTickerRowH = rowH;
+        liveContextTickerGap = gap;
+        liveContextTickerSpeed = speedPxPerMs;
+
+        if (liveContextTickerView != null) {
+            android.view.ViewParent vp = liveContextTickerView.getParent();
+            if (vp instanceof android.view.ViewGroup) {
+                ((android.view.ViewGroup) vp).removeView(liveContextTickerView);
+            }
+            liveContextTickerView.invalidate();
+            return liveContextTickerView;
+        }
 
         View ticker = new View(this) {
             private final Paint fillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -20948,7 +20991,13 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             @Override protected void onDraw(Canvas canvas) {
                 super.onDraw(canvas);
                 int vw = getWidth();
-                if (vw <= 0 || cards.isEmpty()) return;
+                java.util.ArrayList<GameContextCard> cards = liveContextTickerCards;
+                java.util.ArrayList<Integer> widths = liveContextTickerWidths;
+                int cycleW = Math.max(1, liveContextTickerCycleW);
+                int rowH = liveContextTickerRowH;
+                int gap = liveContextTickerGap;
+                float speedPxPerMs = liveContextTickerSpeed;
+                if (vw <= 0 || cards.isEmpty() || widths.size() != cards.size()) return;
 
                 canvas.save();
                 canvas.clipRect(0, 0, vw, rowH);
@@ -20980,6 +21029,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         };
         ticker.setMinimumHeight(rowH);
         ticker.setClipToOutline(false);
+        liveContextTickerView = ticker;
         return ticker;
     }
 
@@ -21194,8 +21244,9 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 addInsightCard(cards, used, 142, "PLATOON SPLIT", head, sub, batAccent);
             }
         }
-        // with RISP (only when relevant)
-        if (batterId > 0 && risp) {
+        // with RISP (only when relevant). If it's specifically 2-out RISP, we show the dedicated
+        // TWO-OUT RISP card below instead, so these never both appear for the same hitter.
+        if (batterId > 0 && risp && outs < 2) {
             Stats sp = liveSplit(batterId, true, "risp");
             Double avg = liveStat(sp, "avg");
             Double ops = liveStat(sp, "ops");
@@ -21342,6 +21393,52 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             addInsightCard(cards, used, 133, "LEVERAGE", head, sub, neutralAccent);
         }
 
+        // --- Batch 3 (v399): more distinct insights, each a unique eyebrow ---
+        // Batter barrel rate — elite power-contact indicator.
+        if (batBarrel != null && batBarrel >= 8d) {
+            String head = (!batLast.isEmpty() ? batLast + " " : "") + livePct(batBarrel) + " barrel rate";
+            addInsightCard(cards, used, 92, "BARREL RATE", head, "Elite batted-ball damage profile", batAccent);
+        }
+        // Pitcher swinging-strike / stuff
+        if (pitWhiff != null && pitWhiff >= 12d && !twoStrike) {
+            String head = (!pitLast.isEmpty() ? pitLast + " " : "") + livePct(pitWhiff) + " whiff rate";
+            addInsightCard(cards, used, 90, "SWING-MISS STUFF", head, "Bat-missing arsenal this season", defAccent);
+        }
+        // Batter chase discipline (when behind/2-strike pressure isn't already shown)
+        if (batChase != null && !twoStrike && !hitterAhead) {
+            boolean disciplined = batChase <= 26d;
+            String head = (!batLast.isEmpty() ? batLast + " " : "") + livePct(batChase) + " chase";
+            addInsightCard(cards, used, 80, "PLATE DISCIPLINE", head, disciplined ? "Rarely expands the zone" : "Will chase out of zone", batAccent);
+        }
+        // Pitcher control: K-BB% as a single command number, mid-count
+        if (pitKbb != null && balls + strikes <= 2 && livePa) {
+            String head = (!pitLast.isEmpty() ? pitLast + " " : "") + livePct(pitKbb) + " K-BB";
+            addInsightCard(cards, used, 78, "COMMAND INDEX", head, "Strikeouts minus walks — overall command", defAccent);
+        }
+        // Batter ISO power
+        Double batIso = liveStat(batStats, "iso");
+        if (batIso != null && batIso >= 0.200d) {
+            String head = (!batLast.isEmpty() ? batLast + " " : "") + liveRate(batIso) + " ISO";
+            addInsightCard(cards, used, 76, "RAW POWER", head, "Isolated power — extra-base damage", batAccent);
+        }
+        // Pitcher ground-ball lean — DP/contact management
+        Double pitGb = liveStat(pitStats, "pGbPct");
+        if (pitGb != null && pitGb >= 48d && (game.onFirst || runners > 0)) {
+            String head = (!pitLast.isEmpty() ? pitLast + " " : "") + livePct(pitGb) + " grounders";
+            addInsightCard(cards, used, 86, "GROUND-BALL LEAN", head, "Pitches to contact on the ground", defAccent);
+        }
+        // First-pitch tendency context (count is 0-0, PA just starting)
+        if (livePa && balls == 0 && strikes == 0) {
+            if (batXwoba != null) {
+                String head = (!batLast.isEmpty() ? batLast + " " : "") + liveRate(batXwoba) + " xwOBA";
+                addInsightCard(cards, used, 70, "FIRST PITCH", head, "New at-bat · season expected value", batAccent);
+            }
+        }
+        // Inning-opening context (leadoff hitter of an inning, bases empty, 0 out)
+        if (runners == 0 && outs == 0 && livePa) {
+            addInsightCard(cards, used, 68, "LEADOFF SPOT", "Setting the table", ordinalNum(inning) + " inning · bases empty, 0 out", neutralAccent);
+        }
+
         float lastWpSwing = latestWinProbSwing(game);
         String lastBigPlay = latestWinProbDescription(game);
         if (!Float.isNaN(lastWpSwing) && lastWpSwing >= 8f) {
@@ -21380,6 +21477,8 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         }
 
         java.util.Collections.sort(cards, (a, b) -> b.priority - a.priority);
+        String sig = liveContextSignature(game);
+        for (GameContextCard c : cards) c.contextSig = sig;
         return cards;
     }
 
