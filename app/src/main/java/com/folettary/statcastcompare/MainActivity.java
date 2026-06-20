@@ -43,6 +43,8 @@ import android.util.LruCache;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.TextureView;
+import android.view.Surface;
 import android.view.ViewOutlineProvider;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
@@ -341,8 +343,6 @@ public class MainActivity extends Activity {
     // wrapped against the current cycle width. Immune to cycle-width changes on pitch updates.
     private float liveContextScrollPos = 0f;
     private long liveContextLastFrameMs = 0L;
-    private long liveContextDebugMaxGap = 0L;      // DEBUG v410: largest frame gap in last 3s
-    private long liveContextDebugGapResetMs = 0L;
     private final java.util.ArrayList<GameContextCard> liveContextCarouselStableCards = new java.util.ArrayList<>();
 
     private View gameHubTabBarView = null;                   // v301: tab bar, to snap to on tab switch
@@ -845,7 +845,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v412", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v413", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20966,12 +20966,16 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         // re-solving the epoch on every data update was what nudged the cards forward each poll.
         if (liveContextTickerEpochMs <= 0L) liveContextTickerEpochMs = android.os.SystemClock.uptimeMillis();
         liveContextCarouselCycleWidth = cycleW;
-        liveContextTickerCards.clear(); liveContextTickerCards.addAll(cards);
-        liveContextTickerWidths.clear(); liveContextTickerWidths.addAll(widths);
-        liveContextTickerCycleW = cycleW;
-        liveContextTickerRowH = rowH;
-        liveContextTickerGap = gap;
-        liveContextTickerSpeed = speedPxPerMs;
+        // v413: write the shared card data under the same lock the render thread reads it with, so the
+        // off-thread crawl never sees a half-updated card list (which could flicker or crash).
+        synchronized (liveContextDrawLock) {
+            liveContextTickerCards.clear(); liveContextTickerCards.addAll(cards);
+            liveContextTickerWidths.clear(); liveContextTickerWidths.addAll(widths);
+            liveContextTickerCycleW = cycleW;
+            liveContextTickerRowH = rowH;
+            liveContextTickerGap = gap;
+            liveContextTickerSpeed = speedPxPerMs;
+        }
     }
 
     // v406: resolve the at-bat the tracker is currently showing (live or browsed), for carousel data.
@@ -20992,191 +20996,189 @@ private View liveGameCard(LiveGame game, int slateIndex) {
 
     // v406: create the canvas ticker view. It draws purely from instance fields (set by
     // prepareCarouselData), so it can be created once and updated forever without recreation.
+    // v413: the carousel is a TextureView rendered on a DEDICATED thread. A SurfaceView/TextureView
+    // draws off the main thread, so a heavy main-thread layout pass (the pitch-moment tracker rebuild)
+    // can no longer freeze the crawl. This is the only approach that survives a busy UI thread; all
+    // the main-thread isolation attempts (v399–v412) couldn't, by definition, draw while the main
+    // thread was blocked. Card data is read under liveContextDrawLock to stay consistent with updates.
+    private final Object liveContextDrawLock = new Object();
+    private CarouselRenderThread liveContextRenderThread = null;
+
     private View createCarouselTickerView() {
-        View ticker = new View(this) {
-            private final Paint fillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-            private final Paint strokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-            private final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-            private final RectF rect = new RectF();
-            private boolean attached = false;
-
-            // v411: ISOLATE this view from the parent's layout passes. When a sibling host rebuilds
-            // (poll or AB navigation), the parent LinearLayout re-measures/-lays-out its children;
-            // that pass was starving this canvas animation (frame gaps jumping 17ms→60ms = ~4 dropped
-            // frames = the flash). A fixed onMeasure makes our measure a no-op, and isolateLayout
-            // stops a sibling's requestLayout from forcing us to re-measure.
-            @Override protected void onMeasure(int widthSpec, int heightSpec) {
-                int w = MeasureSpec.getSize(widthSpec);
-                setMeasuredDimension(w > 0 ? w : dp(360), liveContextTickerRowH);
+        TextureView tv = new TextureView(this);
+        tv.setOpaque(false);
+        tv.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
+            @Override public void onSurfaceTextureAvailable(android.graphics.SurfaceTexture surface, int width, int height) {
+                if (liveContextRenderThread != null) { liveContextRenderThread.requestStop(); }
+                liveContextRenderThread = new CarouselRenderThread(new Surface(surface));
+                liveContextRenderThread.start();
             }
-            @Override public boolean isLayoutRequested() {
-                return false; // never report a pending layout up to the parent
+            @Override public void onSurfaceTextureSizeChanged(android.graphics.SurfaceTexture surface, int width, int height) { }
+            @Override public boolean onSurfaceTextureDestroyed(android.graphics.SurfaceTexture surface) {
+                if (liveContextRenderThread != null) { liveContextRenderThread.requestStop(); liveContextRenderThread = null; }
+                return true;
             }
-
-            private float sp(float v) {
-                return v * getResources().getDisplayMetrics().scaledDensity;
-            }
-
-            private String fitText(String raw, Paint p, float maxW) {
-                String s = safe(raw).replace('\n', ' ').trim();
-                if (s.isEmpty()) return "";
-                if (p.measureText(s) <= maxW) return s;
-                String ell = "…";
-                float ellW = p.measureText(ell);
-                int end = s.length();
-                while (end > 0 && p.measureText(s, 0, end) + ellW > maxW) end--;
-                return end <= 0 ? ell : s.substring(0, end).trim() + ell;
-            }
-
-            private java.util.ArrayList<String> fitTwoLines(String raw, Paint p, float maxW) {
-                java.util.ArrayList<String> out = new java.util.ArrayList<>();
-                String s = safe(raw).replace('\n', ' ').trim();
-                if (s.isEmpty()) return out;
-                String[] words = s.split("\\s+");
-                String line = "";
-                int i = 0;
-                for (; i < words.length; i++) {
-                    String next = line.isEmpty() ? words[i] : line + " " + words[i];
-                    if (p.measureText(next) <= maxW) {
-                        line = next;
-                    } else {
-                        break;
-                    }
-                }
-                if (!line.isEmpty()) out.add(line);
-                StringBuilder rest = new StringBuilder();
-                for (; i < words.length; i++) {
-                    if (rest.length() > 0) rest.append(' ');
-                    rest.append(words[i]);
-                }
-                if (rest.length() > 0) out.add(fitText(rest.toString(), p, maxW));
-                if (out.isEmpty()) out.add(fitText(s, p, maxW));
-                while (out.size() > 2) out.remove(out.size() - 1);
-                return out;
-            }
-
-            private void drawCard(Canvas canvas, GameContextCard c, float x, float y, float w, float h) {
-                rect.set(x, y, x + w, y + h);
-                fillPaint.setStyle(Paint.Style.FILL);
-                fillPaint.setShader(new LinearGradient(x, y, x + w, y + h,
-                        Color.argb(46, Color.red(c.accent), Color.green(c.accent), Color.blue(c.accent)),
-                        Color.argb(14, Color.red(c.accent), Color.green(c.accent), Color.blue(c.accent)),
-                        Shader.TileMode.CLAMP));
-                canvas.drawRoundRect(rect, dp(14), dp(14), fillPaint);
-                fillPaint.setShader(null);
-
-                strokePaint.setStyle(Paint.Style.STROKE);
-                strokePaint.setStrokeWidth(dp(1));
-                strokePaint.setColor(Color.argb(112, Color.red(c.accent), Color.green(c.accent), Color.blue(c.accent)));
-                canvas.drawRoundRect(rect, dp(14), dp(14), strokePaint);
-
-                int save = canvas.save();
-                canvas.clipRect(x + dp(8), y + dp(6), x + w - dp(8), y + h - dp(6));
-
-                float tx = x + dp(10);
-                float maxTextW = Math.max(1f, w - dp(20));
-
-                textPaint.setShader(null);
-                textPaint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
-                textPaint.setTextSize(sp(7));
-                textPaint.setColor(c.accent);
-                textPaint.setLetterSpacing(0.18f);
-                canvas.drawText(fitText(c.eyebrow, textPaint, maxTextW), tx, y + dp(20), textPaint);
-
-                textPaint.setLetterSpacing(0f);
-                textPaint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
-                textPaint.setTextSize(sp(12));
-                textPaint.setColor(INK);
-                canvas.drawText(fitText(c.headline, textPaint, maxTextW), tx, y + dp(50), textPaint);
-
-                textPaint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
-                textPaint.setTextSize(sp(8));
-                textPaint.setColor(INK_DIM);
-                java.util.ArrayList<String> subLines = fitTwoLines(c.subline, textPaint, maxTextW);
-                if (subLines.size() > 0) canvas.drawText(subLines.get(0), tx, y + dp(75), textPaint);
-                if (subLines.size() > 1) canvas.drawText(subLines.get(1), tx, y + dp(89), textPaint);
-
-                canvas.restoreToCount(save);
-            }
-
-            @Override protected void onAttachedToWindow() {
-                super.onAttachedToWindow();
-                attached = true;
-                invalidate();
-            }
-
-            @Override protected void onDetachedFromWindow() {
-                attached = false;
-                super.onDetachedFromWindow();
-            }
-
-            @Override protected void onDraw(Canvas canvas) {
-                super.onDraw(canvas);
-                int vw = getWidth();
-                java.util.ArrayList<GameContextCard> cards = liveContextTickerCards;
-                java.util.ArrayList<Integer> widths = liveContextTickerWidths;
-                int cycleW = Math.max(1, liveContextTickerCycleW);
-                int rowH = liveContextTickerRowH;
-                int gap = liveContextTickerGap;
-                float speedPxPerMs = liveContextTickerSpeed;
-                if (vw <= 0 || cards.isEmpty() || widths.size() != cards.size()) return;
-
-                canvas.save();
-                canvas.clipRect(0, 0, vw, rowH);
-
-                long now = android.os.SystemClock.uptimeMillis();
-                // v409: advance the scroll by the per-FRAME delta, not by absolute-time-modulo. The
-                // old formula ((now-epoch)*speed) % cycleW jumped whenever cycleW changed (which
-                // happens on every pitch as card widths change), because the same time mapped to a
-                // different remainder. A frame-delta accumulator keeps the absolute position
-                // continuous: when cards resize, the crawl simply keeps going from where it was.
-                if (liveContextLastFrameMs <= 0L) liveContextLastFrameMs = now;
-                long dt = now - liveContextLastFrameMs;
-                if (dt < 0) dt = 0;
-                // DEBUG v410: track the largest recent frame gap to diagnose the per-pitch hitch.
-                if (dt > liveContextDebugMaxGap) liveContextDebugMaxGap = dt;
-                if (now - liveContextDebugGapResetMs > 3000L) { liveContextDebugMaxGap = dt; liveContextDebugGapResetMs = now; }
-                if (dt > 100) dt = 16; // a stall (poll/GC) must not teleport the strip; cap the step
-                liveContextLastFrameMs = now;
-                liveContextScrollPos += dt * speedPxPerMs;
-                // wrap softly against the CURRENT cycle width
-                while (liveContextScrollPos >= cycleW) liveContextScrollPos -= cycleW;
-                while (liveContextScrollPos < 0) liveContextScrollPos += cycleW;
-                float offset = cards.size() >= 2 ? liveContextScrollPos : 0f;
-                liveContextCarouselScrollX = (int) offset;
-
-                float startX = -offset;
-                while (startX > 0) startX -= cycleW;
-
-                for (float cycleStart = startX; cycleStart < vw; cycleStart += cycleW) {
-                    float x = cycleStart;
-                    for (int i = 0; i < cards.size(); i++) {
-                        int w = widths.get(i);
-                        if (x < vw && x + w > 0) drawCard(canvas, cards.get(i), x, 0, w, rowH);
-                        x += w + gap;
-                    }
-                }
-
-                canvas.restore();
-
-                // DEBUG v410: max recent frame gap, top-left. Spikes lining up with pitches = the
-                // rebuild's layout pass starves the animation. Steady ~16ms = draw is fine.
-                textPaint.setColor(Color.argb(220, 255, 90, 90));
-                textPaint.setTextSize(sp(9));
-                textPaint.setTextAlign(Paint.Align.LEFT);
-                textPaint.setShader(null);
-                canvas.drawText("gap " + liveContextDebugMaxGap + "ms", dp(3), sp(11), textPaint);
-
-                if (attached && cards.size() >= 2) {
-                    if (Build.VERSION.SDK_INT >= 16) postInvalidateOnAnimation();
-                    else postInvalidateDelayed(16L);
-                }
-            }
-        };
-        ticker.setMinimumHeight(liveContextTickerRowH);
-        ticker.setClipToOutline(false);
-        return ticker;
+            @Override public void onSurfaceTextureUpdated(android.graphics.SurfaceTexture surface) { }
+        });
+        return tv;
     }
+
+    private final class CarouselRenderThread extends Thread {
+        private final Surface surface;
+        private volatile boolean running = true;
+        private final Paint fillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint strokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF rect = new RectF();
+
+        CarouselRenderThread(Surface s) { this.surface = s; setName("carousel-render"); }
+        void requestStop() { running = false; interrupt(); }
+
+        private float sp(float v) { return v * getResources().getDisplayMetrics().scaledDensity; }
+
+        @Override public void run() {
+            while (running) {
+                long frameStart = android.os.SystemClock.uptimeMillis();
+                Canvas canvas = null;
+                try {
+                    if (!surface.isValid()) { sleepQuietly(16); continue; }
+                    canvas = surface.lockCanvas(null);
+                    if (canvas == null) { sleepQuietly(16); continue; }
+                    canvas.drawColor(0, android.graphics.PorterDuff.Mode.CLEAR);
+                    drawFrame(canvas);
+                } catch (Exception e) {
+                    // never let a transient surface error kill the thread
+                } finally {
+                    if (canvas != null) {
+                        try { surface.unlockCanvasAndPost(canvas); } catch (Exception ignored) { }
+                    }
+                }
+                long elapsed = android.os.SystemClock.uptimeMillis() - frameStart;
+                long sleep = 16 - elapsed;
+                if (sleep > 0) sleepQuietly(sleep);
+            }
+            try { surface.release(); } catch (Exception ignored) { }
+        }
+
+        private void sleepQuietly(long ms) { try { Thread.sleep(ms); } catch (InterruptedException ignored) { } }
+
+        private void drawFrame(Canvas canvas) {
+            java.util.ArrayList<GameContextCard> cards;
+            java.util.ArrayList<Integer> widths;
+            int cycleW, rowH, gap; float speedPxPerMs;
+            synchronized (liveContextDrawLock) {
+                cards = new java.util.ArrayList<>(liveContextTickerCards);
+                widths = new java.util.ArrayList<>(liveContextTickerWidths);
+                cycleW = Math.max(1, liveContextTickerCycleW);
+                rowH = liveContextTickerRowH;
+                gap = liveContextTickerGap;
+                speedPxPerMs = liveContextTickerSpeed;
+            }
+            int vw = canvas.getWidth();
+            if (vw <= 0 || cards.isEmpty() || widths.size() != cards.size()) return;
+
+            canvas.save();
+            canvas.clipRect(0, 0, vw, rowH);
+
+            long now = android.os.SystemClock.uptimeMillis();
+            if (liveContextLastFrameMs <= 0L) liveContextLastFrameMs = now;
+            long dt = now - liveContextLastFrameMs;
+            if (dt < 0) dt = 0;
+            if (dt > 100) dt = 16;
+            liveContextLastFrameMs = now;
+            liveContextScrollPos += dt * speedPxPerMs;
+            while (liveContextScrollPos >= cycleW) liveContextScrollPos -= cycleW;
+            while (liveContextScrollPos < 0) liveContextScrollPos += cycleW;
+            float offset = cards.size() >= 2 ? liveContextScrollPos : 0f;
+            liveContextCarouselScrollX = (int) offset;
+
+            float startX = -offset;
+            while (startX > 0) startX -= cycleW;
+            for (float cycleStart = startX; cycleStart < vw; cycleStart += cycleW) {
+                float x = cycleStart;
+                for (int i = 0; i < cards.size(); i++) {
+                    int w = widths.get(i);
+                    if (x < vw && x + w > 0) drawCard(canvas, cards.get(i), x, 0, w, rowH);
+                    x += w + gap;
+                }
+            }
+            canvas.restore();
+        }
+
+        private String fitText(String raw, Paint p, float maxW) {
+            String s = safe(raw).replace('\n', ' ').trim();
+            if (s.isEmpty()) return "";
+            if (p.measureText(s) <= maxW) return s;
+            String ell = "…";
+            float ellW = p.measureText(ell);
+            int end = s.length();
+            while (end > 0 && p.measureText(s, 0, end) + ellW > maxW) end--;
+            return end <= 0 ? ell : s.substring(0, end).trim() + ell;
+        }
+
+        private java.util.ArrayList<String> fitTwoLines(String raw, Paint p, float maxW) {
+            java.util.ArrayList<String> out = new java.util.ArrayList<>();
+            String s = safe(raw).replace('\n', ' ').trim();
+            if (s.isEmpty()) return out;
+            String[] words = s.split("\\s+");
+            String line = "";
+            int i = 0;
+            for (; i < words.length; i++) {
+                String next = line.isEmpty() ? words[i] : line + " " + words[i];
+                if (p.measureText(next) <= maxW) line = next; else break;
+            }
+            if (!line.isEmpty()) out.add(line);
+            StringBuilder rest = new StringBuilder();
+            for (; i < words.length; i++) { if (rest.length() > 0) rest.append(' '); rest.append(words[i]); }
+            if (rest.length() > 0) out.add(fitText(rest.toString(), p, maxW));
+            if (out.isEmpty()) out.add(fitText(s, p, maxW));
+            while (out.size() > 2) out.remove(out.size() - 1);
+            return out;
+        }
+
+        private void drawCard(Canvas canvas, GameContextCard c, float x, float y, float w, float h) {
+            rect.set(x, y, x + w, y + h);
+            fillPaint.setStyle(Paint.Style.FILL);
+            fillPaint.setShader(new LinearGradient(x, y, x + w, y + h,
+                    Color.argb(46, Color.red(c.accent), Color.green(c.accent), Color.blue(c.accent)),
+                    Color.argb(14, Color.red(c.accent), Color.green(c.accent), Color.blue(c.accent)),
+                    Shader.TileMode.CLAMP));
+            canvas.drawRoundRect(rect, dp(14), dp(14), fillPaint);
+            fillPaint.setShader(null);
+
+            strokePaint.setStyle(Paint.Style.STROKE);
+            strokePaint.setStrokeWidth(dp(1));
+            strokePaint.setColor(Color.argb(112, Color.red(c.accent), Color.green(c.accent), Color.blue(c.accent)));
+            canvas.drawRoundRect(rect, dp(14), dp(14), strokePaint);
+
+            int save = canvas.save();
+            canvas.clipRect(x + dp(8), y + dp(6), x + w - dp(8), y + h - dp(6));
+            float tx = x + dp(10);
+            float maxTextW = Math.max(1f, w - dp(20));
+
+            textPaint.setShader(null);
+            textPaint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+            textPaint.setTextSize(sp(7));
+            textPaint.setColor(c.accent);
+            textPaint.setLetterSpacing(0.18f);
+            textPaint.setTextAlign(Paint.Align.LEFT);
+            canvas.drawText(fitText(c.eyebrow, textPaint, maxTextW), tx, y + dp(20), textPaint);
+
+            textPaint.setLetterSpacing(0f);
+            textPaint.setTextSize(sp(12));
+            textPaint.setColor(INK);
+            canvas.drawText(fitText(c.headline, textPaint, maxTextW), tx, y + dp(50), textPaint);
+
+            textPaint.setTextSize(sp(8));
+            textPaint.setColor(INK_DIM);
+            java.util.ArrayList<String> subLines = fitTwoLines(c.subline, textPaint, maxTextW);
+            if (subLines.size() > 0) canvas.drawText(subLines.get(0), tx, y + dp(75), textPaint);
+            if (subLines.size() > 1) canvas.drawText(subLines.get(1), tx, y + dp(89), textPaint);
+
+            canvas.restoreToCount(save);
+        }
+    }
+
 
     private java.util.ArrayList<GameContextCard> buildGameContextCards(LiveGame game, LiveAtBat ab, TeamPalette awayPal, TeamPalette homePal) {
         java.util.ArrayList<GameContextCard> cards = new java.util.ArrayList<>();
