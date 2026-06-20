@@ -330,6 +330,7 @@ public class MainActivity extends Activity {
     // and only its data is updated — a truly continuous, never-flashing crawl.
     private FrameLayout activeCarouselHost = null;
     private View activeCarouselTicker = null;
+    private LinearLayout activePlayFeedHost = null; // v407: play feed below the persistent carousel
     private FrameLayout activeLiveScoreHeroHost = null; // v354: live score/inning hero refreshes during tracker polls
     private final Set<String> betweenInningDueUpSeen = new HashSet<>(); // v355: first render emphasizes last play, later render emphasizes due up
     private int liveContextCarouselGamePk = -1;                 // v358: preserve ticker continuity across tracker rebuilds
@@ -838,7 +839,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v406", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v407", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -1275,6 +1276,7 @@ public class MainActivity extends Activity {
         activeLiveTrackerHost = null;
         activeCarouselHost = null;
         activeCarouselTicker = null;
+        activePlayFeedHost = null;
         screenRequestToken++;
         liveFocusMode = false;
         if (bottomNavHost != null) bottomNavHost.setVisibility(View.VISIBLE);
@@ -19871,6 +19873,14 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                     liveUpdateRebuild = false;
                     // v406: refresh the persistent carousel's data in place — never recreates its view.
                     updateCarouselData(g, currentTrackerAtBat(g));
+                    // v407: rebuild the play feed (its own host, below the carousel).
+                    if (activePlayFeedHost != null) {
+                        activePlayFeedHost.removeAllViews();
+                        LinearLayout pfCard = new LinearLayout(this);
+                        pfCard.setOrientation(LinearLayout.VERTICAL);
+                        buildPlayFeedInto(pfCard, g, g.liveFeed);
+                        activePlayFeedHost.addView(pfCard, matchWrap());
+                    }
                     if (!g.isLive()) { stopLiveTrackerPolling(); return; }
                     main.postDelayed(liveTrackerPollRunnable, 15000L);
                 });
@@ -19908,6 +19918,13 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 host.addView(buildTrackerPager(game), matchWrap());
                 liveUpdateRebuild = false;
                 updateCarouselData(game, currentTrackerAtBat(game)); // v406: fill carousel once data is in
+                if (activePlayFeedHost != null) {
+                    activePlayFeedHost.removeAllViews();
+                    LinearLayout pfCard = new LinearLayout(this);
+                    pfCard.setOrientation(LinearLayout.VERTICAL);
+                    buildPlayFeedInto(pfCard, game, game.liveFeed);
+                    activePlayFeedHost.addView(pfCard, matchWrap());
+                }
                 if (liveFocusMode && mainScroll != null) main.post(() -> mainScroll.scrollTo(0, 0));
                 host.setVisibility(View.VISIBLE);
                 host.setAlpha(0f);
@@ -20197,6 +20214,19 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         // ---- Game Context carousel now lives in its own persistent host (see mountCarouselTicker),
         // mounted as a sibling above this tracker, so the poll's rebuild never destroys it. ----
 
+        // ---- Play feed: rendered into a SEPARATE host below the persistent carousel (v407), so the
+        // carousel can sit between the at-bat area and the play feed while staying outside the poll
+        // rebuild. When that separate host exists we skip the feed here. ----
+        if (activePlayFeedHost == null) {
+            buildPlayFeedInto(card, game, feed);
+        }
+
+        return card;
+    }
+
+    // The play-feed section, extracted so it can render either inside the tracker card or into a
+    // dedicated sibling host beneath the persistent carousel.
+    private void buildPlayFeedInto(LinearLayout card, LiveGame game, LiveFeed feed) {
         // ---- Play feed (most recent first) with inning scanning ----
         if (!liveFocusMode && feed != null && feed.loaded && !feed.feed.isEmpty()) {
             LinearLayout feedHeadRow = new LinearLayout(this);
@@ -20266,8 +20296,6 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 card.addView(less, lessLp);
             }
         }
-
-        return card;
     }
 
     private TextView inningChip(String label, boolean active, View.OnClickListener click) {
@@ -20878,11 +20906,10 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         for (int i = 0; i < cards.size(); i++) { int w = gameContextCardWidth(cards.get(i)); widths.add(w); cycle += w + gap; }
         int cycleW = Math.max(1, cycle);
         float speedPxPerMs = Math.max(0.028f, dp(19) / 1000f);
-        long nowAnchor = android.os.SystemClock.uptimeMillis();
-        if (liveContextCarouselCycleWidth > 0) {
-            float desiredOffset = liveContextCarouselScrollX % cycleW;
-            liveContextTickerEpochMs = nowAnchor - (long) (desiredOffset / speedPxPerMs);
-        }
+        // v407: the ticker view is now PERSISTENT (lives in its own host, never recreated), so the
+        // epoch stays constant and the crawl is inherently continuous. We must NOT re-anchor here —
+        // re-solving the epoch on every data update was what nudged the cards forward each poll.
+        if (liveContextTickerEpochMs <= 0L) liveContextTickerEpochMs = android.os.SystemClock.uptimeMillis();
         liveContextCarouselCycleWidth = cycleW;
         liveContextTickerCards.clear(); liveContextTickerCards.addAll(cards);
         liveContextTickerWidths.clear(); liveContextTickerWidths.addAll(widths);
@@ -22272,6 +22299,14 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         if (game == null || activeLiveTrackerHost == null) return;
         activeLiveTrackerHost.removeAllViews();
         activeLiveTrackerHost.addView(buildTrackerPager(game), matchWrap());
+        if (activePlayFeedHost != null) {
+            activePlayFeedHost.removeAllViews();
+            LinearLayout pfCard = new LinearLayout(this);
+            pfCard.setOrientation(LinearLayout.VERTICAL);
+            buildPlayFeedInto(pfCard, game, game.liveFeed);
+            activePlayFeedHost.addView(pfCard, matchWrap());
+        }
+        updateCarouselData(game, currentTrackerAtBat(game));
         if (liveFocusMode && mainScroll != null) main.post(() -> mainScroll.scrollTo(0, 0));
     }
 
@@ -24542,27 +24577,35 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
             SwipePagerFrame swipeWrap = wrapInSubTabSwiper(game, boxHost, true, "Final".equals(game.statusLabel())); // ←Win Prob, Final→ if over
             panel.addView(swipeWrap, matchWrap()); // renderBoxTab already insets its own host
         } else {
-            // v406: persistent carousel host — mounted ONCE here, above the tracker. The poll rebuilds
-            // the tracker below but never touches this, so the crawl is continuous and flicker-free.
-            if (!"Final".equals(game.statusLabel())) {
-                FrameLayout carouselHost = new FrameLayout(this);
-                LinearLayout.LayoutParams chLp = new LinearLayout.LayoutParams(-1, dp(104));
-                chLp.setMargins(dp(4), 0, dp(4), dp(2));
-                panel.addView(carouselHost, chLp);
-                activeCarouselHost = carouselHost;
-                activeCarouselTicker = null; // force fresh ticker for this game mount
-                mountCarouselTicker(game, null, awayPalette, homePalette);
-            } else {
-                activeCarouselHost = null;
-                activeCarouselTicker = null;
-            }
-
+            // v407: three stacked siblings so the carousel sits in its ORIGINAL spot (between the
+            // at-bat area and the play feed) while staying OUTSIDE the poll rebuild. Only the tracker
+            // and play-feed hosts rebuild on poll; the carousel between them is never destroyed.
             LinearLayout trackerHost = new LinearLayout(this);
             trackerHost.setOrientation(LinearLayout.VERTICAL);
             trackerHost.setVisibility(View.GONE);
             LinearLayout.LayoutParams thLp = matchWrap(); thLp.setMargins(dp(4), 0, dp(4), dp(2));
             panel.addView(trackerHost, thLp);
             activeLiveTrackerHost = trackerHost;
+
+            if (!"Final".equals(game.statusLabel())) {
+                FrameLayout carouselHost = new FrameLayout(this);
+                LinearLayout.LayoutParams chLp = new LinearLayout.LayoutParams(-1, dp(104));
+                chLp.setMargins(dp(4), dp(6), dp(4), dp(2));
+                panel.addView(carouselHost, chLp);
+                activeCarouselHost = carouselHost;
+                activeCarouselTicker = null;
+                mountCarouselTicker(game, null, awayPalette, homePalette);
+            } else {
+                activeCarouselHost = null;
+                activeCarouselTicker = null;
+            }
+
+            LinearLayout playFeedHost = new LinearLayout(this);
+            playFeedHost.setOrientation(LinearLayout.VERTICAL);
+            LinearLayout.LayoutParams pfLp = matchWrap(); pfLp.setMargins(dp(4), 0, dp(4), dp(2));
+            panel.addView(playFeedHost, pfLp);
+            activePlayFeedHost = playFeedHost;
+
             activeLiveTrackerAwayPal = awayPalette;
             activeLiveTrackerHomePal = homePalette;
             activeLiveTrackerGame = game;
