@@ -839,7 +839,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v407", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v408", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -19878,7 +19878,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                         activePlayFeedHost.removeAllViews();
                         LinearLayout pfCard = new LinearLayout(this);
                         pfCard.setOrientation(LinearLayout.VERTICAL);
-                        buildPlayFeedInto(pfCard, g, g.liveFeed);
+                        buildPlayFeedInto(pfCard, g, g.liveFeed, activeLiveTrackerAwayPal, activeLiveTrackerHomePal);
                         activePlayFeedHost.addView(pfCard, matchWrap());
                     }
                     if (!g.isLive()) { stopLiveTrackerPolling(); return; }
@@ -19922,7 +19922,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                     activePlayFeedHost.removeAllViews();
                     LinearLayout pfCard = new LinearLayout(this);
                     pfCard.setOrientation(LinearLayout.VERTICAL);
-                    buildPlayFeedInto(pfCard, game, game.liveFeed);
+                    buildPlayFeedInto(pfCard, game, game.liveFeed, activeLiveTrackerAwayPal, activeLiveTrackerHomePal);
                     activePlayFeedHost.addView(pfCard, matchWrap());
                 }
                 if (liveFocusMode && mainScroll != null) main.post(() -> mainScroll.scrollTo(0, 0));
@@ -20218,7 +20218,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         // carousel can sit between the at-bat area and the play feed while staying outside the poll
         // rebuild. When that separate host exists we skip the feed here. ----
         if (activePlayFeedHost == null) {
-            buildPlayFeedInto(card, game, feed);
+            buildPlayFeedInto(card, game, feed, awayPalette, homePalette);
         }
 
         return card;
@@ -20226,7 +20226,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
 
     // The play-feed section, extracted so it can render either inside the tracker card or into a
     // dedicated sibling host beneath the persistent carousel.
-    private void buildPlayFeedInto(LinearLayout card, LiveGame game, LiveFeed feed) {
+    private void buildPlayFeedInto(LinearLayout card, LiveGame game, LiveFeed feed, TeamPalette awayPalette, TeamPalette homePalette) {
         // ---- Play feed (most recent first) with inning scanning ----
         if (!liveFocusMode && feed != null && feed.loaded && !feed.feed.isEmpty()) {
             LinearLayout feedHeadRow = new LinearLayout(this);
@@ -22303,7 +22303,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             activePlayFeedHost.removeAllViews();
             LinearLayout pfCard = new LinearLayout(this);
             pfCard.setOrientation(LinearLayout.VERTICAL);
-            buildPlayFeedInto(pfCard, game, game.liveFeed);
+            buildPlayFeedInto(pfCard, game, game.liveFeed, activeLiveTrackerAwayPal, activeLiveTrackerHomePal);
             activePlayFeedHost.addView(pfCard, matchWrap());
         }
         updateCarouselData(game, currentTrackerAtBat(game));
