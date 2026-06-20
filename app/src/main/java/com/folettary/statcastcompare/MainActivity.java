@@ -833,7 +833,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v399", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v400", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20717,7 +20717,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
     private long liveContextRotationEpochMs = 0L;
     private int liveContextRotationStep = 0;
     // v399: reuse the same ticker view across rebuilds to eliminate the replace-on-poll flash.
-    private View liveContextTickerView = null;
+    // v400: ticker draws from these instance fields so onDraw always reflects the latest data.
     private final java.util.ArrayList<GameContextCard> liveContextTickerCards = new java.util.ArrayList<>();
     private final java.util.ArrayList<Integer> liveContextTickerWidths = new java.util.ArrayList<>();
     private int liveContextTickerCycleW = 1;
@@ -20738,7 +20738,6 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             liveContextTickerEpochMs = android.os.SystemClock.uptimeMillis();
             liveContextRotationEpochMs = android.os.SystemClock.uptimeMillis();
             liveContextRotationStep = 0;
-            liveContextTickerView = null; // v399: drop the reused view when switching games
             liveContextCarouselStableCards.clear();
         }
 
@@ -20863,9 +20862,10 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         }
         liveContextCarouselCycleWidth = cycleW;
 
-        // v399: store the data in instance fields and REUSE the ticker view across rebuilds. Creating
-        // a fresh View each poll caused a one-frame blink as the old view was swapped out; reusing
-        // the same instance and just updating its data removes that flash entirely.
+        // v400: store data in instance fields so onDraw reads live values, but create a FRESH view
+        // each rebuild (the v399 reuse orphaned the view when the parent tracker card rebuilt, making
+        // the carousel vanish). The epoch re-anchoring above already preserves crawl continuity, so a
+        // fresh view resumes at the same pixel offset without a visible jump.
         liveContextTickerCards.clear();
         liveContextTickerCards.addAll(cards);
         liveContextTickerWidths.clear();
@@ -20874,15 +20874,6 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         liveContextTickerRowH = rowH;
         liveContextTickerGap = gap;
         liveContextTickerSpeed = speedPxPerMs;
-
-        if (liveContextTickerView != null) {
-            android.view.ViewParent vp = liveContextTickerView.getParent();
-            if (vp instanceof android.view.ViewGroup) {
-                ((android.view.ViewGroup) vp).removeView(liveContextTickerView);
-            }
-            liveContextTickerView.invalidate();
-            return liveContextTickerView;
-        }
 
         View ticker = new View(this) {
             private final Paint fillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -21029,7 +21020,6 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         };
         ticker.setMinimumHeight(rowH);
         ticker.setClipToOutline(false);
-        liveContextTickerView = ticker;
         return ticker;
     }
 
