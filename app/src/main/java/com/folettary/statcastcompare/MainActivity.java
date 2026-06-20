@@ -845,7 +845,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v413", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v414", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -19879,10 +19879,14 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                     String trackerSig = trackerStateSignature(g);
                     if (!trackerSig.equals(liveTrackerRenderSig) || host.getChildCount() == 0) {
                         liveTrackerRenderSig = trackerSig;
-                        host.removeAllViews();
                         liveUpdateRebuild = true;
-                        host.addView(buildTrackerPager(g), matchWrap());
+                        // v414: build the new pager FIRST, then swap, so the host is never visibly
+                        // empty mid-rebuild (that empty window was the "whole page flashes" on a
+                        // batter change). removeAllViews + addView now happen back-to-back.
+                        View newPager = buildTrackerPager(g);
                         liveUpdateRebuild = false;
+                        host.removeAllViews();
+                        host.addView(newPager, matchWrap());
                     }
                     // v406: refresh the persistent carousel's data in place — never recreates its view.
                     updateCarouselData(g, currentTrackerAtBat(g));
@@ -20344,10 +20348,11 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         String sig = playFeedSignature(game);
         if (!force && sig.equals(liveFeedRenderSig) && activePlayFeedHost.getChildCount() > 0) return;
         liveFeedRenderSig = sig;
-        activePlayFeedHost.removeAllViews();
+        // v414: build then swap to avoid a visible empty frame during the rebuild.
         LinearLayout pfCard = new LinearLayout(MainActivity.this);
         pfCard.setOrientation(LinearLayout.VERTICAL);
         buildPlayFeedInto(pfCard, game, game.liveFeed, activeLiveTrackerAwayPal, activeLiveTrackerHomePal);
+        activePlayFeedHost.removeAllViews();
         activePlayFeedHost.addView(pfCard, matchWrap());
     }
 
@@ -20798,8 +20803,13 @@ private View liveGameCard(LiveGame game, int slateIndex) {
 
         float contentW = Math.max(ebW, Math.max(headW, subContribution));
         int w = (int) contentW + dp(24); // padding both sides
+        // v414: quantize the width to a coarse bucket (~dp(16)) so a small text change (e.g. a stat
+        // value gaining a digit or a percent ticking up) doesn't change the card's width and reflow
+        // the whole strip — that reflow was the per-pitch position "jump". Stable buckets = stable layout.
+        int bucket = dp(16);
+        w = ((w + bucket - 1) / bucket) * bucket;
         // compact floor, generous-but-bounded ceiling; variety lives in between
-        return Math.max(dp(96), Math.min(dp(220), w));
+        return Math.max(dp(96), Math.min(dp(224), w));
     }
 
     // v397: rotation epoch — advances which discovery cards are visible over time so the strip
@@ -22426,8 +22436,10 @@ private View liveGameCard(LiveGame game, int slateIndex) {
     private void rerenderTracker(LiveGame game) {
         if (game == null || activeLiveTrackerHost == null) return;
         liveTrackerRenderSig = trackerStateSignature(game); // v412: keep guard in sync
+        // v414: build then swap to avoid a visible empty frame.
+        View newPager = buildTrackerPager(game);
         activeLiveTrackerHost.removeAllViews();
-        activeLiveTrackerHost.addView(buildTrackerPager(game), matchWrap());
+        activeLiveTrackerHost.addView(newPager, matchWrap());
         if (activePlayFeedHost != null) {
             rebuildPlayFeedHost(game, true); // v412: nav/filter changed → force
         }
