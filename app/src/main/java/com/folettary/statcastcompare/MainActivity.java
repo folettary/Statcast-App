@@ -833,7 +833,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v403", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v404", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20820,7 +20820,20 @@ private View liveGameCard(LiveGame game, int slateIndex) {
     }
 
     private View situationalCarousel(LiveGame game, LiveAtBat ab, TeamPalette awayPal, TeamPalette homePal) {
-        java.util.ArrayList<GameContextCard> data = stableGameContextCards(game, buildGameContextCards(game, ab, awayPal, homePal));
+        java.util.ArrayList<GameContextCard> built;
+        try {
+            built = buildGameContextCards(game, ab, awayPal, homePal);
+        } catch (Exception e) {
+            // A single misbehaving card must never take down the whole carousel. Fall back to an
+            // empty set; the GAME CONTEXT fallback below keeps the strip alive.
+            built = new java.util.ArrayList<>();
+        }
+        java.util.ArrayList<GameContextCard> data;
+        try {
+            data = stableGameContextCards(game, built);
+        } catch (Exception e) {
+            data = built;
+        }
         if (data.isEmpty() && game != null) {
             String head = game.sitInning > 0 ? liveInningHeroLabel(game) : safe(game.statusLabel());
             String sub = ab != null && !safe(ab.batter).isEmpty()
@@ -21244,9 +21257,10 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         if (betweenInn) {
             int upAccent = batAccent;
             // Due-up hitters with their SEASON quality, not just today's line — a richer look ahead.
-            if (game.dueUp != null && !game.dueUp.isEmpty()) {
+            java.util.ArrayList<DueUpBatter> dueSnapshot = game.dueUp == null ? null : new java.util.ArrayList<>(game.dueUp);
+            if (dueSnapshot != null && !dueSnapshot.isEmpty()) {
                 int shown = 0;
-                for (DueUpBatter db : game.dueUp) {
+                for (DueUpBatter db : dueSnapshot) {
                     if (shown >= 2 || db == null || db.id <= 0) break;
                     Stats ds = cachedStatsByPlayerId(leaderboardCache.get(currentSeason()), db.id);
                     Double dx = liveStat(ds, "xwoba");
