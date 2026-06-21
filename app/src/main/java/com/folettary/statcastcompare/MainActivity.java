@@ -848,7 +848,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v434", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v435", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20075,17 +20075,26 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                     String resultKey = (curAb != null && curAb.complete && !safe(curAb.result).isEmpty())
                             ? ("res|" + curAb.inning + "|" + curAb.abNumber + "|" + safe(curAb.result)) : "";
                     boolean resultAppeared = !resultKey.isEmpty() && !resultKey.equals(liveTrackerLastResultKey);
-                    boolean batterChanged = g.sitBatterId > 0 && liveTrackerLastBatterId != 0
-                            && g.sitBatterId != liveTrackerLastBatterId && host.getChildCount() > 0;
+                    // v435: the batter-change animation must key off the batter the tracker is actually
+                    // DISPLAYING, not g.sitBatterId. When an AB ends, sitBatterId jumps to the next
+                    // hitter immediately, but the tracker is still showing the completed AB's result
+                    // (held). The old code consumed the "batter changed" flag during that held-result
+                    // poll, so when the tracker finally advanced to show the new batter live, the change
+                    // had already been used up → no animation → the flash you saw. We track the
+                    // displayed batter (the current AB's batter) so the handoff animates exactly when
+                    // the visible batter actually changes.
+                    int displayedBatter = curAb != null && curAb.batterId > 0 ? curAb.batterId : g.sitBatterId;
+                    boolean batterChanged = displayedBatter > 0 && liveTrackerLastBatterId != 0
+                            && displayedBatter != liveTrackerLastBatterId && host.getChildCount() > 0;
 
                     String trackerSig = trackerStateSignature(g);
                     boolean willRebuild = !trackerSig.equals(liveTrackerRenderSig) || host.getChildCount() == 0;
-                    // a meaningful event should force a rebuild+animation even if (somehow) the sig didn't move
+                    // a meaningful event should force a rebuild+animation even if the sig didn't move
                     if (resultAppeared || batterChanged) willRebuild = true;
 
                     if (willRebuild) {
                         liveTrackerLastResultKey = resultKey;
-                        liveTrackerLastBatterId = g.sitBatterId;
+                        liveTrackerLastBatterId = displayedBatter;
                         liveTrackerRenderSig = trackerSig;
                         // tell the result-card builder to play the grand reveal this pass
                         forceResultReveal = resultAppeared;
@@ -20093,9 +20102,10 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                         View newPager = buildTrackerPager(g);
                         liveUpdateRebuild = false;
                         forceResultReveal = false;
-                        // batter change → animate the whole pager handoff; otherwise swap instantly
-                        // (the result reveal animates itself inside the pager).
-                        swapTrackerPager(host, newPager, batterChanged);
+                        // A result reveal and a batter change shouldn't both animate the whole pager on
+                        // the same poll. The result reveal animates the result card itself; the batter
+                        // handoff animates the whole pager. Prefer the result reveal when both fire.
+                        swapTrackerPager(host, newPager, batterChanged && !resultAppeared);
                     }
                     // v406: refresh the persistent carousel's data in place — never recreates its view.
                     updateCarouselData(g, currentTrackerAtBat(g));
@@ -20413,12 +20423,27 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                 eventKey = ("roster-" + idx + "-" + safe(feed.latestRosterMove.headline)).hashCode();
             } else if (ab != null && ab.complete && !safe(ab.result).isEmpty()) {
                 eventChild = resultCard(ab, null, batColor);
-                eventKey = ("res-" + fidx + "-" + ab.result).hashCode();
+                // v435: key by fidx only (not the result text) so the terminal-pitch "pending" card and
+                // this final result share continuity. Combined with the pending key above, the slot
+                // sees one element evolving rather than two, so only ONE reveal animation plays.
+                eventKey = ("res-" + fidx + "-pending").hashCode();
                 nextResultIsComplete = true; // v427: this is a finished at-bat → grand reveal
             } else if (ab != null && !ab.pitches.isEmpty()) {
                 LivePitch latest = ab.pitches.get(ab.pitches.size() - 1);
                 eventChild = resultCard(ab, latest, batColor);
-                eventKey = (fidx * 1000) + latest.number;
+                // v435: if this pitch ended the at-bat (in play, or strike 3), reuse the SAME event key
+                // the completed-AB result card will use, so the slot treats the pitch→result handoff
+                // as one continuous element instead of two separate cards animating in. This removes
+                // the "Strike 3" then "Strikeout" (or "in play" then "runs") double-reveal — they now
+                // crossfade as a single evolving result rather than two pops.
+                boolean pitchEndedAb = latest != null && (
+                        latest.isInPlay
+                        || (latest.strikes >= 2 && safe(latest.result).toLowerCase(Locale.US).contains("strike") && !safe(latest.result).toLowerCase(Locale.US).contains("foul")));
+                if (pitchEndedAb) {
+                    eventKey = ("res-" + fidx + "-pending").hashCode();
+                } else {
+                    eventKey = (fidx * 1000) + latest.number;
+                }
             }
 
             LinearLayout.LayoutParams slotLp = new LinearLayout.LayoutParams(-1, resultEventSlotHeight());
