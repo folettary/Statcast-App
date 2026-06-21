@@ -43,8 +43,6 @@ import android.util.LruCache;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
-import android.view.TextureView;
-import android.view.Surface;
 import android.view.ViewOutlineProvider;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
@@ -80,10 +78,6 @@ public class MainActivity extends Activity {
     // reviewed against real data. Set back to false to restore normal behavior. (v277) =====
     static boolean DEBUG_FORCE_LIVE = true;
     static boolean DEBUG_TRACKING_WINDOW = true; // v375: show full pitch-tracking window bounds
-    static boolean DEBUG_LIVE_HUD = true; // v439: on-screen live-state readout to diagnose animations
-    private String liveHudState = "—";    // updated each poll; shown when DEBUG_LIVE_HUD is on
-    private int liveHudPollCount = 0;
-    private TextView liveHudView = null;
     private static final String PREF_TRACKING_WINDOW = "pitch_tracking_window_overlay";
     private enum StatScope { HIT_ONLY, PITCH_ONLY, BOTH }
     private static final int STATCAST_START_YEAR = 2015;
@@ -347,24 +341,14 @@ public class MainActivity extends Activity {
     // wrapped against the current cycle width. Immune to cycle-width changes on pitch updates.
     private float liveContextScrollPos = 0f;
     private long liveContextLastFrameMs = 0L;
-    // v415: ids the render thread has observed scroll fully off-screen while departing; the next
-    // merge prunes them. Synchronized via liveContextDrawLock.
-    private final java.util.Set<String> liveContextDepartedIds = java.util.Collections.synchronizedSet(new java.util.HashSet<>());
+    private long liveContextDebugMaxGap = 0L;      // DEBUG v410: largest frame gap in last 3s
+    private long liveContextDebugGapResetMs = 0L;
     private final java.util.ArrayList<GameContextCard> liveContextCarouselStableCards = new java.util.ArrayList<>();
 
     private View gameHubTabBarView = null;                   // v301: tab bar, to snap to on tab switch
     private TeamPalette activeLiveTrackerAwayPal = null, activeLiveTrackerHomePal = null;
     private LiveGame activeLiveTrackerGame = null;
     private boolean liveTrackerPolling = false;
-    // v438: when an AB-ending pitch (in play / strike 3 / ball 4) arrives but the DETAILED result
-    // (groundout, single, strikeout, walk…) hasn't resolved in the feed yet, we suppress rendering
-    // that intermediate state entirely and poll rapidly until the real result lands, then show only
-    // that final card. These fields drive that burst-poll window.
-    private boolean awaitingAbResult = false;     // currently bursting toward a pending AB result
-    private long awaitingAbResultUntilMs = 0L;     // hard timeout so we never hang
-    private int awaitingAbNumber = -1;             // which AB we're waiting on
-    private static final long BURST_POLL_MS = 700L;        // fast poll cadence while awaiting
-    private static final long AWAIT_RESULT_TIMEOUT_MS = 5200L; // give up and show what we have
     private boolean liveFeedPlaysExpanded = false; // v275: play feed compact by default
     private int liveFeedInningFilter = 0;          // v279: 0 = all innings, else filter to that inning
     private String gameHubTab = "live";            // v276: live | matchups | box
@@ -861,7 +845,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v440", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v410", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -1296,7 +1280,6 @@ public class MainActivity extends Activity {
         stopLiveTrackerPolling(); // v273: left the game; stop the live feed loop
         activeLiveTrackerGame = null;
         activeLiveTrackerHost = null;
-        liveTrackerLastBatterId = 0;
         activeCarouselHost = null;
         activeCarouselTicker = null;
         activePlayFeedHost = null;
@@ -1739,23 +1722,6 @@ public class MainActivity extends Activity {
 
     private LiveGame pickFeaturedHomeGame(ArrayList<LiveGame> games) {
         if (games == null || games.isEmpty()) return null;
-        // v429: prefer a favorite team's game as the home hero — a live one first, otherwise any game
-        // involving a favorite — so opening the app puts your team front and center. Falls back to the
-        // normal "live, else not-final, else first" logic when no favorite is on today's slate.
-        java.util.Set<Integer> favIds = favoriteTeamIdSet();
-        if (!favIds.isEmpty()) {
-            for (LiveGame game : games) {
-                if (game != null && gameInvolvesFavorite(game, favIds)
-                        && safe(game.abstractState).toLowerCase(Locale.US).contains("live")) return game;
-            }
-            for (LiveGame game : games) {
-                if (game != null && gameInvolvesFavorite(game, favIds)
-                        && !safe(game.abstractState).toLowerCase(Locale.US).contains("final")) return game;
-            }
-            for (LiveGame game : games) {
-                if (game != null && gameInvolvesFavorite(game, favIds)) return game;
-            }
-        }
         for (LiveGame game : games) {
             if (game != null && safe(game.abstractState).toLowerCase(Locale.US).contains("live")) return game;
         }
@@ -3358,12 +3324,6 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             matchupResultMode = false;
             if (homeBox != null) homeBox.setVisibility(View.VISIBLE);
             rebuildHomeFavorites();
-            // v431: re-render the home live slate on landing so a team favorited elsewhere (e.g. from
-            // a matchup) re-features immediately, instead of staying stale until the app relaunches.
-            if (homeLiveMatchupsBox != null && lastRenderedSlate != null) {
-                sortGamesByStatus(lastRenderedSlate);
-                renderHomeLiveMatchupsGames(lastRenderedSlate);
-            }
             if (matchupHubBox != null) matchupHubBox.setVisibility(View.GONE);
             if (form != null) form.setVisibility(View.GONE);
             if (resultsBox != null) resultsBox.setVisibility(View.GONE);
@@ -14995,76 +14955,6 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         } catch (Exception ignored) {}
     }
 
-    // v426: aggregate a pitcher's last N starts (by id) from the season game log, returning a summary
-    // with real ERA over exactly those starts. Used by the PITCHER FORM card so the label ("last 5
-    // starts") matches the data — unlike the L30 day-window, which is a vague number of starts. Fetch
-    // is cached and fully null-safe: if the log can't be retrieved, the card simply won't show.
-    private static class StartWindow {
-        int starts = 0; double ip = 0; int er = 0, k = 0, bb = 0, hits = 0;
-        double era() { return ip > 0 ? er * 9.0 / ip : -1; }
-        double kPer9() { return ip > 0 ? k * 9.0 / ip : -1; }
-    }
-
-    private StartWindow lastNStartsById(int pitcherId, int n) {
-        if (pitcherId <= 0 || n <= 0) return null;
-        int season = currentSeason();
-        String cacheKey = pitcherId + ":" + season + ":pitchlog";
-        ArrayList<GameLogEntry> logs = gameLogCache.get(cacheKey);
-        if (logs == null) {
-            // not warmed yet → kick off a background fetch and return null this pass; the card will
-            // appear on a later poll once the log is cached. Never block the carousel update thread.
-            warmPitcherStartLog(pitcherId, season);
-            return null;
-        }
-        if (logs.isEmpty()) return null;
-        StartWindow w = new StartWindow();
-        for (int i = logs.size() - 1; i >= 0 && w.starts < n; i--) {
-            Stats s = logs.get(i).stats;
-            double ip = s.get("__pip") != null ? s.get("__pip") : s.ip;
-            if (ip <= 0) continue;
-            w.starts++;
-            w.ip += ip;
-            Double er = s.get("__er");
-            if (er != null) w.er += (int) Math.round(er);
-            Double kk = s.get("__pk");
-            if (kk != null) w.k += (int) Math.round(kk);
-        }
-        return w.starts > 0 ? w : null;
-    }
-
-    private final java.util.Set<String> warmingStartLogs = java.util.Collections.synchronizedSet(new java.util.HashSet<>());
-
-    private void warmPitcherStartLog(int pitcherId, int season) {
-        final String cacheKey = pitcherId + ":" + season + ":pitchlog";
-        if (gameLogCache.get(cacheKey) != null) return;
-        if (!warmingStartLogs.add(cacheKey)) return; // already in flight
-        io.execute(() -> {
-            ArrayList<GameLogEntry> logs = new ArrayList<>();
-            try {
-                String url = "https://statsapi.mlb.com/api/v1/people/" + pitcherId
-                        + "/stats?stats=gameLog&group=pitching&season=" + season;
-                String text = httpGet(url);
-                JSONArray statsArr = new JSONObject(text).optJSONArray("stats");
-                if (statsArr != null && statsArr.length() > 0) {
-                    JSONArray splits = statsArr.getJSONObject(0).optJSONArray("splits");
-                    if (splits != null) {
-                        for (int i = 0; i < splits.length(); i++) {
-                            JSONObject split = splits.getJSONObject(i);
-                            JSONObject stat = split.optJSONObject("stat");
-                            if (stat == null) continue;
-                            Date date = parseMlbDate(split.optString("date", ""));
-                            Stats s = statsFromPitchingJson(stat);
-                            if (date != null && s != null && s.ip > 0) logs.add(new GameLogEntry(date, shortDate(date), s));
-                        }
-                    }
-                }
-            } catch (Exception ignored) {}
-            logs.sort((a, b) -> a.date.compareTo(b.date));
-            gameLogCache.put(cacheKey, logs);
-            warmingStartLogs.remove(cacheKey);
-        });
-    }
-
     private Map<String, ArrayList<TrendPoint>> fetchPlayerSeasonTrendMap(Player player, int season) {
         LinkedHashMap<String, ArrayList<TrendPoint>> out = new LinkedHashMap<>();
         ArrayList<GameLogEntry> logs = dailyGameLogs(fetchPlayerGameLogs(player, season));
@@ -18539,61 +18429,10 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             empty.setBackground(roundedStroke(Color.argb(76, 8, 13, 22), Color.argb(52, 255, 255, 255), 14, 1));
             panel.addView(empty, matchWrap());
         } else {
-            // v429: split favorited-team games into a dedicated "MY TEAMS" strip pulled OUT of the main
-            // slate, so they're elevated and never shown twice. The remaining games render in the
-            // normal two-up grid below. We preserve each game's original slate index so taps and edge
-            // previews still resolve to the right game.
-            java.util.Set<Integer> favIds = favoriteTeamIdSet();
-            ArrayList<LiveGame> favGames = new ArrayList<>();
-            ArrayList<Integer> favIndexes = new ArrayList<>();
-            ArrayList<LiveGame> restGames = new ArrayList<>();
-            ArrayList<Integer> restIndexes = new ArrayList<>();
-            for (int gi = 0; gi < games.size(); gi++) {
-                LiveGame g = games.get(gi);
-                if (gameInvolvesFavorite(g, favIds)) { favGames.add(g); favIndexes.add(gi); }
-                else { restGames.add(g); restIndexes.add(gi); }
-            }
-
-            if (!favGames.isEmpty()) {
-                LinearLayout myTeamsHeader = new LinearLayout(this);
-                myTeamsHeader.setOrientation(LinearLayout.HORIZONTAL);
-                myTeamsHeader.setGravity(Gravity.CENTER_VERTICAL);
-                LinearLayout.LayoutParams mthLp = matchWrap();
-                mthLp.setMargins(0, dp(10), 0, dp(2));
-                TextView star = text("★", 11, Color.rgb(244, 192, 54), true);
-                star.setPadding(0, 0, dp(5), 0);
-                myTeamsHeader.addView(star);
-                TextView myTeams = text("MY TEAMS", 10, Color.rgb(244, 192, 54), true);
-                myTeams.setLetterSpacing(0.12f);
-                myTeamsHeader.addView(myTeams);
-                panel.addView(myTeamsHeader, mthLp);
-
-                // favorites render full-width (one per row) with the richer favorite layout
-                for (int fi = 0; fi < favGames.size(); fi++) {
-                    LinearLayout.LayoutParams favLp = new LinearLayout.LayoutParams(-1, -2);
-                    favLp.setMargins(0, dp(6), 0, 0);
-                    panel.addView(liveGameCard(favGames.get(fi), favIndexes.get(fi), true), favLp);
-                }
-
-                // a thin divider before the rest of the slate
-                View divider = new View(this);
-                divider.setBackgroundColor(Color.argb(40, 255, 255, 255));
-                LinearLayout.LayoutParams divLp = new LinearLayout.LayoutParams(-1, Math.max(1, dp(1)));
-                divLp.setMargins(0, dp(12), 0, dp(2));
-                panel.addView(divider, divLp);
-
-                if (!restGames.isEmpty()) {
-                    TextView restLabel = text("ALL GAMES", 10, INK_DIM, true);
-                    restLabel.setLetterSpacing(0.12f);
-                    LinearLayout.LayoutParams rlLp = matchWrap();
-                    rlLp.setMargins(0, dp(6), 0, dp(2));
-                    panel.addView(restLabel, rlLp);
-                }
-            }
-
-            // remaining games in the normal two-up grid, preserving original slate indexes
+            LinearLayout grid = new LinearLayout(this);
+            grid.setOrientation(LinearLayout.VERTICAL);
             int i = 0;
-            while (i < restGames.size()) {
+            while (i < games.size()) {
                 LinearLayout row = new LinearLayout(this);
                 row.setOrientation(LinearLayout.HORIZONTAL);
                 LinearLayout.LayoutParams rowLp = matchWrap();
@@ -18601,11 +18440,11 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 panel.addView(row, rowLp);
 
                 LinearLayout.LayoutParams leftLp = new LinearLayout.LayoutParams(0, dp(140), 1);
-                row.addView(liveGameCard(restGames.get(i), restIndexes.get(i)), leftLp);
-                if (i + 1 < restGames.size()) {
+                row.addView(liveGameCard(games.get(i), i), leftLp);
+                if (i + 1 < games.size()) {
                     LinearLayout.LayoutParams rightLp = new LinearLayout.LayoutParams(0, dp(140), 1);
                     rightLp.setMargins(dp(7), 0, 0, 0);
-                    row.addView(liveGameCard(restGames.get(i + 1), restIndexes.get(i + 1)), rightLp);
+                    row.addView(liveGameCard(games.get(i + 1), i + 1), rightLp);
                 } else {
                     Space spacer = new Space(this);
                     LinearLayout.LayoutParams rightLp = new LinearLayout.LayoutParams(0, dp(140), 1);
@@ -18806,10 +18645,6 @@ private View liveGameCard(LiveGame game) {
 }
 
 private View liveGameCard(LiveGame game, int slateIndex) {
-    return liveGameCard(game, slateIndex, false);
-}
-
-private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
     Team away = teamForLiveGame(game.awayTeamId, game.awayName, game.awayAbbr);
     Team home = teamForLiveGame(game.homeTeamId, game.homeName, game.homeAbbr);
     TeamPalette awayPalette = away == null ? paletteForAbbr(game.awayAbbr) : paletteForTeam(away);
@@ -18820,7 +18655,7 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
 
     LinearLayout content = new LinearLayout(this);
     content.setOrientation(LinearLayout.VERTICAL);
-    content.setPadding(dp(favorite ? 14 : 12), dp(favorite ? 11 : 9), dp(favorite ? 14 : 12), dp(favorite ? 12 : 10));
+    content.setPadding(dp(12), dp(9), dp(12), dp(10));
     card.addView(content, new FrameLayout.LayoutParams(-1, -1));
 
     // Top row: status pill (left) + start time (right, pre-game only).
@@ -18833,13 +18668,11 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
     status.setPadding(dp(7), dp(3), dp(7), dp(3));
     status.setBackground(roundedStroke(Color.argb(94, 8, 13, 22), Color.argb(120, Color.red(statusColor), Color.green(statusColor), Color.blue(statusColor)), 12, 1));
     top.addView(status);
-    Space favSpacer = new Space(this);
-    top.addView(favSpacer, new LinearLayout.LayoutParams(0, dp(1), 1));
     TextView time = text(game.isPregame() ? game.timeLabel() : "", 9, Color.argb(232, 247, 249, 252), true);
     time.setGravity(Gravity.RIGHT);
     time.setSingleLine(true);
     time.setShadowLayer(dp(1.8f), 0, dp(1), Color.argb(150, 0, 0, 0));
-    top.addView(time, new LinearLayout.LayoutParams(-2, -2));
+    top.addView(time, new LinearLayout.LayoutParams(0, -2, 1));
     content.addView(top, matchWrap());
 
     // Two-column score row: away (left) · @ · home (right), each with team-color underline.
@@ -18922,44 +18755,6 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
             eRow.addView(gameEdgeChipView(edge.chip, edge.accent));
         }
         content.addView(eRow, matchWrap());
-    }
-
-    // v430: favorite cards are full-width and were feeling empty. Fill the space with genuinely
-    // useful context: a starting-pitcher matchup line and the team records, so your team's card
-    // earns its elevated slot instead of just stretching the standard tile.
-    if (favorite) {
-        String aSp = safe(game.awayPitcher).isEmpty() ? "TBD" : lastNameOnly(game.awayPitcher);
-        String hSp = safe(game.homePitcher).isEmpty() ? "TBD" : lastNameOnly(game.homePitcher);
-        LinearLayout spRow = new LinearLayout(this);
-        spRow.setOrientation(LinearLayout.HORIZONTAL);
-        spRow.setGravity(Gravity.CENTER_VERTICAL);
-        spRow.setPadding(0, dp(10), 0, 0);
-        TextView spLabel = text("PROBABLES", 8, INK_DIM, true);
-        spLabel.setLetterSpacing(0.12f);
-        spRow.addView(spLabel);
-        TextView spVal = text("  " + aSp + " vs " + hSp, 11, Color.argb(232, 247, 249, 252), true);
-        spVal.setSingleLine(true);
-        spVal.setEllipsize(TextUtils.TruncateAt.END);
-        spRow.addView(spVal, new LinearLayout.LayoutParams(0, -2, 1));
-        content.addView(spRow, matchWrap());
-
-        String aRec = safe(game.awayRecord), hRec = safe(game.homeRecord);
-        if (!aRec.isEmpty() || !hRec.isEmpty()) {
-            LinearLayout recRow = new LinearLayout(this);
-            recRow.setOrientation(LinearLayout.HORIZONTAL);
-            recRow.setGravity(Gravity.CENTER_VERTICAL);
-            recRow.setPadding(0, dp(5), 0, 0);
-            TextView recLabel = text("RECORD", 8, INK_DIM, true);
-            recLabel.setLetterSpacing(0.12f);
-            recRow.addView(recLabel);
-            String recText = "  " + displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr) + " " + (aRec.isEmpty() ? "—" : aRec)
-                    + "   ·   " + displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr) + " " + (hRec.isEmpty() ? "—" : hRec);
-            TextView recVal = text(recText, 11, Color.argb(232, 247, 249, 252), true);
-            recVal.setSingleLine(true);
-            recVal.setEllipsize(TextUtils.TruncateAt.END);
-            recRow.addView(recVal, new LinearLayout.LayoutParams(0, -2, 1));
-            content.addView(recRow, matchWrap());
-        }
     }
 
     return card;
@@ -20078,132 +19873,22 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                     boolean followingLive = (g.viewAtBatIndex < 0) || (f != null && f.loaded && g.viewAtBatIndex >= f.atBats.size() - 1);
                     if (followingLive) g.viewAtBatIndex = -1;
                     refreshActiveLiveScoreHero(g);
-                    // v433: drive the transition animations off the EVENTS themselves (a result
-                    // appearing, the batter changing), not off whether the pager happened to rebuild.
-                    // Previously the animations only fired inside the signature-guarded rebuild block,
-                    // so they were inconsistent — sometimes a meaningful change didn't trip the guard
-                    // and no animation played (and the raw flash showed through). Now we compute the
-                    // events first and force the animation whenever they occur.
-                    LiveAtBat curAb = currentTrackerAtBat(g);
-                    // v437: robust event detection for the poll. We look at three independent facts and
-                    // resolve them with a clear priority so combined events on one poll (a result AND a
-                    // batter change, or a batter change AND a first pitch) never cancel each other out:
-                    //   1) a NEW completed at-bat result appeared (from the feed's latest complete AB),
-                    //   2) the DISPLAYED batter changed,
-                    //   3) the latest pitch is a terminal pitch (ends the AB).
-                    // Detection of (1) is based on the FEED's latest completed AB, independent of the
-                    // held-display heuristic, so a short result-hold can't cause us to miss firing the
-                    // result reveal.
-                    LiveAtBat feedResultAb = latestCompletedAb(g);
-                    String resultKey = (feedResultAb != null)
-                            ? ("res|" + feedResultAb.inning + "|" + feedResultAb.abNumber + "|" + safe(feedResultAb.result)) : "";
-                    boolean resultAppeared = !resultKey.isEmpty() && !resultKey.equals(liveTrackerLastResultKey);
-
-                    int displayedBatter = curAb != null && curAb.batterId > 0 ? curAb.batterId : g.sitBatterId;
-                    boolean batterChanged = displayedBatter > 0 && liveTrackerLastBatterId != 0
-                            && displayedBatter != liveTrackerLastBatterId && host.getChildCount() > 0;
-
-                    boolean terminalPitch = false;
-                    if (curAb != null && curAb.pitches != null && !curAb.pitches.isEmpty() && !curAb.complete) {
-                        LivePitch lp = curAb.pitches.get(curAb.pitches.size() - 1);
-                        terminalPitch = lp != null && deriveTerminalResult(curAb, lp) != null;
-                    }
-
-                    // v438: INTERCEPT an AB-ending pitch whose detailed result hasn't resolved yet. When
-                    // the live AB just ended (terminal pitch) but the feed hasn't populated the real
-                    // outcome (groundout / single / strikeout…), we do NOT render that intermediate
-                    // state at all — we keep the prior content on screen and poll rapidly until the
-                    // real result lands, then show only that final card. A hard timeout prevents hanging
-                    // if the feed is slow (reviews, scoring plays).
-                    long now = System.currentTimeMillis();
-                    // v440: detect a PRELIMINARY result deterministically from the text. MLB's feed first
-                    // reports an AB-ending in-play ball as "In play, out(s)" / "In play, run(s)" /
-                    // "In play, no out" and refines it to the real result ("Single", "Groundout"…) a beat
-                    // later. Those "In play…" strings are the intermediate we must never show. We treat
-                    // an AB as pending whenever its current result text is one of these placeholders OR a
-                    // terminal pitch landed with no result yet — and suppress rendering until it refines.
-                    boolean prelimResult = false;
-                    if (curAb != null) {
-                        String rr = safe(curAb.result).toLowerCase(Locale.US);
-                        prelimResult = rr.startsWith("in play") || rr.contains("in play,");
-                    }
-                    boolean liveAbPendingResult = (terminalPitch || prelimResult) && curAb != null
-                            && (!curAb.complete || prelimResult);
-                    if (liveAbPendingResult && !awaitingAbResult) {
-                        awaitingAbResult = true;
-                        awaitingAbNumber = curAb.abNumber;
-                        awaitingAbResultUntilMs = now + AWAIT_RESULT_TIMEOUT_MS;
-                    }
-                    // resolved = the awaited AB now has a REAL (non-preliminary) result
-                    boolean resolvedNow = awaitingAbResult && curAb != null
-                            && curAb.abNumber == awaitingAbNumber
-                            && curAb.complete && !prelimResult && !safe(curAb.result).isEmpty();
-                    boolean awaitTimedOut = awaitingAbResult && now >= awaitingAbResultUntilMs;
-                    if (awaitingAbResult && (resolvedNow || awaitTimedOut)) {
-                        awaitingAbResult = false;
-                        awaitingAbNumber = -1;
-                    }
-                    // While awaiting (and not yet resolved/timed out), suppress the tracker rebuild and
-                    // schedule a fast burst poll. The carousel/score still refresh below.
-                    boolean suppressRenderThisPoll = awaitingAbResult && !resolvedNow && !awaitTimedOut;
-
-                    String trackerSig = trackerStateSignature(g);
-                    boolean willRebuild = !trackerSig.equals(liveTrackerRenderSig) || host.getChildCount() == 0;
-                    // a meaningful event should force a rebuild+animation even if the sig didn't move
-                    if (resultAppeared || batterChanged) willRebuild = true;
-                    if (suppressRenderThisPoll) willRebuild = false; // hold prior content until result lands
-
-                    if (willRebuild) {
-                        liveTrackerLastResultKey = resultKey;
-                        liveTrackerLastBatterId = displayedBatter;
-                        liveTrackerRenderSig = trackerSig;
-                        // tell the result-card builder to play the grand reveal this pass
-                        forceResultReveal = resultAppeared || resolvedNow;
-                        liveUpdateRebuild = true;
-                        View newPager = buildTrackerPager(g);
-                        liveUpdateRebuild = false;
-                        forceResultReveal = false;
-                        // v436: smooth-swap on a batter change, a result, OR a terminal pitch so the
-                        // pitch→result handoff is continuous, never an instant flash.
-                        boolean premiumSwap = batterChanged || resultAppeared || resolvedNow || terminalPitch;
-                        if (premiumSwap) {
-                            swapTrackerPager(host, newPager, true);
-                        } else {
-                            // ordinary in-AB update (a normal ball/strike): a quick, soft crossfade so
-                            // each pitch eases in rather than snapping — removes per-poll abruptness
-                            // while staying clearly lighter than the premium handoff.
-                            softSwapTrackerPager(host, newPager);
-                        }
-                    }
+                    host.removeAllViews();
+                    liveUpdateRebuild = true;
+                    host.addView(buildTrackerPager(g), matchWrap());
+                    liveUpdateRebuild = false;
                     // v406: refresh the persistent carousel's data in place — never recreates its view.
                     updateCarouselData(g, currentTrackerAtBat(g));
-                    // v439: debug HUD — surfaces exactly what the poll decided, so we can see at runtime
-                    // why an animation did or didn't fire instead of guessing.
-                    if (DEBUG_LIVE_HUD) {
-                        liveHudPollCount++;
-                        String curRes = curAb != null ? safe(curAb.result) : "";
-                        String lp = (curAb != null && curAb.pitches != null && !curAb.pitches.isEmpty())
-                                ? safe(curAb.pitches.get(curAb.pitches.size() - 1).result) : "";
-                        liveHudState = "#" + liveHudPollCount
-                                + (liveFocusMode ? " FOCUS" : " MENU")
-                                + " term=" + (terminalPitch ? "Y" : "n")
-                                + " cmpl=" + (curAb != null && curAb.complete ? "Y" : "n")
-                                + " pend=" + (liveAbPendingResult ? "Y" : "n")
-                                + " resNow=" + (resolvedNow ? "Y" : "n")
-                                + " await=" + (awaitingAbResult ? "Y" : "n")
-                                + " abN=" + (curAb != null ? curAb.abNumber : -1)
-                                + " fResN=" + (feedResultAb != null ? feedResultAb.abNumber : -1)
-                                + " rebuild=" + (willRebuild ? "Y" : "n")
-                                + " res=" + (curRes.length() > 14 ? curRes.substring(0, 14) : curRes);
-                        if (liveHudView != null) liveHudView.setText("HUD: " + liveHudState);
+                    // v407: rebuild the play feed (its own host, below the carousel).
+                    if (activePlayFeedHost != null) {
+                        activePlayFeedHost.removeAllViews();
+                        LinearLayout pfCard = new LinearLayout(MainActivity.this);
+                        pfCard.setOrientation(LinearLayout.VERTICAL);
+                        buildPlayFeedInto(pfCard, g, g.liveFeed, activeLiveTrackerAwayPal, activeLiveTrackerHomePal);
+                        activePlayFeedHost.addView(pfCard, matchWrap());
                     }
-                    // v412: only rebuilds when the feed actually changed (guard inside).
-                    rebuildPlayFeedHost(g, false);
                     if (!g.isLive()) { stopLiveTrackerPolling(); return; }
-                    // v438: while awaiting a pending AB result, poll rapidly so the real result lands
-                    // (and renders) almost immediately; otherwise use the normal live cadence.
-                    long nextDelay = awaitingAbResult ? BURST_POLL_MS : 10000L;
-                    main.postDelayed(liveTrackerPollRunnable, nextDelay);
+                    main.postDelayed(liveTrackerPollRunnable, 15000L);
                 });
             });
         }
@@ -20213,13 +19898,11 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
         if (game == null || !game.isLive()) return;
         liveTrackerPolling = true;
         main.removeCallbacks(liveTrackerPollRunnable);
-        main.postDelayed(liveTrackerPollRunnable, 10000L);
+        main.postDelayed(liveTrackerPollRunnable, 15000L);
     }
 
     private void stopLiveTrackerPolling() {
         liveTrackerPolling = false;
-        awaitingAbResult = false;
-        awaitingAbNumber = -1;
         main.removeCallbacks(liveTrackerPollRunnable);
     }
 
@@ -20241,18 +19924,17 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                 host.addView(buildTrackerPager(game), matchWrap());
                 liveUpdateRebuild = false;
                 updateCarouselData(game, currentTrackerAtBat(game)); // v406: fill carousel once data is in
-                rebuildPlayFeedHost(game, true); // v412: initial render
+                if (activePlayFeedHost != null) {
+                    activePlayFeedHost.removeAllViews();
+                    LinearLayout pfCard = new LinearLayout(this);
+                    pfCard.setOrientation(LinearLayout.VERTICAL);
+                    buildPlayFeedInto(pfCard, game, game.liveFeed, activeLiveTrackerAwayPal, activeLiveTrackerHomePal);
+                    activePlayFeedHost.addView(pfCard, matchWrap());
+                }
                 if (liveFocusMode && mainScroll != null) main.post(() -> mainScroll.scrollTo(0, 0));
                 host.setVisibility(View.VISIBLE);
-                // v437: fade just the freshly-mounted tracker content in. The host already reserved its
-                // height, so this fades content into place without the layout reflow that shoved the
-                // carousel down.
-                View mounted = host.getChildCount() > 0 ? host.getChildAt(0) : null;
-                if (mounted != null) {
-                    mounted.setAlpha(0f);
-                    mounted.animate().alpha(1f).setDuration(240)
-                            .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
-                }
+                host.setAlpha(0f);
+                host.animate().alpha(1f).setDuration(220).start();
             });
         });
     }
@@ -20521,32 +20203,13 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                     && feed.latestRosterMove != null && feed.latestRosterAbIndex == idx) {
                 eventChild = rosterMoveCard(feed.latestRosterMove);
                 eventKey = ("roster-" + idx + "-" + safe(feed.latestRosterMove.headline)).hashCode();
-            } else if (ab != null && ab.complete && !safe(ab.result).isEmpty() && !isPreliminaryResult(ab.result)) {
+            } else if (ab != null && ab.complete && !safe(ab.result).isEmpty()) {
                 eventChild = resultCard(ab, null, batColor);
-                // v435: key by fidx only (not the result text) so the terminal-pitch "pending" card and
-                // this final result share continuity. Combined with the pending key above, the slot
-                // sees one element evolving rather than two, so only ONE reveal animation plays.
-                eventKey = ("res-" + fidx + "-pending").hashCode();
-                nextResultIsComplete = true; // v427: this is a finished at-bat → grand reveal
+                eventKey = ("res-" + fidx + "-" + ab.result).hashCode();
             } else if (ab != null && !ab.pitches.isEmpty()) {
                 LivePitch latest = ab.pitches.get(ab.pitches.size() - 1);
-                // v438: if this pitch ended the at-bat, we do NOT render an intermediate card here —
-                // the poll loop is burst-polling for the real detailed result and will rebuild with it
-                // momentarily. Until then we keep the prior content (eventChild stays null → slot keeps
-                // its current view). Only ordinary, non-terminal pitches render a live pitch card.
-                String derived = deriveTerminalResult(ab, latest);
-                if (derived == null) {
-                    eventChild = resultCard(ab, latest, batColor);
-                    eventKey = (fidx * 1000) + latest.number;
-                } else if (!awaitingAbResult) {
-                    // await window ended without the feed resolving (timeout) → fall back to the
-                    // derived terminal result so the slot is never blank. For strike-3/ball-4/HBP this
-                    // is exact; for in-play it's a clean "In play" rather than the raw intermediate.
-                    eventChild = derivedResultCard(ab, latest, derived, batColor);
-                    eventKey = ("res-" + fidx + "-pending").hashCode();
-                    nextResultIsComplete = true;
-                }
-                // terminal pitch, still awaiting → leave eventChild null (render suppressed upstream)
+                eventChild = resultCard(ab, latest, batColor);
+                eventKey = (fidx * 1000) + latest.number;
             }
 
             LinearLayout.LayoutParams slotLp = new LinearLayout.LayoutParams(-1, resultEventSlotHeight());
@@ -20639,72 +20302,6 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                 card.addView(less, lessLp);
             }
         }
-    }
-
-    // v412: rebuild the play-feed host only when its content actually changed. Polls fire every 15s
-    // but plays are less frequent, so most polls leave the feed identical — skipping the rebuild then
-    // removes a heavy main-thread layout pass that was starving the carousel animation (the flash).
-    private String liveFeedRenderSig = "";
-    private String liveTrackerRenderSig = ""; // v412: skip tracker rebuild when state is unchanged
-
-    // v437: the feed's most recent COMPLETED at-bat, independent of the held-display window. Used to
-    // detect "a result appeared" reliably even if the result hold is short.
-    private LiveAtBat latestCompletedAb(LiveGame game) {
-        if (game == null || game.liveFeed == null || !game.liveFeed.loaded) return null;
-        java.util.ArrayList<LiveAtBat> abs = game.liveFeed.atBats;
-        if (abs == null || abs.isEmpty()) return null;
-        for (int i = abs.size() - 1; i >= 0; i--) {
-            LiveAtBat ab = abs.get(i);
-            if (ab != null && ab.complete && !safe(ab.result).isEmpty() && !isPreliminaryResult(ab.result)) return ab;
-        }
-        return null;
-    }
-
-    private String trackerStateSignature(LiveGame game) {
-        if (game == null) return "null";
-        StringBuilder sb = new StringBuilder();
-        sb.append(game.viewAtBatIndex).append('|')
-          .append(game.sitInning).append(safe(game.sitInningState)).append('|')
-          .append(game.awayScore).append('-').append(game.homeScore).append('|')
-          .append(game.sitOuts).append('|')
-          .append(game.onFirst ? 1 : 0).append(game.onSecond ? 1 : 0).append(game.onThird ? 1 : 0).append('|')
-          .append(game.sitBatterId).append('|').append(game.sitPitcherId).append('|')
-          .append(safe(game.statusLabel()));
-        // include the current count + pitch tally via the live feed's latest AB
-        LiveAtBat ab = currentTrackerAtBat(game);
-        if (ab != null) {
-            sb.append('|').append(ab.abNumber).append('|').append(ab.pitches == null ? 0 : ab.pitches.size())
-              .append('|').append(safe(ab.result));
-        }
-        return sb.toString();
-    }
-
-    private String playFeedSignature(LiveGame game) {
-        if (game == null || game.liveFeed == null || game.liveFeed.feed == null) return "empty";
-        LiveFeed feed = game.liveFeed;
-        StringBuilder sb = new StringBuilder();
-        sb.append(feed.feed.size()).append('|').append(liveFeedInningFilter).append('|').append(liveFeedPlaysExpanded).append('|');
-        int from = Math.max(0, feed.feed.size() - 8);
-        for (int i = from; i < feed.feed.size(); i++) {
-            LiveFeedEntry fe = feed.feed.get(i);
-            if (fe == null) continue;
-            sb.append(fe.inning).append(fe.topHalf ? 'T' : 'B')
-              .append(safe(fe.headline)).append('~').append(safe(fe.detail)).append(';');
-        }
-        return sb.toString();
-    }
-
-    private void rebuildPlayFeedHost(LiveGame game, boolean force) {
-        if (activePlayFeedHost == null) return;
-        String sig = playFeedSignature(game);
-        if (!force && sig.equals(liveFeedRenderSig) && activePlayFeedHost.getChildCount() > 0) return;
-        liveFeedRenderSig = sig;
-        // v414: build then swap to avoid a visible empty frame during the rebuild.
-        LinearLayout pfCard = new LinearLayout(MainActivity.this);
-        pfCard.setOrientation(LinearLayout.VERTICAL);
-        buildPlayFeedInto(pfCard, game, game.liveFeed, activeLiveTrackerAwayPal, activeLiveTrackerHomePal);
-        activePlayFeedHost.removeAllViews();
-        activePlayFeedHost.addView(pfCard, matchWrap());
     }
 
     private TextView inningChip(String label, boolean active, View.OnClickListener click) {
@@ -20810,53 +20407,22 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
     // v330: only animate the card on a LIVE update (poll), never on user navigation (swipe/tap),
     // which was causing the result card to flash every time you scrolled through plays.
     private boolean liveUpdateRebuild = false;
-    private boolean nextResultIsComplete = false; // v427: set when the slot child is a finished-AB result
     private void playCardIn(View v) {
         v.setAlpha(0f);
         v.setTranslationY(dp(10));
         v.animate().alpha(1f).translationY(0f).setStartDelay(40).setDuration(260)
                 .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
     }
-
-    // v427: the GRAND REVEAL for a completed at-bat. Instead of fighting the rebuild flash, we cover
-    // it with a deliberate, premium entrance: the result card pops in with a slight scale-up and a
-    // quick settle, so the eye reads "the at-bat is over, here's the outcome" rather than noticing
-    // the underlying re-render. Used only for finished ABs; in-progress pitch updates keep the subtle
-    // slide so rapid mid-AB ticks stay calm.
-    private void playResultReveal(View v) {
-        // v433: a more pronounced, deliberate reveal so it reads as an intentional "here's the result"
-        // moment rather than a flash. Starts smaller and lower with a brief settle delay, rises and
-        // scales up with a noticeable overshoot bounce, over a longer duration the eye can track.
-        v.setAlpha(0f);
-        v.setScaleX(0.78f);
-        v.setScaleY(0.78f);
-        v.setTranslationY(dp(14));
-        v.animate().alpha(1f).scaleX(1f).scaleY(1f).translationY(0f)
-                .setStartDelay(40).setDuration(420)
-                .setInterpolator(new android.view.animation.OvershootInterpolator(2.4f))
-                .start();
-    }
     private void animateResultIn(View v, int key) {
-        boolean complete = nextResultIsComplete;
-        nextResultIsComplete = false; // consume the flag regardless of whether we animate
         if (!animationsAllowed) return;     // neighbour/offscreen render — never animate
         if (liveFocusMode || (activeLiveTrackerGame != null && activeLiveTrackerGame.viewAtBatIndex >= 0)) {
             lastResultKey = key;
             return;
         }
-        // v433: if the poll detected a genuine new AB result, ALWAYS play the grand reveal — this is
-        // the consistency fix. Previously the reveal was suppressed unless liveUpdateRebuild was set
-        // and the key differed, which made it fire inconsistently. The event flag overrides both.
-        if (forceResultReveal && complete) {
-            lastResultKey = key;
-            playResultReveal(v);
-            return;
-        }
         if (!liveUpdateRebuild) { lastResultKey = key; return; } // user navigation — update key, don't animate
         if (key == lastResultKey) return;   // same content on a live poll — don't re-animate
         lastResultKey = key;
-        if (complete) playResultReveal(v);
-        else playCardIn(v);
+        playCardIn(v);
     }
 
     // v317: a dedicated showcase for the most recent pitch — big velo, type, result, and whatever
@@ -21136,7 +20702,6 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
         String contextSig = ""; // v399: base/out/count signature; stale cards are dropped on change
         String subject = "";    // v401: player/subject this card is about; folded into the ID so a
                                  // new batter's card is distinct (crawls in) instead of swapping in place
-        boolean departing = false; // v415: marked stale; stays drawn until it scrolls off, then removed
         GameContextCard(int priority, String eyebrow, String headline, String subline, int accent) {
             this.priority = priority;
             this.eyebrow = eyebrow;
@@ -21152,12 +20717,7 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
     private String liveContextSignature(LiveGame game) {
         if (game == null) return "";
         int baseMask = (game.onFirst ? 1 : 0) | (game.onSecond ? 2 : 0) | (game.onThird ? 4 : 0);
-        // v432: include the batter and pitcher ids. Without them, a batter change that left the
-        // base/out state unchanged read as the "same situation", so the transient-miss guard kept the
-        // previous batter's cards alive and new-batter cards never cycled in — the bug where the same
-        // batter's cards persisted across at-bats. Tying the signature to who's actually up fixes it.
-        return baseMask + "|" + Math.max(0, Math.min(3, game.sitOuts)) + "|" + game.sitInning + "|"
-                + safe(game.sitInningState) + "|B" + game.sitBatterId + "|P" + game.sitPitcherId;
+        return baseMask + "|" + Math.max(0, Math.min(3, game.sitOuts)) + "|" + game.sitInning + "|" + safe(game.sitInningState);
     }
 
     private String gameContextCardId(GameContextCard c) {
@@ -21168,14 +20728,6 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
     }
 
     private int gameContextCardWidth(GameContextCard c) {
-        // v416 TEST: force a single uniform width for every card. If the flashing stops, the cause is
-        // confirmed to be the variable-width reflow at the wrap boundary (cycleW changing by different
-        // amounts as cards of different sizes enter/leave). This is a diagnostic — if confirmed, the
-        // real fix keeps variety via a stable absolute-position track instead of modulo wrapping.
-        return dp(168);
-    }
-
-    private int gameContextCardWidthVariable(GameContextCard c) {
         if (c == null) return dp(120);
         // v398: measure the actual rendered widths so each card uses only the space it needs,
         // giving a natural variety of sizes instead of a wide uniform floor.
@@ -21199,13 +20751,8 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
 
         float contentW = Math.max(ebW, Math.max(headW, subContribution));
         int w = (int) contentW + dp(24); // padding both sides
-        // v414: quantize the width to a coarse bucket (~dp(16)) so a small text change (e.g. a stat
-        // value gaining a digit or a percent ticking up) doesn't change the card's width and reflow
-        // the whole strip — that reflow was the per-pitch position "jump". Stable buckets = stable layout.
-        int bucket = dp(16);
-        w = ((w + bucket - 1) / bucket) * bucket;
         // compact floor, generous-but-bounded ceiling; variety lives in between
-        return Math.max(dp(96), Math.min(dp(224), w));
+        return Math.max(dp(96), Math.min(dp(220), w));
     }
 
     // v397: rotation epoch — advances which discovery cards are visible over time so the strip
@@ -21215,78 +20762,11 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
     // v399: reuse the same ticker view across rebuilds to eliminate the replace-on-poll flash.
     // v405: ticker draws from these instance fields so onDraw always reflects the latest data.
     private final java.util.ArrayList<GameContextCard> liveContextTickerCards = new java.util.ArrayList<>();
-    // v419: fixed-slot grid — cards occupy permanent slot indices and never compact.
-    private static final int GRID_SLOTS = 12;
-    private GameContextCard[] liveContextGrid = null;
-    private int liveContextGridBatterId = 0;   // v434: last batter the grid was built for
-    private int liveContextGridSlotW = 0;     // uniform slot width in px
-    private int liveContextViewportW = 0;      // carousel viewport width (set by renderer)
     private final java.util.ArrayList<Integer> liveContextTickerWidths = new java.util.ArrayList<>();
     private int liveContextTickerCycleW = 1;
     private int liveContextTickerRowH = 1;
     private int liveContextTickerGap = 0;
     private float liveContextTickerSpeed = 0.02f;
-
-    // v418: explicit classification of each card type by whose performance it describes.
-    // 1 = about the current HITTER, 2 = about the current PITCHER, 0 = pure game situation (no
-    // subject — legitimately updates in place). This drives slot identity so a batter/pitcher change
-    // cycles that player's cards off-screen rather than swapping their content in place.
-    private int cardSubjectKind(String eyebrow) {
-        String e = safe(eyebrow).toUpperCase(Locale.US);
-        switch (e) {
-            // hitter cards
-            case "BARREL RATE":
-            case "BASES EMPTY":
-            case "BATTER BASELINE":
-            case "BATTER SURVIVAL":
-            case "CHASE PROFILE":
-            case "CLUTCH SPLIT":
-            case "CONTACT PROFILE":
-            case "CONTACT QUALITY":
-            case "DAMAGE PROFILE":
-            case "EXPECTED VALUE":
-            case "HARD-HIT BASE":
-            case "MEN-ON SPLIT":
-            case "PLATE DISCIPLINE":
-            case "PLATOON SPLIT":
-            case "RAW POWER":
-            case "RECENT FORM":
-            case "TWO-OUT RISP":
-            case "LATE LEVERAGE":
-            case "COUNT SPLIT":
-                return 1;
-            // pitcher cards
-            case "COMMAND INDEX":
-            case "DP PROFILE":
-            case "EV ALLOWED":
-            case "FATIGUE WATCH":
-            case "GROUND-BALL LEAN":
-            case "PITCH MIX":
-            case "ARSENAL":
-            case "WORKING TODAY":
-            case "PITCHER BASELINE":
-            case "PITCHER CLUTCH":
-            case "PITCHER LINE":
-            case "PITCHER PLATOON":
-            case "PITCHER FORM":
-            case "PUT-AWAY PROFILE":
-            case "SWING-MISS STUFF":
-            case "TIMES THROUGH":
-            case "VELOCITY SPREAD":
-            case "WALK PROFILE":
-            case "WHIFF BASELINE":
-            case "AHEAD IN COUNT":
-                return 2;
-            // matchup cards compare both players → tie to the matchup (batter id as anchor)
-            case "HARD-CONTACT MATCHUP":
-            case "WALK MATCHUP":
-            case "STRIKEOUT MATCHUP":
-                return 1;
-            default:
-                return 0; // COUNT VALUE, COUNT EDGE, LEVERAGE, BASE-OUT VALUE, OUT COST, RUN VALUE,
-                          // SCOREBOARD, WPA SWING, DUE UP, GAME'S BIG SWING, INSIGHT ENGINE, etc.
-        }
-    }
 
     private java.util.ArrayList<GameContextCard> stableGameContextCards(LiveGame game, java.util.ArrayList<GameContextCard> fresh) {
         java.util.ArrayList<GameContextCard> sorted = new java.util.ArrayList<>();
@@ -21303,8 +20783,6 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
             liveContextLastFrameMs = 0L;
             liveContextRotationEpochMs = android.os.SystemClock.uptimeMillis();
             liveContextRotationStep = 0;
-            liveContextGrid = null; // v419: fresh grid for a new game
-            liveContextGridBatterId = 0;
             liveContextCarouselStableCards.clear();
         }
 
@@ -21345,170 +20823,38 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
             }
         }
 
-        // v415: SLOT MODEL. The carousel keeps a persistent, ordered list of cards ("slots"). The
-        // golden rule: never remove or reorder a card that is currently on screen. Instead:
-        //   • a card whose situation is still valid updates its content IN its existing slot,
-        //   • a card that's no longer valid is MARKED departing (kept drawn until it scrolls off),
-        //   • a newly-relevant card is APPENDED to the tail (it crawls in from off-screen right).
-        // Departed cards are pruned only once the crawl has carried them fully past the left edge,
-        // so the visible window never reflows — eliminating the per-pitch/per-AB jump.
-        java.util.HashMap<String, GameContextCard> desiredById = new java.util.HashMap<>();
-        for (GameContextCard c : visible) desiredById.put(gameContextCardId(c), c);
+        // First time: seed and return.
+        if (liveContextCarouselStableCards.isEmpty()) {
+            liveContextCarouselStableCards.addAll(visible);
+            return new java.util.ArrayList<>(liveContextCarouselStableCards);
+        }
 
-        // v419: TRUE FIXED-SLOT GRID. liveContextGrid is a fixed array of GRID_SLOTS positions. Each
-        // slot's x-position is permanent (index × slotWidth). A slot holds a card or is null (drawn as
-        // a gap). The list NEVER compacts, so removing a card frees its slot to empty — nothing slides
-        // to fill it. This is what finally kills the "card swapped in place" effect: a given screen
-        // position is bound to a slot index, and a slot's occupant only changes while off-screen.
-        if (liveContextGrid == null) liveContextGrid = new GameContextCard[GRID_SLOTS];
+        // Merge: keep moving order stable, update content in place for cards still present, append
+        // any newly-visible cards to the tail so they slide in rather than popping at the front.
+        java.util.HashMap<String, GameContextCard> visById = new java.util.HashMap<>();
+        for (GameContextCard c : visible) visById.put(gameContextCardId(c), c);
 
-        // 1) Update slots whose card is still desired (in place); mark the rest departing — but ONLY
-        // if the situation actually changed. A card can briefly drop out of the desired set because
-        // its source stat hasn't reloaded this poll (async cache miss/refresh); departing it then would
-        // make it vanish and reappear a second later. So we keep a card whose situation signature still
-        // matches the current one, and only truly depart it when the situation has moved on.
+        java.util.ArrayList<GameContextCard> merged = new java.util.ArrayList<>();
+        java.util.HashSet<String> kept = new java.util.HashSet<>();
         String curSig = liveContextSignature(game);
-        // v434: detect a batter change at the grid level. On a real batter change we don't want the
-        // previous hitter's departing cards to linger and pile up (especially across quick at-bats),
-        // so any departing card that's already off-screen is freed immediately rather than waiting to
-        // be flagged by the renderer. On-screen ones still crawl out gracefully.
-        int gridBatter = game.sitBatterId;
-        boolean batterChangedGrid = gridBatter > 0 && liveContextGridBatterId != 0 && gridBatter != liveContextGridBatterId;
-        liveContextGridBatterId = gridBatter;
-        java.util.HashSet<String> placed = new java.util.HashSet<>();
-        for (int i = 0; i < GRID_SLOTS; i++) {
-            GameContextCard slot = liveContextGrid[i];
-            if (slot == null) continue;
-            String id = gameContextCardId(slot);
-            GameContextCard desired = desiredById.get(id);
-            if (desired != null && !placed.contains(id)) {
-                desired.departing = false;
-                liveContextGrid[i] = desired; // same slot index → same position
-                placed.add(id);
-            } else if (placed.contains(id)) {
-                liveContextGrid[i] = null; // duplicate slot → free it
-            } else if (safe(slot.contextSig).equals(curSig) && !slot.departing) {
-                // not in desired set, but situation unchanged → transient data miss; keep it as-is
-                placed.add(id);
-            } else {
-                slot.departing = true; // situation moved on → cycle out off-screen, then free
-            }
+        for (GameContextCard old : liveContextCarouselStableCards) {
+            String id = gameContextCardId(old);
+            GameContextCard updated = visById.get(id);
+            // only keep if still present in the fresh set AND its content matches the current
+            // situation (the updated card carries the current signature by construction).
+            if (updated != null && safe(updated.contextSig).equals(curSig)) { merged.add(updated); kept.add(id); }
         }
-
-        // v434: on a batter change, immediately free any departing card that's already off-screen so
-        // stale cards from the previous (or a skipped) batter don't accumulate. Visible departing
-        // cards are left to crawl out so nothing pops away mid-view.
-        if (batterChangedGrid) {
-            int slotW = liveContextGridSlotW > 0 ? liveContextGridSlotW : dp(168);
-            int gap = liveContextTickerGap > 0 ? liveContextTickerGap : dp(8);
-            int vw = liveContextViewportW > 0 ? liveContextViewportW : dp(360);
-            float scroll = liveContextScrollPos;
-            int cycleW = Math.max(1, (lastFilledIndex() + 1) * (slotW + gap));
-            for (int i = 0; i < GRID_SLOTS; i++) {
-                GameContextCard slot = liveContextGrid[i];
-                if (slot != null && slot.departing && slotIsOffScreen(i, slotW, gap, vw, scroll, cycleW)) {
-                    liveContextGrid[i] = null;
-                }
-            }
-        }
-
-        // 2) Free slots whose departing card has scrolled fully off-screen (flagged by the renderer).
-        synchronized (liveContextDrawLock) {
-            for (int i = 0; i < GRID_SLOTS; i++) {
-                GameContextCard slot = liveContextGrid[i];
-                if (slot != null && slot.departing && liveContextDepartedIds.contains(gameContextCardId(slot))) {
-                    liveContextGrid[i] = null;
-                }
-            }
-            liveContextDepartedIds.clear();
-        }
-
-        // 3) Place newly-desired cards (not yet in the grid) into empty slots. Prefer slots that are
-        // currently OFF-SCREEN so the card appears to crawl in rather than pop in mid-view. If the
-        // grid is full, the card waits for the next update (a slot will free as situations change).
-        java.util.ArrayList<GameContextCard> toPlace = new java.util.ArrayList<>();
         for (GameContextCard c : visible) {
             String id = gameContextCardId(c);
-            if (!placed.contains(id)) toPlace.add(c);
+            if (!kept.contains(id)) { merged.add(c); kept.add(id); }
+            if (merged.size() >= 8) break;
         }
-        if (!toPlace.isEmpty()) {
-            // sort newcomers by priority so the most important fill first
-            java.util.Collections.sort(toPlace, (a, b) -> b.priority - a.priority);
-            for (GameContextCard c : toPlace) {
-                int slotIdx = firstPreferredEmptySlot();
-                if (slotIdx < 0) break; // grid full; place on a later update
-                c.departing = false;
-                liveContextGrid[slotIdx] = c;
-                placed.add(gameContextCardId(c));
-            }
+        if (merged.isEmpty()) {
+            for (int i = 0; i < Math.min(6, sorted.size()); i++) merged.add(sorted.get(i));
         }
-
-        // 4) Off-screen compaction: pull cards into earlier empty slots ONLY when the card being
-        // moved is currently off-screen, so the viewer never sees a card jump. This closes interior
-        // gaps (left by departed cards during a set change) without disturbing visible cards — the
-        // gaps were the "empty rolled into view" you saw on inning changes.
-        compactGridOffScreen();
-
-        // 5) Emit the grid as a list with nulls preserved (the renderer draws gaps for nulls).
-        java.util.ArrayList<GameContextCard> out = new java.util.ArrayList<>(GRID_SLOTS);
-        for (int i = 0; i < GRID_SLOTS; i++) out.add(liveContextGrid[i]);
-        // mirror into the legacy list (used by a couple of callers/fallbacks)
         liveContextCarouselStableCards.clear();
-        for (GameContextCard c : out) if (c != null) liveContextCarouselStableCards.add(c);
-        return out;
-    }
-
-    // v423: choose where a newcomer goes — lowest empty slot, keeping cards contiguous.
-    private int firstPreferredEmptySlot() {
-        if (liveContextGrid == null) return -1;
-        for (int i = 0; i < GRID_SLOTS; i++) {
-            if (liveContextGrid[i] == null) return i;
-        }
-        return -1;
-    }
-
-    // v423: pull cards into earlier empty slots, but ONLY when the card being moved is currently
-    // off-screen — so closing a gap never makes a visible card jump. Compaction runs back-to-front:
-    // for each empty slot, find the next occupied slot after it whose card is off-screen and move it
-    // down. Visible cards stay exactly where they are; off-screen ones quietly fill the holes so no
-    // empty stretch ever crawls into view.
-    private void compactGridOffScreen() {
-        if (liveContextGrid == null) return;
-        int slotW = liveContextGridSlotW > 0 ? liveContextGridSlotW : dp(168);
-        int gap = liveContextTickerGap > 0 ? liveContextTickerGap : dp(8);
-        int vw = liveContextViewportW > 0 ? liveContextViewportW : dp(360);
-        float scroll = liveContextScrollPos;
-        int filled = 0;
-        for (int i = 0; i < GRID_SLOTS; i++) if (liveContextGrid[i] != null) filled++;
-        int cycleW = Math.max(1, (filled > 0 ? lastFilledIndex() + 1 : 1) * (slotW + gap));
-
-        for (int target = 0; target < GRID_SLOTS; target++) {
-            if (liveContextGrid[target] != null) continue;
-            // find the next occupied slot after `target` whose card is off-screen
-            for (int src = target + 1; src < GRID_SLOTS; src++) {
-                GameContextCard c = liveContextGrid[src];
-                if (c == null) continue;
-                if (slotIsOffScreen(src, slotW, gap, vw, scroll, cycleW)) {
-                    liveContextGrid[target] = c;
-                    liveContextGrid[src] = null;
-                }
-                break; // only consider the immediate next occupied slot; preserves order
-            }
-        }
-    }
-
-    private int lastFilledIndex() {
-        if (liveContextGrid == null) return -1;
-        int last = -1;
-        for (int i = 0; i < GRID_SLOTS; i++) if (liveContextGrid[i] != null) last = i;
-        return last;
-    }
-
-    private boolean slotIsOffScreen(int i, int slotW, int gap, int vw, float scroll, int cycleW) {
-        float x = i * (slotW + gap) - scroll;
-        while (x < -slotW) x += cycleW;
-        while (x > cycleW) x -= cycleW;
-        return (x + slotW <= 0) || (x >= vw);
+        liveContextCarouselStableCards.addAll(merged);
+        return new java.util.ArrayList<>(liveContextCarouselStableCards);
     }
 
     // v406: create the ticker once into the persistent carousel host. Subsequent updates only refresh
@@ -21545,50 +20891,40 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
         java.util.ArrayList<GameContextCard> data;
         try { data = stableGameContextCards(game, built); }
         catch (Exception e) { data = built; }
-        // data is the fixed grid (size GRID_SLOTS, may contain nulls for empty slots). If totally
-        // empty, drop in a single fallback card so the strip isn't blank.
-        boolean anyCard = false;
-        for (GameContextCard c : data) if (c != null) { anyCard = true; break; }
-        if (!anyCard && game != null) {
+        if (data.isEmpty() && game != null) {
             String head = game.sitInning > 0 ? liveInningHeroLabel(game) : safe(game.statusLabel());
             String sub = ab != null && !safe(ab.batter).isEmpty()
                     ? lastNameOnly(ab.batter) + " vs " + lastNameOnly(ab.pitcher)
                     : displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr) + " " + game.awayScoreText()
                     + "–" + game.homeScoreText() + " " + displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr);
-            if (data.isEmpty()) data.add(new GameContextCard(1, "GAME CONTEXT", head, sub, Color.rgb(244, 207, 100)));
-            else data.set(0, new GameContextCard(1, "GAME CONTEXT", head, sub, Color.rgb(244, 207, 100)));
+            data.add(new GameContextCard(1, "GAME CONTEXT", head, sub, Color.rgb(244, 207, 100)));
         }
+        java.util.LinkedHashMap<String, GameContextCard> uniqueCards = new java.util.LinkedHashMap<>();
+        for (GameContextCard c : data) {
+            String id = gameContextCardId(c);
+            if (!uniqueCards.containsKey(id)) uniqueCards.put(id, c);
+        }
+        java.util.ArrayList<GameContextCard> cards = new java.util.ArrayList<>(uniqueCards.values());
+        while (cards.size() > 6) cards.remove(cards.size() - 1);
 
         if (liveContextTickerEpochMs <= 0L) liveContextTickerEpochMs = android.os.SystemClock.uptimeMillis();
         int rowH = dp(104), gap = dp(8);
-        // v419: uniform slot width — a fixed grid requires equal widths so each slot's x is stable.
-        int slotW = dp(188);
-        liveContextGridSlotW = slotW;
-        java.util.ArrayList<GameContextCard> cards = new java.util.ArrayList<>(data); // may contain nulls
-        // v423: trim trailing empty slots so the crawl loop spans only up to the last occupied slot.
-        // Interior gaps keep their fixed positions (a card that left leaves a hole that fills off-
-        // screen), but trailing empties shouldn't add dead space to the strip. During a full set
-        // change the occupied range temporarily grows (old cards departing in low slots + new cards
-        // entering higher slots), so the loop lengthens to fit both, then tightens again after.
-        int lastFilled = -1;
-        for (int i = 0; i < cards.size(); i++) if (cards.get(i) != null) lastFilled = i;
-        // keep at least the occupied range; if everything is null, keep one slot to avoid a 0-cycle.
-        int keep = Math.max(1, lastFilled + 1);
-        while (cards.size() > keep) cards.remove(cards.size() - 1);
         java.util.ArrayList<Integer> widths = new java.util.ArrayList<>();
         int cycle = 0;
-        for (int i = 0; i < cards.size(); i++) { widths.add(slotW); cycle += slotW + gap; }
+        for (int i = 0; i < cards.size(); i++) { int w = gameContextCardWidth(cards.get(i)); widths.add(w); cycle += w + gap; }
         int cycleW = Math.max(1, cycle);
         float speedPxPerMs = Math.max(0.028f, dp(19) / 1000f);
+        // v407: the ticker view is now PERSISTENT (lives in its own host, never recreated), so the
+        // epoch stays constant and the crawl is inherently continuous. We must NOT re-anchor here —
+        // re-solving the epoch on every data update was what nudged the cards forward each poll.
+        if (liveContextTickerEpochMs <= 0L) liveContextTickerEpochMs = android.os.SystemClock.uptimeMillis();
         liveContextCarouselCycleWidth = cycleW;
-        synchronized (liveContextDrawLock) {
-            liveContextTickerCards.clear(); liveContextTickerCards.addAll(cards);
-            liveContextTickerWidths.clear(); liveContextTickerWidths.addAll(widths);
-            liveContextTickerCycleW = cycleW;
-            liveContextTickerRowH = rowH;
-            liveContextTickerGap = gap;
-            liveContextTickerSpeed = speedPxPerMs;
-        }
+        liveContextTickerCards.clear(); liveContextTickerCards.addAll(cards);
+        liveContextTickerWidths.clear(); liveContextTickerWidths.addAll(widths);
+        liveContextTickerCycleW = cycleW;
+        liveContextTickerRowH = rowH;
+        liveContextTickerGap = gap;
+        liveContextTickerSpeed = speedPxPerMs;
     }
 
     // v406: resolve the at-bat the tracker is currently showing (live or browsed), for carousel data.
@@ -21609,229 +20945,178 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
 
     // v406: create the canvas ticker view. It draws purely from instance fields (set by
     // prepareCarouselData), so it can be created once and updated forever without recreation.
-    // v413: the carousel is a TextureView rendered on a DEDICATED thread. A SurfaceView/TextureView
-    // draws off the main thread, so a heavy main-thread layout pass (the pitch-moment tracker rebuild)
-    // can no longer freeze the crawl. This is the only approach that survives a busy UI thread; all
-    // the main-thread isolation attempts (v399–v412) couldn't, by definition, draw while the main
-    // thread was blocked. Card data is read under liveContextDrawLock to stay consistent with updates.
-    private final Object liveContextDrawLock = new Object();
-    private CarouselRenderThread liveContextRenderThread = null;
-
     private View createCarouselTickerView() {
-        TextureView tv = new TextureView(this);
-        tv.setOpaque(false);
-        tv.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
-            @Override public void onSurfaceTextureAvailable(android.graphics.SurfaceTexture surface, int width, int height) {
-                if (liveContextRenderThread != null) { liveContextRenderThread.requestStop(); }
-                liveContextRenderThread = new CarouselRenderThread(new Surface(surface));
-                liveContextRenderThread.start();
+        View ticker = new View(this) {
+            private final Paint fillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            private final Paint strokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            private final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            private final RectF rect = new RectF();
+            private boolean attached = false;
+
+            private float sp(float v) {
+                return v * getResources().getDisplayMetrics().scaledDensity;
             }
-            @Override public void onSurfaceTextureSizeChanged(android.graphics.SurfaceTexture surface, int width, int height) { }
-            @Override public boolean onSurfaceTextureDestroyed(android.graphics.SurfaceTexture surface) {
-                if (liveContextRenderThread != null) { liveContextRenderThread.requestStop(); liveContextRenderThread = null; }
-                return true;
+
+            private String fitText(String raw, Paint p, float maxW) {
+                String s = safe(raw).replace('\n', ' ').trim();
+                if (s.isEmpty()) return "";
+                if (p.measureText(s) <= maxW) return s;
+                String ell = "…";
+                float ellW = p.measureText(ell);
+                int end = s.length();
+                while (end > 0 && p.measureText(s, 0, end) + ellW > maxW) end--;
+                return end <= 0 ? ell : s.substring(0, end).trim() + ell;
             }
-            @Override public void onSurfaceTextureUpdated(android.graphics.SurfaceTexture surface) { }
-        });
-        return tv;
-    }
 
-    private final class CarouselRenderThread extends Thread {
-        private final Surface surface;
-        private volatile boolean running = true;
-        private final Paint fillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint strokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final RectF rect = new RectF();
-
-        CarouselRenderThread(Surface s) { this.surface = s; setName("carousel-render"); }
-        void requestStop() { running = false; interrupt(); }
-
-        private float sp(float v) { return v * getResources().getDisplayMetrics().scaledDensity; }
-
-        @Override public void run() {
-            while (running) {
-                long frameStart = android.os.SystemClock.uptimeMillis();
-                Canvas canvas = null;
-                try {
-                    if (!surface.isValid()) { sleepQuietly(16); continue; }
-                    canvas = surface.lockCanvas(null);
-                    if (canvas == null) { sleepQuietly(16); continue; }
-                    canvas.drawColor(0, android.graphics.PorterDuff.Mode.CLEAR);
-                    drawFrame(canvas);
-                } catch (Exception e) {
-                    // never let a transient surface error kill the thread
-                } finally {
-                    if (canvas != null) {
-                        try { surface.unlockCanvasAndPost(canvas); } catch (Exception ignored) { }
-                    }
-                }
-                long elapsed = android.os.SystemClock.uptimeMillis() - frameStart;
-                long sleep = 16 - elapsed;
-                if (sleep > 0) sleepQuietly(sleep);
-            }
-            try { surface.release(); } catch (Exception ignored) { }
-        }
-
-        private void sleepQuietly(long ms) { try { Thread.sleep(ms); } catch (InterruptedException ignored) { } }
-
-        private void drawFrame(Canvas canvas) {
-            java.util.ArrayList<GameContextCard> cards;
-            java.util.ArrayList<Integer> widths;
-            int cycleW, rowH, gap; float speedPxPerMs;
-            synchronized (liveContextDrawLock) {
-                cards = new java.util.ArrayList<>(liveContextTickerCards);
-                widths = new java.util.ArrayList<>(liveContextTickerWidths);
-                cycleW = Math.max(1, liveContextTickerCycleW);
-                rowH = liveContextTickerRowH;
-                gap = liveContextTickerGap;
-                speedPxPerMs = liveContextTickerSpeed;
-            }
-            int vw = canvas.getWidth();
-            liveContextViewportW = vw; // v419: feed viewport width back for off-screen slot placement
-            if (vw <= 0 || cards.isEmpty() || widths.size() != cards.size()) return;
-
-            canvas.save();
-            canvas.clipRect(0, 0, vw, rowH);
-
-            long now = android.os.SystemClock.uptimeMillis();
-            if (liveContextLastFrameMs <= 0L) liveContextLastFrameMs = now;
-            long dt = now - liveContextLastFrameMs;
-            if (dt < 0) dt = 0;
-            if (dt > 100) dt = 16;
-            liveContextLastFrameMs = now;
-            liveContextScrollPos += dt * speedPxPerMs;
-            while (liveContextScrollPos >= cycleW) liveContextScrollPos -= cycleW;
-            while (liveContextScrollPos < 0) liveContextScrollPos += cycleW;
-            float offset = cards.size() >= 2 ? liveContextScrollPos : 0f;
-            liveContextCarouselScrollX = (int) offset;
-
-            float startX = -offset;
-            while (startX > 0) startX -= cycleW;
-            // v422: a departing card is drawn wherever it currently sits on screen (the old "first
-            // pass only" rule wrongly hid departing cards that were on the RIGHT side of the strip,
-            // making them vanish mid-screen). To stop a departing card from looping back around after
-            // it exits left, we track ids that have exited this frame and skip them in later passes
-            // AND flag them for the merge to free the slot.
-            java.util.HashSet<String> departedThisFrame = null;
-            java.util.HashSet<String> exitedLeft = new java.util.HashSet<>();
-            boolean firstPass = true;
-            for (float cycleStart = startX; cycleStart < vw; cycleStart += cycleW) {
-                float x = cycleStart;
-                for (int i = 0; i < cards.size(); i++) {
-                    GameContextCard card = cards.get(i);
-                    int w = widths.get(i);
-                    if (card == null) { x += w + gap; continue; } // empty slot → fixed gap
-                    boolean onScreen = x < vw && x + w > 0;
-                    if (card.departing) {
-                        String id = gameContextCardId(card);
-                        if (exitedLeft.contains(id)) { x += w + gap; continue; } // already left this frame
-                        if (x + w <= 0) {
-                            // fully past the left edge → mark exited so it won't loop back, and flag
-                            // for the merge to free its slot.
-                            exitedLeft.add(id);
-                            if (departedThisFrame == null) departedThisFrame = new java.util.HashSet<>();
-                            departedThisFrame.add(id);
-                        } else if (onScreen || x > 0) {
-                            // still on screen or to the right (about to exit) → keep drawing it
-                            if (onScreen) drawCard(canvas, card, x, 0, w, rowH);
-                        }
+            private java.util.ArrayList<String> fitTwoLines(String raw, Paint p, float maxW) {
+                java.util.ArrayList<String> out = new java.util.ArrayList<>();
+                String s = safe(raw).replace('\n', ' ').trim();
+                if (s.isEmpty()) return out;
+                String[] words = s.split("\\s+");
+                String line = "";
+                int i = 0;
+                for (; i < words.length; i++) {
+                    String next = line.isEmpty() ? words[i] : line + " " + words[i];
+                    if (p.measureText(next) <= maxW) {
+                        line = next;
                     } else {
-                        if (onScreen) drawCard(canvas, card, x, 0, w, rowH);
+                        break;
                     }
-                    x += w + gap;
                 }
-                firstPass = false;
+                if (!line.isEmpty()) out.add(line);
+                StringBuilder rest = new StringBuilder();
+                for (; i < words.length; i++) {
+                    if (rest.length() > 0) rest.append(' ');
+                    rest.append(words[i]);
+                }
+                if (rest.length() > 0) out.add(fitText(rest.toString(), p, maxW));
+                if (out.isEmpty()) out.add(fitText(s, p, maxW));
+                while (out.size() > 2) out.remove(out.size() - 1);
+                return out;
             }
-            if (departedThisFrame != null) liveContextDepartedIds.addAll(departedThisFrame);
-            canvas.restore();
-        }
 
-        private String fitText(String raw, Paint p, float maxW) {
-            String s = safe(raw).replace('\n', ' ').trim();
-            if (s.isEmpty()) return "";
-            if (p.measureText(s) <= maxW) return s;
-            String ell = "…";
-            float ellW = p.measureText(ell);
-            int end = s.length();
-            while (end > 0 && p.measureText(s, 0, end) + ellW > maxW) end--;
-            return end <= 0 ? ell : s.substring(0, end).trim() + ell;
-        }
+            private void drawCard(Canvas canvas, GameContextCard c, float x, float y, float w, float h) {
+                rect.set(x, y, x + w, y + h);
+                fillPaint.setStyle(Paint.Style.FILL);
+                fillPaint.setShader(new LinearGradient(x, y, x + w, y + h,
+                        Color.argb(46, Color.red(c.accent), Color.green(c.accent), Color.blue(c.accent)),
+                        Color.argb(14, Color.red(c.accent), Color.green(c.accent), Color.blue(c.accent)),
+                        Shader.TileMode.CLAMP));
+                canvas.drawRoundRect(rect, dp(14), dp(14), fillPaint);
+                fillPaint.setShader(null);
 
-        private java.util.ArrayList<String> fitTwoLines(String raw, Paint p, float maxW) {
-            java.util.ArrayList<String> out = new java.util.ArrayList<>();
-            String s = safe(raw).replace('\n', ' ').trim();
-            if (s.isEmpty()) return out;
-            String[] words = s.split("\\s+");
-            String line = "";
-            int i = 0;
-            for (; i < words.length; i++) {
-                String next = line.isEmpty() ? words[i] : line + " " + words[i];
-                if (p.measureText(next) <= maxW) line = next; else break;
+                strokePaint.setStyle(Paint.Style.STROKE);
+                strokePaint.setStrokeWidth(dp(1));
+                strokePaint.setColor(Color.argb(112, Color.red(c.accent), Color.green(c.accent), Color.blue(c.accent)));
+                canvas.drawRoundRect(rect, dp(14), dp(14), strokePaint);
+
+                int save = canvas.save();
+                canvas.clipRect(x + dp(8), y + dp(6), x + w - dp(8), y + h - dp(6));
+
+                float tx = x + dp(10);
+                float maxTextW = Math.max(1f, w - dp(20));
+
+                textPaint.setShader(null);
+                textPaint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+                textPaint.setTextSize(sp(7));
+                textPaint.setColor(c.accent);
+                textPaint.setLetterSpacing(0.18f);
+                canvas.drawText(fitText(c.eyebrow, textPaint, maxTextW), tx, y + dp(20), textPaint);
+
+                textPaint.setLetterSpacing(0f);
+                textPaint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+                textPaint.setTextSize(sp(12));
+                textPaint.setColor(INK);
+                canvas.drawText(fitText(c.headline, textPaint, maxTextW), tx, y + dp(50), textPaint);
+
+                textPaint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+                textPaint.setTextSize(sp(8));
+                textPaint.setColor(INK_DIM);
+                java.util.ArrayList<String> subLines = fitTwoLines(c.subline, textPaint, maxTextW);
+                if (subLines.size() > 0) canvas.drawText(subLines.get(0), tx, y + dp(75), textPaint);
+                if (subLines.size() > 1) canvas.drawText(subLines.get(1), tx, y + dp(89), textPaint);
+
+                canvas.restoreToCount(save);
             }
-            if (!line.isEmpty()) out.add(line);
-            StringBuilder rest = new StringBuilder();
-            for (; i < words.length; i++) { if (rest.length() > 0) rest.append(' '); rest.append(words[i]); }
-            if (rest.length() > 0) out.add(fitText(rest.toString(), p, maxW));
-            if (out.isEmpty()) out.add(fitText(s, p, maxW));
-            while (out.size() > 2) out.remove(out.size() - 1);
-            return out;
-        }
 
-        private void drawCard(Canvas canvas, GameContextCard c, float x, float y, float w, float h) {
-            rect.set(x, y, x + w, y + h);
-            fillPaint.setStyle(Paint.Style.FILL);
-            fillPaint.setShader(new LinearGradient(x, y, x + w, y + h,
-                    Color.argb(46, Color.red(c.accent), Color.green(c.accent), Color.blue(c.accent)),
-                    Color.argb(14, Color.red(c.accent), Color.green(c.accent), Color.blue(c.accent)),
-                    Shader.TileMode.CLAMP));
-            canvas.drawRoundRect(rect, dp(14), dp(14), fillPaint);
-            fillPaint.setShader(null);
-
-            strokePaint.setStyle(Paint.Style.STROKE);
-            strokePaint.setStrokeWidth(dp(1));
-            strokePaint.setColor(Color.argb(112, Color.red(c.accent), Color.green(c.accent), Color.blue(c.accent)));
-            canvas.drawRoundRect(rect, dp(14), dp(14), strokePaint);
-
-            int save = canvas.save();
-            canvas.clipRect(x + dp(8), y + dp(6), x + w - dp(8), y + h - dp(6));
-            float tx = x + dp(10);
-            float maxTextW = Math.max(1f, w - dp(20));
-
-            textPaint.setShader(null);
-            textPaint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
-            textPaint.setTextSize(sp(7));
-            textPaint.setColor(c.accent);
-            textPaint.setLetterSpacing(0.18f);
-            textPaint.setTextAlign(Paint.Align.LEFT);
-            // letter spacing widens text beyond measureText's estimate; fit to a tighter budget so
-            // the eyebrow never clips the card edge.
-            canvas.drawText(fitText(c.eyebrow, textPaint, maxTextW * 0.86f), tx, y + dp(20), textPaint);
-
-            textPaint.setLetterSpacing(0f);
-            textPaint.setColor(INK);
-            // v432: auto-fit the headline size so long stat headlines shrink to fit rather than
-            // ellipsizing awkwardly or appearing to clip. Start at sp(12), step down to sp(9.5) min.
-            float headSize = sp(12);
-            textPaint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
-            String headStr = safe(c.headline).replace('\n', ' ').trim();
-            while (headSize > sp(9.5f) && textPaint.measureText(headStr) > maxTextW) {
-                headSize -= sp(0.5f);
-                textPaint.setTextSize(headSize);
+            @Override protected void onAttachedToWindow() {
+                super.onAttachedToWindow();
+                attached = true;
+                invalidate();
             }
-            textPaint.setTextSize(headSize);
-            canvas.drawText(fitText(headStr, textPaint, maxTextW), tx, y + dp(50), textPaint);
 
-            textPaint.setTextSize(sp(9));
-            textPaint.setColor(INK_DIM);
-            java.util.ArrayList<String> subLines = fitTwoLines(c.subline, textPaint, maxTextW);
-            if (subLines.size() > 0) canvas.drawText(subLines.get(0), tx, y + dp(76), textPaint);
-            if (subLines.size() > 1) canvas.drawText(subLines.get(1), tx, y + dp(90), textPaint);
+            @Override protected void onDetachedFromWindow() {
+                attached = false;
+                super.onDetachedFromWindow();
+            }
 
-            canvas.restoreToCount(save);
-        }
+            @Override protected void onDraw(Canvas canvas) {
+                super.onDraw(canvas);
+                int vw = getWidth();
+                java.util.ArrayList<GameContextCard> cards = liveContextTickerCards;
+                java.util.ArrayList<Integer> widths = liveContextTickerWidths;
+                int cycleW = Math.max(1, liveContextTickerCycleW);
+                int rowH = liveContextTickerRowH;
+                int gap = liveContextTickerGap;
+                float speedPxPerMs = liveContextTickerSpeed;
+                if (vw <= 0 || cards.isEmpty() || widths.size() != cards.size()) return;
+
+                canvas.save();
+                canvas.clipRect(0, 0, vw, rowH);
+
+                long now = android.os.SystemClock.uptimeMillis();
+                // v409: advance the scroll by the per-FRAME delta, not by absolute-time-modulo. The
+                // old formula ((now-epoch)*speed) % cycleW jumped whenever cycleW changed (which
+                // happens on every pitch as card widths change), because the same time mapped to a
+                // different remainder. A frame-delta accumulator keeps the absolute position
+                // continuous: when cards resize, the crawl simply keeps going from where it was.
+                if (liveContextLastFrameMs <= 0L) liveContextLastFrameMs = now;
+                long dt = now - liveContextLastFrameMs;
+                if (dt < 0) dt = 0;
+                // DEBUG v410: track the largest recent frame gap to diagnose the per-pitch hitch.
+                if (dt > liveContextDebugMaxGap) liveContextDebugMaxGap = dt;
+                if (now - liveContextDebugGapResetMs > 3000L) { liveContextDebugMaxGap = dt; liveContextDebugGapResetMs = now; }
+                if (dt > 100) dt = 16; // a stall (poll/GC) must not teleport the strip; cap the step
+                liveContextLastFrameMs = now;
+                liveContextScrollPos += dt * speedPxPerMs;
+                // wrap softly against the CURRENT cycle width
+                while (liveContextScrollPos >= cycleW) liveContextScrollPos -= cycleW;
+                while (liveContextScrollPos < 0) liveContextScrollPos += cycleW;
+                float offset = cards.size() >= 2 ? liveContextScrollPos : 0f;
+                liveContextCarouselScrollX = (int) offset;
+
+                float startX = -offset;
+                while (startX > 0) startX -= cycleW;
+
+                for (float cycleStart = startX; cycleStart < vw; cycleStart += cycleW) {
+                    float x = cycleStart;
+                    for (int i = 0; i < cards.size(); i++) {
+                        int w = widths.get(i);
+                        if (x < vw && x + w > 0) drawCard(canvas, cards.get(i), x, 0, w, rowH);
+                        x += w + gap;
+                    }
+                }
+
+                canvas.restore();
+
+                // DEBUG v410: max recent frame gap, top-left. Spikes lining up with pitches = the
+                // rebuild's layout pass starves the animation. Steady ~16ms = draw is fine.
+                textPaint.setColor(Color.argb(220, 255, 90, 90));
+                textPaint.setTextSize(sp(9));
+                textPaint.setTextAlign(Paint.Align.LEFT);
+                textPaint.setShader(null);
+                canvas.drawText("gap " + liveContextDebugMaxGap + "ms", dp(3), sp(11), textPaint);
+
+                if (attached && cards.size() >= 2) {
+                    if (Build.VERSION.SDK_INT >= 16) postInvalidateOnAnimation();
+                    else postInvalidateDelayed(16L);
+                }
+            }
+        };
+        ticker.setMinimumHeight(liveContextTickerRowH);
+        ticker.setClipToOutline(false);
+        return ticker;
     }
-
 
     private java.util.ArrayList<GameContextCard> buildGameContextCards(LiveGame game, LiveAtBat ab, TeamPalette awayPal, TeamPalette homePal) {
         java.util.ArrayList<GameContextCard> cards = new java.util.ArrayList<>();
@@ -21906,22 +21191,21 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
         // season profile stats. This is a stepping stone until true count-split tables are added.
         if (threeBall && (batObp != null || batBb != null)) {
             String head = !batLast.isEmpty() && batObp != null ? batLast + " " + liveRate(batObp) + " OBP"
-                    : (!batLast.isEmpty() && batBb != null ? batLast + " " + livePct(batBb) + " BB" : livePct(batBb) + " BB rate");
-            String sub = batBb != null ? (batBb >= 12 ? "Elite eye (lg ~8.5%)" : batBb >= 8.5 ? "Above-average eye (lg ~8.5%)" : "League-average walk rate")
-                    : (batObp != null ? (batObp >= 0.360 ? "Gets on base (lg ~.315)" : "On-base vs lg ~.315") : "");
+                    : (!batLast.isEmpty() && batBb != null ? batLast + " " + livePct(batBb) + " BB" : livePct(batBb) + " BB profile");
+            String sub = (balls + "-" + strikes) + " spot"
+                    + (batBb != null ? " · season " + livePct(batBb) + " BB" : " · season on-base profile");
             addInsightCard(cards, used, 134, "COUNT EDGE", head, sub, batAccent);
         }
 
         if (threeBall && pitBb != null) {
-            String head = (!pitLast.isEmpty() ? pitLast + " " : "") + livePct(pitBb) + " walk rate";
-            String sub = pitBb <= 6 ? "Strong control (lg ~8.5%)" : pitBb <= 9 ? "League-average control" : "Walk-prone (lg ~8.5%)";
+            String head = (!pitLast.isEmpty() ? pitLast + " " : "") + livePct(pitBb) + " BB rate";
+            String sub = (balls + "-" + strikes) + " count · pitcher walk profile";
             addInsightCard(cards, used, 130, "WALK PROFILE", head, sub, defAccent);
         }
 
         if (twoStrike && pitK != null) {
             String head = (!pitLast.isEmpty() ? pitLast + " " : "") + livePct(pitK) + " K rate";
-            String sub = (pitK >= 27 ? "Big swing-miss (lg ~22%)" : pitK >= 22 ? "Above-average K (lg ~22%)" : "League-average K rate")
-                    + (pitWhiff != null ? " · " + livePct(pitWhiff) + " whiff" : "");
+            String sub = (pitWhiff != null ? livePct(pitWhiff) + " whiff · " : "") + "two-strike spot";
             addInsightCard(cards, used, 132, "PUT-AWAY PROFILE", head, sub, defAccent);
         }
 
@@ -21929,8 +21213,8 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
             String head = batK != null ? (!batLast.isEmpty() ? batLast + " " : "") + livePct(batK) + " K rate"
                     : (batWhiff != null ? (!batLast.isEmpty() ? batLast + " " : "") + livePct(batWhiff) + " whiff"
                     : (!batLast.isEmpty() ? batLast + " " : "") + livePct(batZoneContact) + " zone contact");
-            String sub = batK != null ? (batK <= 16 ? "Tough to strike out (lg ~22%)" : batK <= 22 ? "League-average K (lg ~22%)" : "Strikeout-prone (lg ~22%)")
-                    : (batWhiff != null ? qualifyWhiff(batWhiff) : "Zone contact vs lg ~82%");
+            String sub = "Two-strike profile"
+                    + (batWhiff != null && batK != null ? " · " + livePct(batWhiff) + " whiff" : "");
             addInsightCard(cards, used, 126, "BATTER SURVIVAL", head, sub, batAccent);
         }
 
@@ -21938,51 +21222,39 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
             String head = batSlg != null ? (!batLast.isEmpty() ? batLast + " " : "") + liveRate(batSlg) + " xSLG"
                     : (batXwoba != null ? (!batLast.isEmpty() ? batLast + " " : "") + liveRate(batXwoba) + " xwOBA"
                     : (!batLast.isEmpty() ? batLast + " " : "") + livePct(batHard) + " hard-hit");
-            String sub = batSlg != null ? (batSlg >= 0.480 ? "Big power in hitter's counts (lg ~.410)" : batSlg >= 0.410 ? "Above-average slug (lg ~.410)" : "League-average slug (~.410)")
-                    : (batXwoba != null ? qualifyXwoba(batXwoba) : qualifyHardHit(batHard));
+            String sub = (balls + "-" + strikes) + " count · damage profile when pitcher attacks";
             addInsightCard(cards, used, 124, "DAMAGE PROFILE", head, sub, batAccent);
         }
 
         if (pitcherAhead && (pitWhiff != null || pitChase != null || pitKbb != null)) {
             String head = pitWhiff != null ? (!pitLast.isEmpty() ? pitLast + " " : "") + livePct(pitWhiff) + " whiff"
-                    : (pitChase != null ? (!pitLast.isEmpty() ? pitLast + " " : "") + livePct(pitChase) + " chase drawn"
+                    : (pitChase != null ? (!pitLast.isEmpty() ? pitLast + " " : "") + livePct(pitChase) + " chase"
                     : (!pitLast.isEmpty() ? pitLast + " " : "") + livePct(pitKbb) + " K-BB");
-            String sub = pitWhiff != null ? qualifyWhiff(pitWhiff)
-                    : (pitChase != null ? (pitChase >= 32 ? "Gets chases (lg ~28%)" : "League-average chase (~28%)") : qualifyKbb(pitKbb));
-            addInsightCard(cards, used, 122, "AHEAD IN COUNT", head, sub, defAccent);
+            String sub = (balls + "-" + strikes) + " count · pitcher profile favors expansion";
+            addInsightCard(cards, used, 122, "CHASE PROFILE", head, sub, defAccent);
         }
 
-        // Matchup cards: instead of two raw percentages the viewer can't compare, we lead with the
-        // edge — whose tendency wins this matchup — and give each number its league context so it's
-        // clear what's good. (A hitter's 45% hard-hit and a pitcher's 35% hard-hit-allowed aren't on
-        // the same scale of "good"; we frame each against its own league average.)
+        // Matchup collision cards: these are the most useful v1 cards because they combine both
+        // player profiles with the current situation.
         if (twoStrike && batK != null && pitK != null) {
-            // both are strikeout rates (hitter's K% and pitcher's K%) — these ARE comparable in
-            // direction: high favors the pitcher. Lead with the matchup-relevant one.
-            boolean pitcherEdge = pitK >= 24d || batK >= 24d;
-            String head = (!pitLast.isEmpty() ? pitLast + " " : "") + livePct(pitK) + " K rate";
-            String sub = "vs " + (!batLast.isEmpty() ? batLast : "batter") + " " + livePct(batK) + " K"
-                    + " · " + (pitcherEdge ? "whiff-prone matchup" : "contact matchup") + " (lg K ~22%)";
-            addInsightCard(cards, used, 128, "STRIKEOUT MATCHUP", head, sub, orangeAccent);
+            String head = "K rates stack up";
+            String sub = (!batLast.isEmpty() ? batLast + " " : "Batter ") + livePct(batK)
+                    + " · " + (!pitLast.isEmpty() ? pitLast + " " : "pitcher ") + livePct(pitK);
+            addInsightCard(cards, used, 128, "WHIFF COLLISION", head, sub, orangeAccent);
         }
 
         if ((hitterAhead || runners > 0 || close) && batHard != null && pitHard != null) {
-            // Lead with the hitter's hard-hit% (the threat), contextualize vs league, and note how
-            // much contact this pitcher usually allows so the matchup is legible.
-            double edge = batHard - pitHard;
-            String head = (!batLast.isEmpty() ? batLast + " " : "") + livePct(batHard) + " hard-hit";
-            String sub = qualifyHardHit(batHard) + " · " + (!pitLast.isEmpty() ? pitLast : "pitcher")
-                    + " allows " + livePct(pitHard) + (edge >= 6 ? " — hitter's edge" : edge <= -6 ? " — pitcher's edge" : "");
-            addInsightCard(cards, used, 118, "HARD-CONTACT MATCHUP", head, sub, orangeAccent);
+            String head = "Hard contact collision";
+            String sub = (!batLast.isEmpty() ? batLast + " " : "Bat ") + livePct(batHard)
+                    + " · " + (!pitLast.isEmpty() ? pitLast + " allows " : "P allows ") + livePct(pitHard);
+            addInsightCard(cards, used, 118, "CONTACT COLLISION", head, sub, orangeAccent);
         }
 
         if (threeBall && batBb != null && pitBb != null) {
-            // Walk pressure: both walk rates point the same way at 3-ball — lead with the hitter's
-            // patience, contextualize, note the pitcher's control.
-            String head = (!batLast.isEmpty() ? batLast + " " : "") + livePct(batBb) + " walk rate";
-            String sub = (batBb >= 12 ? "Patient hitter" : batBb >= 8 ? "Average eye" : "Aggressive")
-                    + " (lg ~8.5%) · " + (!pitLast.isEmpty() ? pitLast : "pitcher") + " walks " + livePct(pitBb);
-            addInsightCard(cards, used, 127, "WALK MATCHUP", head, sub, neutralAccent);
+            String head = "Walk pressure stacked";
+            String sub = (!batLast.isEmpty() ? batLast + " " : "Bat ") + livePct(batBb)
+                    + " · " + (!pitLast.isEmpty() ? pitLast + " " : "P ") + livePct(pitBb) + " BB";
+            addInsightCard(cards, used, 127, "WALK COLLISION", head, sub, neutralAccent);
         }
 
         // Base/out stats: use run expectancy deltas so these are quantitative, not labels.
@@ -22002,17 +21274,14 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
         }
 
         if (game.onFirst && outs < 2 && batGb != null) {
-            String head = (!batLast.isEmpty() ? batLast + " " : "") + livePct(batGb) + " ground-ball%";
-            String sub = batGb >= 50 ? "DP risk — heavy grounder rate (lg ~43%)" : batGb >= 43 ? "League-average grounders (~43%)" : "Lifts the ball, low DP risk (lg ~43%)";
-            addInsightCard(cards, used, 114, "DP PROFILE", head, sub, batAccent);
+            String head = (!batLast.isEmpty() ? batLast + " " : "") + livePct(batGb) + " GB rate";
+            addInsightCard(cards, used, 114, "DP PROFILE", head, "Runner on 1st · fewer than 2 outs", batAccent);
         }
 
         if (thirdLessThanTwo && (batK != null || batZoneContact != null)) {
             String head = batK != null ? (!batLast.isEmpty() ? batLast + " " : "") + livePct(batK) + " K rate"
                     : (!batLast.isEmpty() ? batLast + " " : "") + livePct(batZoneContact) + " zone contact";
-            String sub = batK != null ? (batK <= 16 ? "Puts ball in play — scores the run (lg K ~22%)" : batK >= 26 ? "Whiff risk with run on 3rd (lg ~22%)" : "League-average contact (lg K ~22%)")
-                    : "Zone contact vs lg ~82% · run on 3rd";
-            addInsightCard(cards, used, 113, "CONTACT PROFILE", head, sub, batAccent);
+            addInsightCard(cards, used, 113, "CONTACT PROFILE", head, "Runner on 3rd · fewer than 2 outs", batAccent);
         }
 
         // Current-game contact is allowed, but it has to connect to a profile stat or a measured trend.
@@ -22025,8 +21294,8 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
         }
 
         if (pitchCount >= 75 && pitKbb != null) {
-            String head = (!pitLast.isEmpty() ? pitLast + " " : "") + livePct(pitKbb) + " K-BB%";
-            String sub = pitchCount + " pitches · " + qualifyKbb(pitKbb);
+            String head = (!pitLast.isEmpty() ? pitLast + " " : "") + livePct(pitKbb) + " K-BB";
+            String sub = pitchCount + " pitches · baseline command profile";
             addInsightCard(cards, used, 104 + (pitchCount >= 90 ? 8 : 0), "HOOK WATCH", head, sub, tealAccent);
         }
 
@@ -22034,9 +21303,8 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
             String head = batSlg != null ? (!batLast.isEmpty() ? batLast + " " : "") + liveRate(batSlg) + " xSLG"
                     : (batBarrel != null ? (!batLast.isEmpty() ? batLast + " " : "") + livePct(batBarrel) + " barrel"
                     : (!pitLast.isEmpty() ? pitLast + " " : "") + liveRate(pitXwoba) + " xwOBA allowed");
-            String sub = batSlg != null ? (batSlg >= 0.480 ? "Power threat late (lg ~.410)" : "Slugging vs lg ~.410")
-                    : (batBarrel != null ? qualifyBarrel(batBarrel) : qualifyXwoba(pitXwoba) + " allowed");
-            addInsightCard(cards, used, 106, "LATE LEVERAGE", head, sub, batAccent);
+            String sub = "Late close game · one swing has leverage";
+            addInsightCard(cards, used, 106, "LEVERAGE BAT", head, sub, batAccent);
         }
 
         // ===== Insight Engine v2: live splits + pitch-sequence cards (v397) =====
@@ -22062,17 +21330,9 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                         String sub = "Due up · " + qualifyXwoba(dx) + (safe(db.line).isEmpty() ? "" : " · " + db.line + " today");
                         addInsightCard(cards, used, 134 - shown, "DUE UP", head, sub, upAccent);
                         shown++;
-                    } else {
-                        // v432: only show a due-up card if we have something meaningful — a season OPS
-                        // or today's line with context. A bare "X up next" with no stat is exactly the
-                        // empty card to avoid, so we skip it entirely when there's nothing to say.
-                        Double dops = liveStat(ds, "ops");
-                        if (dops != null) {
-                            String head = safe(db.name) + " " + liveRate(dops) + " OPS";
-                            String sub = "Due up · " + qualifyOpsSplit(dops) + (safe(db.line).isEmpty() ? "" : " · " + db.line + " today");
-                            addInsightCard(cards, used, 120 - shown, "DUE UP", head, sub, upAccent);
-                            shown++;
-                        }
+                    } else if (!safe(db.line).isEmpty()) {
+                        addInsightCard(cards, used, 112 - shown, "DUE UP", safe(db.name) + " up next", db.line + " today", upAccent);
+                        shown++;
                     }
                 }
             }
@@ -22092,23 +21352,14 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                 String why = bigPlay.length() > 60 ? bigPlay.substring(0, 58) + "…" : bigPlay;
                 addInsightCard(cards, used, 100, "GAME'S BIG SWING", "+" + Math.round(bigSwing) + "% WP play", why, neutralAccent);
             }
-            // v432: replaced the score-restating SCOREBOARD card with a WIN PROBABILITY read — the
-            // score is already visible on the tracker, so a card should add what you DON'T see: how
-            // much that lead is actually worth at this point in the game. Only shown when we have a
-            // real win-prob figure from the feed.
-            double wpHome = (game.wpLoaded && game.wpHome >= 0f) ? game.wpHome : -1;
-            if (wpHome >= 0 && inning >= 1) {
+            // Scoreboard context: the run situation framed for the inning break.
+            if (margin >= 0) {
                 String aA = displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr);
                 String hA = displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr);
-                int favPct; String favAbbr;
-                if (wpHome >= 50) { favPct = (int) Math.round(wpHome); favAbbr = hA; }
-                else { favPct = (int) Math.round(100 - wpHome); favAbbr = aA; }
-                String head = favAbbr + " " + favPct + "% to win";
-                String sub;
-                if (favPct >= 85) sub = "Commanding spot · " + ordinalNum(inning) + " inning";
-                else if (favPct >= 65) sub = "Clear edge but live · " + ordinalNum(inning);
-                else sub = "Toss-up — anyone's game · " + ordinalNum(inning);
-                addInsightCard(cards, used, 92, "WIN PROBABILITY", head, sub, neutralAccent);
+                String head = margin == 0 ? "Tied " + game.awayScoreText() + "–" + game.homeScoreText()
+                        : (game.awayScore > game.homeScore ? aA : hA) + " up " + margin;
+                String sub = "Through " + ordinalNum(inning) + (game.awayHits >= 0 && game.homeHits >= 0 ? " · " + aA + " " + game.awayHits + "H, " + hA + " " + game.homeHits + "H" : "");
+                addInsightCard(cards, used, 90, "SCOREBOARD", head, sub, neutralAccent);
             }
         }
 
@@ -22151,28 +21402,13 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                 addInsightCard(cards, used, 120, "MEN-ON SPLIT", head, qualifyOpsSplit(ops), batAccent);
             }
         }
-        // v426: RECENT FORM as a TREND — L30 OPS vs season OPS, with direction. The insight isn't the
-        // recent number alone, it's whether the hitter is heating up or cooling off relative to their
-        // own baseline. We lead with the recent number and the delta, and say which way it's trending.
+        // recency: last 30 days form
         if (batterId > 0) {
             Stats sp = liveSplit(batterId, true, "l30");
-            Double l30ops = liveStat(sp, "ops");
-            Double seasonOps = liveStat(batStats, "ops");
-            if (seasonOps == null && batObp != null && batSlg != null) seasonOps = batObp + batSlg;
-            if (l30ops != null && seasonOps != null && seasonOps > 0) {
-                double delta = l30ops - seasonOps;
-                int pts = (int) Math.round(Math.abs(delta) * 1000);
-                String head = (!batLast.isEmpty() ? batLast + " " : "") + liveRate(l30ops) + " OPS, L30";
-                String sub;
-                if (delta >= 0.060) sub = "Heating up — " + pts + " pts above season " + liveRate(seasonOps);
-                else if (delta <= -0.060) sub = "Cooling off — " + pts + " pts below season " + liveRate(seasonOps);
-                else sub = "Steady vs season " + liveRate(seasonOps) + " (±" + pts + ")";
-                // a hotter streak is more noteworthy → nudge priority up when the swing is big
-                int prio = 95 + (Math.abs(delta) >= 0.120 ? 12 : 0);
-                addInsightCard(cards, used, prio, "RECENT FORM", head, sub, batAccent);
-            } else if (l30ops != null) {
-                String head = (!batLast.isEmpty() ? batLast + " " : "") + liveRate(l30ops) + " OPS, L30";
-                addInsightCard(cards, used, 95, "RECENT FORM", head, qualifyOpsSplit(l30ops) + " over 30 days", batAccent);
+            Double ops = liveStat(sp, "ops");
+            if (ops != null) {
+                String head = (!batLast.isEmpty() ? batLast + " " : "") + liveRate(ops) + " OPS, L30";
+                addInsightCard(cards, used, 95, "RECENT FORM", head, qualifyOpsSplit(ops) + " over 30 days", batAccent);
             }
         }
 
@@ -22197,24 +21433,7 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
             Double avg = liveStat(sp, "avg");
             if (avg != null) {
                 String head = (!pitLast.isEmpty() ? pitLast + " " : "") + liveRate(avg) + " AVG w/RISP";
-                addInsightCard(cards, used, 119, "PITCHER CLUTCH", head, (avg <= 0.230 ? "Stingy w/RISP (lg ~.250)" : avg <= 0.260 ? "League-average w/RISP (~.250)" : "Hittable w/RISP (lg ~.250)"), defAccent);
-            }
-        }
-
-        // v426: PITCHER FORM — concrete last 5 starts, with real ERA computed over exactly those
-        // starts from the game log (not a vague day-window). Label matches the data.
-        if (pitcherId > 0) {
-            StartWindow w5 = lastNStartsById(pitcherId, 5);
-            if (w5 != null && w5.starts >= 3 && w5.ip >= 10) {
-                double era = w5.era();
-                String startLabel = w5.starts >= 5 ? "L5 starts" : ("L" + w5.starts + " starts");
-                String head = (!pitLast.isEmpty() ? pitLast + " " : "") + liveOneDecimal(era) + " ERA, " + startLabel;
-                String sub = era <= 2.50 ? "Dealing — " + w5.k + " K over " + liveOneDecimal(w5.ip) + " IP (lg ERA ~4.10)"
-                        : era <= 3.75 ? "Strong recent work (lg ERA ~4.10)"
-                        : era <= 5.00 ? "Hittable lately (lg ERA ~4.10)"
-                        : "Rough stretch (lg ERA ~4.10)";
-                int prio = 94 + (era <= 2.50 || era >= 5.50 ? 12 : 0);
-                addInsightCard(cards, used, prio, "PITCHER FORM", head, sub, defAccent);
+                addInsightCard(cards, used, 119, "PITCHER CLUTCH", head, "Opponent average w/RISP", defAccent);
             }
         }
 
@@ -22239,77 +21458,24 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
             double cv = countWobaValue(balls, strikes);
             if (Math.abs(cv) >= 0.02d) {
                 boolean favorsHitter = cv > 0;
-                double countWoba = 0.320d + cv;
-                String head = (balls + "-" + strikes) + ": " + liveRate(countWoba) + " wOBA";
-                String sub = "League hitters " + (favorsHitter ? "thrive" : "struggle") + " here (avg ~.320)";
+                String head = (balls + "-" + strikes) + (favorsHitter ? " favors hitter" : " favors pitcher");
+                String sub = "League wOBA in this count: " + liveRate(0.320d + cv);
                 addInsightCard(cards, used, 145, "COUNT VALUE", head, sub, favorsHitter ? batAccent : defAccent);
             }
         }
 
-        // v426: COUNT SPLIT — the hitter's ACTUAL numbers in this count STATE (ahead vs behind), not
-        // the league average. MLB exposes "ahead in count" (ac) and "behind in count" (bc) splits, so
-        // when the hitter is genuinely ahead or behind we show their own OPS in that state with league
-        // context. This is the concrete, player-specific version of the count-value idea.
-        if (livePa && batterId > 0 && (hitterAhead || pitcherAhead)) {
-            boolean ahead = hitterAhead;
-            Stats csp = liveSplit(batterId, true, ahead ? "ac" : "bc");
-            Double cops = liveStat(csp, "ops");
-            if (cops != null) {
-                String stateLabel = ahead ? "ahead in count" : "behind in count";
-                String head = (!batLast.isEmpty() ? batLast + " " : "") + liveRate(cops) + " OPS, " + stateLabel;
-                String sub = ahead
-                        ? (cops >= 0.900 ? "Punishes hitter's counts (lg ~.810)" : cops >= 0.810 ? "Above-average ahead (lg ~.810)" : "Below-average ahead (lg ~.810)")
-                        : (cops >= 0.620 ? "Dangerous even behind (lg ~.560)" : cops >= 0.500 ? "League-average behind (lg ~.560)" : "Struggles behind (lg ~.560)");
-                addInsightCard(cards, used, ahead ? 140 : 136, "COUNT SPLIT", head, sub, ahead ? batAccent : defAccent);
-            }
-        }
-
-        // Times through the order: show the pitcher's ACTUAL results this time through vs earlier,
-        // computed from the feed — not a generic "penalty rises" statement.
+        // Times through the order: penalty grows each time a pitcher sees the lineup.
         int tto = timesThroughOrderEstimate(game, ab, pitcherId);
         if (tto >= 2 && pitchCount >= 40) {
-            String ttoLine = timesThroughResultLine(game, pitcherId, tto);
-            String head = (pitLast.isEmpty() ? "" : pitLast + " ") + tto + ordinalSuffix(tto) + " time thru";
-            if (!ttoLine.isEmpty()) {
-                addInsightCard(cards, used, 117, "TIMES THROUGH", head, ttoLine, tealAccent);
-            }
+            String head = pitLast.isEmpty() ? (tto + ordinalSuffix(tto) + " time through") : (pitLast + " " + tto + ordinalSuffix(tto) + " time through");
+            String sub = tto >= 3 ? "3rd-time penalty · OPS rises sharply" : "2nd time through the order";
+            addInsightCard(cards, used, 117, "TIMES THROUGH", head, sub, tealAccent);
         }
 
-        // v426: ARSENAL — the pitcher's actual pitch mix this start, stat-first with real usage %.
-        // Built entirely from this game's pitches, so it reflects what he's throwing tonight.
-        java.util.ArrayList<PitchTypeLine> arsenal = pitcherArsenalThisGame(game, pitcherId);
-        int arsenalTotal = pitcherPitchTotalThisGame(game, pitcherId);
-        if (arsenal.size() >= 2 && arsenalTotal >= 12) {
-            PitchTypeLine p1 = arsenal.get(0), p2 = arsenal.get(1);
-            String head = p1.label + " " + Math.round(p1.usagePct) + "% · " + p2.label + " " + Math.round(p2.usagePct) + "%";
-            if (arsenal.size() >= 3 && arsenal.get(2).usagePct >= 12) {
-                PitchTypeLine p3 = arsenal.get(2);
-                head += " · " + p3.label + " " + Math.round(p3.usagePct) + "%";
-            }
-            String sub;
-            if (p1.usagePct >= 55) sub = (pitLast.isEmpty() ? "Pitcher" : pitLast) + " leans hard on the " + p1.label + " (" + arsenalTotal + " pitches)";
-            else if (arsenal.size() >= 4) sub = "Deep mix — " + arsenal.size() + " pitch types (" + arsenalTotal + " thrown)";
-            else sub = (pitLast.isEmpty() ? "Pitcher's" : pitLast + "'s") + " mix this start (" + arsenalTotal + " pitches)";
-            addInsightCard(cards, used, 96, "ARSENAL", head, sub, defAccent);
-        }
-
-        // v426: WORKING TODAY — which pitch is getting whiffs in this start. Real swings-and-misses
-        // from the live feed; only shown once a pitch type has a meaningful sample of swings.
-        if (!arsenal.isEmpty()) {
-            PitchTypeLine bestWhiff = null;
-            for (PitchTypeLine t : arsenal) {
-                if (t.swings >= 4 && t.whiffs >= 2) {
-                    if (bestWhiff == null || (t.whiffs * 1d / Math.max(1, t.swings)) > (bestWhiff.whiffs * 1d / Math.max(1, bestWhiff.swings))) {
-                        bestWhiff = t;
-                    }
-                }
-            }
-            if (bestWhiff != null) {
-                int whiffPct = Math.round(bestWhiff.whiffs * 100f / Math.max(1, bestWhiff.swings));
-                String head = bestWhiff.label + ": " + bestWhiff.whiffs + " whiffs on " + bestWhiff.swings + " swings";
-                String sub = whiffPct + "% miss rate today" + (whiffPct >= 40 ? " — putaway pitch (lg whiff ~25%)" : " (lg whiff ~25%)");
-                addInsightCard(cards, used, 111, "WORKING TODAY", head, sub, orangeAccent);
-            }
+        // Pitch-mix tendency this game: most-used pitch so far.
+        String topPitch = mostUsedPitchThisGame(game, pitcherId);
+        if (!topPitch.isEmpty()) {
+            addInsightCard(cards, used, 88, "PITCH MIX", (pitLast.isEmpty() ? "" : pitLast + " ") + "leans " + topPitch, "Most-used pitch this start", defAccent);
         }
 
         // 2-out RISP — a distinct clutch context.
@@ -22428,20 +21594,13 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
         // v401: stamp a per-player subject so that when the batter or pitcher changes, that player's
         // cards become distinct IDs — the old player's cards crawl off the tail and the new player's
         // crawl in, instead of swapping content in place (which read as a flash).
-        String batSubj = ("B" + (game.sitBatterId > 0 ? game.sitBatterId : 0));
-        String pitSubj = ("P" + (game.sitPitcherId > 0 ? game.sitPitcherId : 0));
+        String batSubj = batLast.isEmpty() ? "" : ("B" + (game.sitBatterId > 0 ? game.sitBatterId : 0) + ":" + batLast);
+        String pitSubj = pitLast.isEmpty() ? "" : ("P" + (game.sitPitcherId > 0 ? game.sitPitcherId : 0) + ":" + pitLast);
         for (GameContextCard c : cards) {
             c.contextSig = sig;
-            // v418: assign the subject from an EXPLICIT classification of each card type, not from
-            // accent (which was wrong: COUNT VALUE flips accent by count) and not from headline
-            // name-matching (which silently failed). A card about the hitter is tagged with the
-            // batter id, a card about the pitcher with the pitcher id, and a pure game-situation
-            // card gets no subject (it legitimately updates in place). This makes each player's
-            // version of a card a distinct slot, so a batter change cycles cards instead of swapping.
-            int kind = cardSubjectKind(c.eyebrow);
-            if (kind == 1 && game.sitBatterId > 0) c.subject = batSubj;
-            else if (kind == 2 && game.sitPitcherId > 0) c.subject = pitSubj;
-            else c.subject = ""; // situation card — no subject
+            String head = safe(c.headline);
+            if (!batLast.isEmpty() && head.contains(batLast)) c.subject = batSubj;
+            else if (!pitLast.isEmpty() && head.contains(pitLast)) c.subject = pitSubj;
         }
         return cards;
     }
@@ -22459,8 +21618,8 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
     // v397: the sitCodes we pull for live splits. These map to MLB statSplits situation codes and
     // give the carousel genuinely situational numbers (vs hand, RISP, men on, ahead/behind, recency).
     // hitting: vl/vr (vs LHP/RHP), risp, runners on (men_on), bases empty, 2-out RISP, last 30 days.
-    private static final String HITTER_SIT_CODES = "vl,vr,risp,men_on,empty,risp2,h,a,l30,ac,bc";
-    private static final String PITCHER_SIT_CODES = "vl,vr,risp,men_on,empty,risp2,h,a,l30,ac,bc";
+    private static final String HITTER_SIT_CODES = "vl,vr,risp,men_on,empty,risp2,h,a,l30";
+    private static final String PITCHER_SIT_CODES = "vl,vr,risp,men_on,empty,risp2,h,a,l30";
 
     private String liveSplitsKey(int playerId, boolean hitting) { return playerId + ":" + (hitting ? "h" : "p"); }
 
@@ -22472,19 +21631,6 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
         final int pitcherId = game.sitPitcherId > 0 ? game.sitPitcherId : (ab == null ? 0 : ab.pitcherId);
         if (batterId > 0) warmOneSplit(batterId, true, season);
         if (pitcherId > 0) warmOneSplit(pitcherId, false, season);
-        // v434: proactively warm the NEXT hitters' splits so their cards are ready the instant they
-        // come to bat. Without this, a new batter's stats only started loading once they were already
-        // up, so for a poll or two the carousel had no cards for them — the old batter's cards lingered
-        // and slots sat empty until the async fetch finished. Pre-warming the on-deck/in-the-hole
-        // hitters closes that gap so the swap is clean.
-        if (game.dueUp != null) {
-            int warmed = 0;
-            for (DueUpBatter db : game.dueUp) {
-                if (db == null || db.id <= 0 || db.id == batterId) continue;
-                warmOneSplit(db.id, true, season);
-                if (++warmed >= 3) break; // next three hitters is plenty of lookahead
-            }
-        }
     }
 
     private void warmOneSplit(int playerId, boolean hitting, int season) {
@@ -22891,37 +22037,6 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
 
     // Estimate times through the order: how many times this pitcher has faced this batter already
     // this game, plus one (the current PA). Counts distinct prior PAs by the same batter id.
-    // v411: the pitcher's actual results for a given time-through-the-order, from the feed. We bucket
-    // each completed PA by how many times that batter had already been faced. Returns e.g.
-    // "3rd time: 4-7, 2 HR" (hits-AB + extra-base damage) — concrete, not a generic penalty claim.
-    private String timesThroughResultLine(LiveGame game, int pitcherId, int wantTto) {
-        if (game == null || game.liveFeed == null || game.liveFeed.atBats == null || pitcherId <= 0) return "";
-        java.util.HashMap<Integer, Integer> seenByBatter = new java.util.HashMap<>();
-        int ab = 0, h = 0, hr = 0, bb = 0, k = 0, faced = 0;
-        for (LiveAtBat x : game.liveFeed.atBats) {
-            if (x == null || x.pitcherId != pitcherId || x.batterId <= 0) continue;
-            int seen = seenByBatter.getOrDefault(x.batterId, 0) + 1;
-            seenByBatter.put(x.batterId, seen);
-            if (seen != wantTto) continue;
-            if (!x.complete || safe(x.result).isEmpty()) continue;
-            String r = safe(x.result).toLowerCase(Locale.US);
-            faced++;
-            boolean walk = r.contains("walk") || r.contains("hit by pitch");
-            boolean strikeout = r.contains("strikeout") || r.contains("struck out") || r.contains("strikes out");
-            boolean hit = r.contains("single") || r.contains("double") || r.contains("triple") || r.contains("homer") || r.contains("home run");
-            if (walk) { bb++; }
-            else { ab++; if (hit) h++; if (strikeout) k++; if (r.contains("homer") || r.contains("home run")) hr++; }
-        }
-        if (faced < 2) return ""; // not enough this time through to be meaningful yet
-        StringBuilder sb = new StringBuilder();
-        sb.append(h).append("-").append(ab);
-        if (hr > 0) sb.append(", ").append(hr).append(" HR");
-        if (bb > 0) sb.append(", ").append(bb).append(" BB");
-        if (k > 0) sb.append(", ").append(k).append(" K");
-        sb.append(" this time thru");
-        return sb.toString();
-    }
-
     private int timesThroughOrderEstimate(LiveGame game, LiveAtBat ab, int pitcherId) {
         if (game == null || game.liveFeed == null || game.liveFeed.atBats == null || pitcherId <= 0) return 0;
         int batterId = game.sitBatterId > 0 ? game.sitBatterId : (ab == null ? 0 : ab.batterId);
@@ -22955,65 +22070,6 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
         if (best.isEmpty() || total == 0) return "";
         int pct = Math.round(bestN * 100f / total);
         return best + " " + pct + "%";
-    }
-
-    // v426: per-pitch-type breakdown for a pitcher THIS GAME, computed from the live feed. Everything
-    // here is real, observed data from the current start — usage, swings, whiffs, called strikes, and
-    // hard contact per pitch type — so the pitch-type cards never depend on Statcast season data we
-    // can't reliably fetch. A "swing" is any swing (whiff, foul, or in-play); a "whiff" is a swing and
-    // miss; "hard" is an in-play ball at 95+ mph exit velo.
-    private static class PitchTypeLine {
-        String label = "";
-        int count = 0, swings = 0, whiffs = 0, calledStrikes = 0, inPlay = 0, hard = 0;
-        double maxVelo = 0, veloSum = 0; int veloN = 0;
-        double usagePct = 0;
-    }
-
-    private java.util.ArrayList<PitchTypeLine> pitcherArsenalThisGame(LiveGame game, int pitcherId) {
-        java.util.ArrayList<PitchTypeLine> out = new java.util.ArrayList<>();
-        if (game == null || game.liveFeed == null || game.liveFeed.atBats == null || pitcherId <= 0) return out;
-        java.util.LinkedHashMap<String, PitchTypeLine> byType = new java.util.LinkedHashMap<>();
-        int total = 0;
-        for (LiveAtBat x : game.liveFeed.atBats) {
-            if (x == null || x.pitcherId != pitcherId || x.pitches == null) continue;
-            for (LivePitch lp : x.pitches) {
-                String label = pitchTypeShort(lp.typeCode, lp.typeName);
-                if (label.isEmpty()) continue;
-                PitchTypeLine t = byType.get(label);
-                if (t == null) { t = new PitchTypeLine(); t.label = label; byType.put(label, t); }
-                t.count++;
-                total++;
-                if (lp.speed > 0) { t.veloSum += lp.speed; t.veloN++; if (lp.speed > t.maxVelo) t.maxVelo = lp.speed; }
-                String r = safe(lp.result).toLowerCase(Locale.US);
-                boolean swing = r.contains("swinging strike") || r.contains("foul") || lp.isInPlay
-                        || r.contains("in play") || r.contains("hit into play");
-                boolean whiff = r.contains("swinging strike") || r.contains("missed bunt");
-                boolean called = r.contains("called strike");
-                if (swing) t.swings++;
-                if (whiff) t.whiffs++;
-                if (called) t.calledStrikes++;
-                if (lp.isInPlay || r.contains("in play")) {
-                    t.inPlay++;
-                    if (!Double.isNaN(lp.exitVelo) && lp.exitVelo >= 95d) t.hard++;
-                }
-            }
-        }
-        if (total == 0) return out;
-        for (PitchTypeLine t : byType.values()) { t.usagePct = t.count * 100d / total; out.add(t); }
-        // sort by usage descending so the primary pitch leads
-        java.util.Collections.sort(out, (a, b) -> Integer.compare(b.count, a.count));
-        return out;
-    }
-
-    // total pitches thrown by a pitcher this game (for sample-size gating)
-    private int pitcherPitchTotalThisGame(LiveGame game, int pitcherId) {
-        int total = 0;
-        if (game == null || game.liveFeed == null || game.liveFeed.atBats == null || pitcherId <= 0) return 0;
-        for (LiveAtBat x : game.liveFeed.atBats) {
-            if (x == null || x.pitcherId != pitcherId || x.pitches == null) continue;
-            for (LivePitch lp : x.pitches) if (!pitchTypeShort(lp.typeCode, lp.typeName).isEmpty()) total++;
-        }
-        return total;
     }
 
     // Pitcher velocity drop: average of last 5 fastball-ish pitches vs first 5 of the outing.
@@ -23148,51 +22204,6 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
         row.addView(resultMetricPill(value, accent, emphasis), lp);
     }
 
-    // v440: MLB's feed reports an in-play AB-ending ball as a placeholder ("In play, out(s)",
-    // "In play, run(s)", "In play, no out") before refining it to the real result. These are the
-    // intermediate strings we must never surface — callers treat them as "not resolved yet".
-    private boolean isPreliminaryResult(String result) {
-        String r = safe(result).toLowerCase(Locale.US);
-        return r.startsWith("in play") || r.contains("in play,");
-    }
-
-    // v437: derive the at-bat result that a terminal pitch logically guarantees, so we never show a
-    // raw "Strike 3" / "Ball 4" pitch card or an "In play, out(s)" intermediate. Returns the result
-    // string to display, or null if this pitch does NOT end the at-bat (an ordinary ball/strike/foul).
-    //   • strike 3 (called or swinging, not a foul) → "Strikeout"
-    //   • ball 4 → "Walk"
-    //   • a hit-by-pitch → "Hit By Pitch"
-    //   • in play → AB is over; we show a clean "In play" placeholder until ab.result resolves
-    //     (single vs out needs the feed). We never echo the feed's raw "In play, out(s)" string.
-    private String deriveTerminalResult(LiveAtBat ab, LivePitch p) {
-        if (p == null) return null;
-        String r = safe(p.result).toLowerCase(Locale.US);
-        boolean foul = r.contains("foul");
-        if (r.contains("hit by pitch") || r.equals("hbp")) return "Hit By Pitch";
-        if (!foul && p.strikes >= 3 && (r.contains("strike") || r.contains("swinging") || r.contains("called"))) {
-            return r.contains("swinging") ? "Strikeout (swinging)" : (r.contains("called") ? "Strikeout (looking)" : "Strikeout");
-        }
-        if ((p.isBall || r.contains("ball")) && p.balls >= 4) return "Walk";
-        if (p.isInPlay) {
-            if (ab != null && ab.complete && !safe(ab.result).isEmpty()) return ab.result;
-            return "In play";
-        }
-        return null; // ordinary ball/strike/foul — not AB-ending
-    }
-
-    // Render a derived terminal result in RESULT mode (not pitch mode), so it reads as the outcome
-    // rather than "LATEST PITCH". Temporarily lends resultCard a result string without mutating the
-    // cached feed object permanently.
-    private View derivedResultCard(LiveAtBat ab, LivePitch p, String resultText, int batColor) {
-        if (ab == null) return resultCard(null, p, batColor);
-        String prev = ab.result;
-        boolean restore = false;
-        if (safe(ab.result).isEmpty()) { ab.result = resultText; restore = true; }
-        View v = resultCard(ab, null, batColor); // result mode
-        if (restore) ab.result = prev;
-        return v;
-    }
-
     private View resultCard(LiveAtBat ab, LivePitch pitch, int batColor) {
         boolean pitchMode = pitch != null;
         int accent = pitchMode ? pitchOutcomeColor(pitch, ab)
@@ -23316,72 +22327,16 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
     }
 
 
-    private int liveTrackerLastBatterId = 0; // v424: detect batter changes for animated handoff
-    private String liveTrackerLastResultKey = ""; // v433: detect a new AB result for a consistent reveal
-    private boolean forceResultReveal = false;    // v433: force the grand reveal this pass (event-driven)
-
-    // v424: swap the tracker pager. On a batter change, do a brief crossfade + gentle slide so the
-    // handoff to the next hitter reads as an intentional, premium transition rather than a flash.
-    // Other updates swap instantly (no animation) so rapid in-AB ticks stay calm.
-    // v436: a light, quick crossfade for ordinary in-AB pitch updates — just enough to remove the
-    // snap of an instant swap, clearly subtler than the premium handoff. Fades the old out fast, then
-    // fades the new in fast; sequential so the vertical host never stacks two pagers.
-    private void softSwapTrackerPager(LinearLayout host, View newPager) {
-        if (host == null || newPager == null) return;
-        if (host.getChildCount() == 0) {
-            host.addView(newPager, matchWrap());
-            newPager.setAlpha(0f);
-            newPager.animate().alpha(1f).setDuration(160).start();
-            return;
-        }
-        final View oldPager = host.getChildAt(0);
-        oldPager.animate().alpha(0f).setDuration(90)
-                .withEndAction(() -> {
-                    host.removeAllViews();
-                    host.addView(newPager, matchWrap());
-                    newPager.setAlpha(0f);
-                    newPager.animate().alpha(1f).setDuration(150)
-                            .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
-                }).start();
-    }
-
-    private void swapTrackerPager(LinearLayout host, View newPager, boolean animate) {
-        if (host == null || newPager == null) return;
-        if (!animate || host.getChildCount() == 0) {
-            host.removeAllViews();
-            host.addView(newPager, matchWrap());
-            return;
-        }
-        final View oldPager = host.getChildAt(0);
-        // Fade the current pager out, then swap in the new one and fade+slide it in. Sequential (not
-        // overlapping) so the vertical host never stacks two pagers at once. Reads as a deliberate
-        // handoff to the next hitter rather than a hard rebuild flash.
-        if (oldPager != null) {
-            oldPager.animate().alpha(0f).setDuration(150)
-                    .setInterpolator(new android.view.animation.AccelerateInterpolator())
-                    .withEndAction(() -> {
-                        host.removeAllViews();
-                        host.addView(newPager, matchWrap());
-                        newPager.setAlpha(0f);
-                        newPager.setTranslationX(dp(16));
-                        newPager.animate().alpha(1f).translationX(0f).setDuration(260)
-                                .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
-                    }).start();
-        } else {
-            host.removeAllViews();
-            host.addView(newPager, matchWrap());
-        }
-    }
-
     private void rerenderTracker(LiveGame game) {
         if (game == null || activeLiveTrackerHost == null) return;
-        liveTrackerRenderSig = trackerStateSignature(game); // v412: keep guard in sync
-        // v414: build then swap to avoid a visible empty frame.
-        View newPager = buildTrackerPager(game);
         activeLiveTrackerHost.removeAllViews();
-        activeLiveTrackerHost.addView(newPager, matchWrap());
+        activeLiveTrackerHost.addView(buildTrackerPager(game), matchWrap());
         if (activePlayFeedHost != null) {
-            rebuildPlayFeedHost(game, true); // v412: nav/filter changed → force
+            activePlayFeedHost.removeAllViews();
+            LinearLayout pfCard = new LinearLayout(this);
+            pfCard.setOrientation(LinearLayout.VERTICAL);
+            buildPlayFeedInto(pfCard, game, game.liveFeed, activeLiveTrackerAwayPal, activeLiveTrackerHomePal);
+            activePlayFeedHost.addView(pfCard, matchWrap());
         }
         updateCarouselData(game, currentTrackerAtBat(game));
         if (liveFocusMode && mainScroll != null) main.post(() -> mainScroll.scrollTo(0, 0));
@@ -25369,53 +24324,6 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         if (mainScroll != null) mainScroll.post(() -> mainScroll.scrollTo(0, 0));
     }
 
-    // v428: a compact "★ ABBR" toggle that favorites/unfavorites a team. Gold + filled star when
-    // favorited, dim + hollow otherwise. Tapping re-renders so the slate/matchup reorders and the
-    // star state updates immediately.
-    private View buildTeamFavStar(final int teamId, String abbr, final Team team) {
-        boolean fav = isFavoriteTeam(teamId);
-        // v430: more visible/tappable than the old dim hollow star. Favorited = solid gold filled
-        // star + gold pill. Unfavorited = brighter outline star with a visible gold-tinted border so
-        // it clearly reads as "tap to favorite" rather than blending into the card art.
-        TextView chip = text((fav ? "★ " : "☆ ") + safe(abbr), 10,
-                fav ? Color.rgb(255, 209, 71) : Color.rgb(214, 198, 142), true);
-        chip.setGravity(Gravity.CENTER);
-        chip.setSingleLine(true);
-        chip.setLetterSpacing(0.04f);
-        chip.setPadding(dp(9), dp(5), dp(9), dp(5));
-        chip.setBackground(roundedStroke(
-                Color.argb(fav ? 46 : 26, 244, 192, 54),
-                Color.argb(fav ? 150 : 96, 244, 192, 54), 999, fav ? 1 : 1));
-        chip.setForeground(ripple(true));
-        chip.setClickable(true);
-        chip.setContentDescription((fav ? "Unfavorite " : "Favorite ") + safe(abbr));
-        chip.setOnClickListener(v -> {
-            boolean nowFav = toggleFavoriteTeam(team);
-            Toast.makeText(this, nowFav ? (safe(abbr) + " added to favorites") : (safe(abbr) + " removed from favorites"), Toast.LENGTH_SHORT).show();
-            rebuildHomeFavorites();
-            // v430: also refresh the HOME slate so its featured hero re-picks immediately (previously
-            // it only updated on app relaunch). We re-sort the cached slate and re-render both home
-            // and matchup surfaces as appropriate.
-            if (lastRenderedSlate != null) sortGamesByStatus(lastRenderedSlate);
-            if (activePrimaryTab == TAB_HOME && homeLiveMatchupsBox != null && lastRenderedSlate != null) {
-                renderHomeLiveMatchupsGames(lastRenderedSlate);
-            }
-            // re-render whichever surface is showing so the new ordering + star state take effect. We
-            // re-sort the cached slate and render from it (no network refetch) for an instant update.
-            if (activeLiveGameMenu != null && activePrimaryTab == TAB_MATCHUP && standingsBox != null && standingsBox.getVisibility() == View.VISIBLE && !"matchups".equals(gameHubTab)) {
-                renderLiveGameMenu(activeLiveGameMenu);
-            } else if (lastRenderedSlate != null && activePrimaryTab == TAB_MATCHUP && matchupPathMode == MATCHUP_PATH_LIVE && !matchupResultMode) {
-                renderLiveMatchupGames(lastRenderedSlate);
-            } else if (activePrimaryTab != TAB_HOME) {
-                renderLiveMatchupsPanel();
-            }
-        });
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
-        lp.setMargins(dp(4), 0, 0, 0);
-        chip.setLayoutParams(lp);
-        return chip;
-    }
-
     private void renderLiveGameMenu(LiveGame game) {
         if (standingsBox == null || activePrimaryTab != TAB_MATCHUP) return;
         if (liveFocusMode && game != null && game.isLive()) {
@@ -25458,12 +24366,6 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         LinearLayout.LayoutParams panelLp = matchWrap();
         panelLp.setMargins(0, dp(9), 0, dp(8));
         standingsBox.addView(panel, panelLp);
-        // v436: fade the whole panel in on (re)render so the staged assembly — carousel mounting,
-        // then hero, then tracker filling in around it — reads as one smooth appearance instead of a
-        // series of flashes that shove the layout around. A short fade hides the reflow.
-        panel.setAlpha(0f);
-        panel.animate().alpha(1f).setStartDelay(20).setDuration(240)
-                .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
 
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.HORIZONTAL);
@@ -25478,11 +24380,6 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         top.addView(back);
         Space refreshSpacer = new Space(this);
         top.addView(refreshSpacer, new LinearLayout.LayoutParams(0, dp(1), 1));
-        // v428: favorite-team toggles right in the matchup header. Tap a team's star to favorite it;
-        // favorited teams sort to the top of the slate and matchups and show a gold star there.
-        final Team favAway = away, favHome = home;
-        if (favAway != null) top.addView(buildTeamFavStar(game.awayTeamId, displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr), favAway));
-        if (favHome != null) top.addView(buildTeamFavStar(game.homeTeamId, displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr), favHome));
         TextView livePill = text(game.isPregame() ? "GAME FEED" : "LIVE FEED", 9, game.isPregame() ? INK_DIM : Color.rgb(82, 226, 176), true);
         livePill.setGravity(Gravity.CENTER);
         livePill.setSingleLine(true);
@@ -25717,22 +24614,10 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
             // and play-feed hosts rebuild on poll; the carousel between them is never destroyed.
             LinearLayout trackerHost = new LinearLayout(this);
             trackerHost.setOrientation(LinearLayout.VERTICAL);
-            // v437: reserve the tracker's height up front instead of starting GONE. Starting GONE meant
-            // the host had zero height, so when the feed loaded and the tracker mounted it EXPANDED and
-            // shoved the carousel and play feed down — the "everything jumps around and pushes the
-            // carousel down" the user saw. A reserved min-height holds the space so content fades into
-            // place without reflowing the layout.
-            trackerHost.setMinimumHeight(dp(286));
+            trackerHost.setVisibility(View.GONE);
             LinearLayout.LayoutParams thLp = matchWrap(); thLp.setMargins(dp(4), 0, dp(4), dp(2));
             panel.addView(trackerHost, thLp);
             activeLiveTrackerHost = trackerHost;
-            liveTrackerRenderSig = ""; // v412: force first render
-            liveFeedRenderSig = "";
-            if (DEBUG_LIVE_HUD) {
-                liveHudView = text("HUD: " + liveHudState, 8, Color.rgb(255, 120, 120), true);
-                liveHudView.setPadding(dp(8), dp(2), dp(8), dp(2));
-                panel.addView(liveHudView, matchWrap());
-            }
 
             if (!"Final".equals(game.statusLabel())) {
                 FrameLayout carouselHost = new FrameLayout(this);
@@ -26227,10 +25112,6 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         final LiveGame targetGame = game;
 
         io.execute(() -> {
-            // v431: REVERTED to the pre-v427 sequential form. The parallel version (15 games × 3
-            // concurrent fanout tasks = ~45 simultaneous fetches, each committing+rebuilding the slate
-            // separately) is what made this screen lag. Computing the three sections in sequence and
-            // committing ONCE per game restores the original smooth loading.
             final ArrayList<LiveMatchupEdgeBuild> builds = new ArrayList<>();
             try {
                 Team awayTeam = teamForLiveGame(targetGame.awayTeamId, targetGame.awayName, targetGame.awayAbbr);
@@ -26613,12 +25494,10 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         Team home = teamForLiveGame(game.homeTeamId, game.homeName, game.homeAbbr);
         TeamPalette awayPalette = away == null ? paletteForAbbr(game.awayAbbr) : paletteForTeam(away);
         TeamPalette homePalette = home == null ? paletteForAbbr(game.homeAbbr) : paletteForTeam(home);
-        // v420: build the new hero FIRST, then swap, so the host is never momentarily empty (that
-        // empty window contributed to the whole-page flash at the end of an at-bat).
+        activeLiveScoreHeroHost.removeAllViews();
         View hero = liveFocusMode
                 ? focusHeroHeader(game, away, home, awayPalette, homePalette)
                 : liveScoreHero(game, away, home, awayPalette, homePalette);
-        activeLiveScoreHeroHost.removeAllViews();
         activeLiveScoreHeroHost.addView(hero, new FrameLayout.LayoutParams(-1, -2));
     }
 
@@ -30828,37 +29707,11 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         return out;
     }
 
-    // v428: order the slate so live action is on top, AND favorited teams float up within each
-    // status tier. Primary key = status (live, upcoming, final, postponed). Secondary key = whether
-    // the game involves one of your favorite teams. So a live game is still above an upcoming one,
-    // but among games of the same status, your teams come first. Ties keep schedule order.
+    // v329: order the slate so live action is always on top:
+    //   1 in progress / delayed, 2 not started, 3 final, 4 postponed. Ties keep schedule order.
     private void sortGamesByStatus(ArrayList<LiveGame> games) {
         if (games == null) return;
-        final java.util.Set<Integer> favIds = favoriteTeamIdSet();
-        java.util.Collections.sort(games, (a, b) -> {
-            int rs = Integer.compare(gameStatusRank(a), gameStatusRank(b));
-            if (rs != 0) return rs;
-            int fa = gameInvolvesFavorite(a, favIds) ? 0 : 1;
-            int fb = gameInvolvesFavorite(b, favIds) ? 0 : 1;
-            return Integer.compare(fa, fb);
-        });
-    }
-
-    // lightweight id-only favorite-team lookup (avoids resolving full Team objects during a sort)
-    private java.util.Set<Integer> favoriteTeamIdSet() {
-        java.util.HashSet<Integer> out = new java.util.HashSet<>();
-        SharedPreferences prefs = getSharedPreferences(PREFS_FAVORITES, MODE_PRIVATE);
-        for (int i = 0; i < MAX_FAVORITES; i++) {
-            String idStr = prefs.getString("ftid_" + i, null);
-            if (idStr == null) continue;
-            try { out.add(Integer.parseInt(idStr)); } catch (Exception ignored) {}
-        }
-        return out;
-    }
-
-    private boolean gameInvolvesFavorite(LiveGame g, java.util.Set<Integer> favIds) {
-        if (g == null || favIds == null || favIds.isEmpty()) return false;
-        return favIds.contains(g.awayTeamId) || favIds.contains(g.homeTeamId);
+        java.util.Collections.sort(games, (a, b) -> Integer.compare(gameStatusRank(a), gameStatusRank(b)));
     }
     private int gameStatusRank(LiveGame g) {
         if (g == null) return 5;
