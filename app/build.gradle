@@ -8,8 +8,8 @@ android {
         applicationId 'com.folettary.statcastcompare'
         minSdk 24
         targetSdk 35
-        versionCode 419
-        versionName '419.0.0'
+        versionCode 420
+        versionName '420.0.0'
     }
 
     buildTypes {
