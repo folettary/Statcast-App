@@ -848,7 +848,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v429", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v430", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -18549,11 +18549,11 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 myTeamsHeader.addView(myTeams);
                 panel.addView(myTeamsHeader, mthLp);
 
-                // favorites render full-width (one per row) so they read as the elevated, richer slot
+                // favorites render full-width (one per row) with the richer favorite layout
                 for (int fi = 0; fi < favGames.size(); fi++) {
-                    LinearLayout.LayoutParams favLp = new LinearLayout.LayoutParams(-1, dp(140));
+                    LinearLayout.LayoutParams favLp = new LinearLayout.LayoutParams(-1, -2);
                     favLp.setMargins(0, dp(6), 0, 0);
-                    panel.addView(liveGameCard(favGames.get(fi), favIndexes.get(fi)), favLp);
+                    panel.addView(liveGameCard(favGames.get(fi), favIndexes.get(fi), true), favLp);
                 }
 
                 // a thin divider before the rest of the slate
@@ -18678,7 +18678,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                     && standingsBox != null && standingsBox.getVisibility() == View.VISIBLE) {
                 renderLiveMatchupGames(lastRenderedSlate);
             }
-        }, 250);
+        }, 600);
     }
 
 private String liveStateSummary(LiveGame game) {
@@ -18787,6 +18787,10 @@ private View liveGameCard(LiveGame game) {
 }
 
 private View liveGameCard(LiveGame game, int slateIndex) {
+    return liveGameCard(game, slateIndex, false);
+}
+
+private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
     Team away = teamForLiveGame(game.awayTeamId, game.awayName, game.awayAbbr);
     Team home = teamForLiveGame(game.homeTeamId, game.homeName, game.homeAbbr);
     TeamPalette awayPalette = away == null ? paletteForAbbr(game.awayAbbr) : paletteForTeam(away);
@@ -18797,7 +18801,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
 
     LinearLayout content = new LinearLayout(this);
     content.setOrientation(LinearLayout.VERTICAL);
-    content.setPadding(dp(12), dp(9), dp(12), dp(10));
+    content.setPadding(dp(favorite ? 14 : 12), dp(favorite ? 11 : 9), dp(favorite ? 14 : 12), dp(favorite ? 12 : 10));
     card.addView(content, new FrameLayout.LayoutParams(-1, -1));
 
     // Top row: status pill (left) + start time (right, pre-game only).
@@ -18905,6 +18909,44 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             eRow.addView(gameEdgeChipView(edge.chip, edge.accent));
         }
         content.addView(eRow, matchWrap());
+    }
+
+    // v430: favorite cards are full-width and were feeling empty. Fill the space with genuinely
+    // useful context: a starting-pitcher matchup line and the team records, so your team's card
+    // earns its elevated slot instead of just stretching the standard tile.
+    if (favorite) {
+        String aSp = safe(game.awayPitcher).isEmpty() ? "TBD" : lastNameOnly(game.awayPitcher);
+        String hSp = safe(game.homePitcher).isEmpty() ? "TBD" : lastNameOnly(game.homePitcher);
+        LinearLayout spRow = new LinearLayout(this);
+        spRow.setOrientation(LinearLayout.HORIZONTAL);
+        spRow.setGravity(Gravity.CENTER_VERTICAL);
+        spRow.setPadding(0, dp(10), 0, 0);
+        TextView spLabel = text("PROBABLES", 8, INK_DIM, true);
+        spLabel.setLetterSpacing(0.12f);
+        spRow.addView(spLabel);
+        TextView spVal = text("  " + aSp + " vs " + hSp, 11, Color.argb(232, 247, 249, 252), true);
+        spVal.setSingleLine(true);
+        spVal.setEllipsize(TextUtils.TruncateAt.END);
+        spRow.addView(spVal, new LinearLayout.LayoutParams(0, -2, 1));
+        content.addView(spRow, matchWrap());
+
+        String aRec = safe(game.awayRecord), hRec = safe(game.homeRecord);
+        if (!aRec.isEmpty() || !hRec.isEmpty()) {
+            LinearLayout recRow = new LinearLayout(this);
+            recRow.setOrientation(LinearLayout.HORIZONTAL);
+            recRow.setGravity(Gravity.CENTER_VERTICAL);
+            recRow.setPadding(0, dp(5), 0, 0);
+            TextView recLabel = text("RECORD", 8, INK_DIM, true);
+            recLabel.setLetterSpacing(0.12f);
+            recRow.addView(recLabel);
+            String recText = "  " + displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr) + " " + (aRec.isEmpty() ? "—" : aRec)
+                    + "   ·   " + displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr) + " " + (hRec.isEmpty() ? "—" : hRec);
+            TextView recVal = text(recText, 11, Color.argb(232, 247, 249, 252), true);
+            recVal.setSingleLine(true);
+            recVal.setEllipsize(TextUtils.TruncateAt.END);
+            recRow.addView(recVal, new LinearLayout.LayoutParams(0, -2, 1));
+            content.addView(recRow, matchWrap());
+        }
     }
 
     return card;
@@ -25025,13 +25067,18 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
     // star state updates immediately.
     private View buildTeamFavStar(final int teamId, String abbr, final Team team) {
         boolean fav = isFavoriteTeam(teamId);
-        TextView chip = text((fav ? "★ " : "☆ ") + safe(abbr), 9, fav ? Color.rgb(244, 192, 54) : INK_DIM, true);
+        // v430: more visible/tappable than the old dim hollow star. Favorited = solid gold filled
+        // star + gold pill. Unfavorited = brighter outline star with a visible gold-tinted border so
+        // it clearly reads as "tap to favorite" rather than blending into the card art.
+        TextView chip = text((fav ? "★ " : "☆ ") + safe(abbr), 10,
+                fav ? Color.rgb(255, 209, 71) : Color.rgb(214, 198, 142), true);
         chip.setGravity(Gravity.CENTER);
         chip.setSingleLine(true);
-        chip.setPadding(dp(7), dp(4), dp(7), dp(4));
+        chip.setLetterSpacing(0.04f);
+        chip.setPadding(dp(9), dp(5), dp(9), dp(5));
         chip.setBackground(roundedStroke(
-                Color.argb(fav ? 30 : 16, 244, 192, 54),
-                Color.argb(fav ? 110 : 50, 244, 192, 54), 999, 1));
+                Color.argb(fav ? 46 : 26, 244, 192, 54),
+                Color.argb(fav ? 150 : 96, 244, 192, 54), 999, fav ? 1 : 1));
         chip.setForeground(ripple(true));
         chip.setClickable(true);
         chip.setContentDescription((fav ? "Unfavorite " : "Favorite ") + safe(abbr));
@@ -25039,14 +25086,20 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
             boolean nowFav = toggleFavoriteTeam(team);
             Toast.makeText(this, nowFav ? (safe(abbr) + " added to favorites") : (safe(abbr) + " removed from favorites"), Toast.LENGTH_SHORT).show();
             rebuildHomeFavorites();
+            // v430: also refresh the HOME slate so its featured hero re-picks immediately (previously
+            // it only updated on app relaunch). We re-sort the cached slate and re-render both home
+            // and matchup surfaces as appropriate.
+            if (lastRenderedSlate != null) sortGamesByStatus(lastRenderedSlate);
+            if (activePrimaryTab == TAB_HOME && homeLiveMatchupsBox != null && lastRenderedSlate != null) {
+                renderHomeLiveMatchupsGames(lastRenderedSlate);
+            }
             // re-render whichever surface is showing so the new ordering + star state take effect. We
             // re-sort the cached slate and render from it (no network refetch) for an instant update.
             if (activeLiveGameMenu != null && activePrimaryTab == TAB_MATCHUP && standingsBox != null && standingsBox.getVisibility() == View.VISIBLE && !"matchups".equals(gameHubTab)) {
                 renderLiveGameMenu(activeLiveGameMenu);
             } else if (lastRenderedSlate != null && activePrimaryTab == TAB_MATCHUP && matchupPathMode == MATCHUP_PATH_LIVE && !matchupResultMode) {
-                sortGamesByStatus(lastRenderedSlate);
                 renderLiveMatchupGames(lastRenderedSlate);
-            } else {
+            } else if (activePrimaryTab != TAB_HOME) {
                 renderLiveMatchupsPanel();
             }
         });
@@ -25611,7 +25664,10 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         if (game == null || !game.isPregame()) return;
         LiveMatchupEdgePreview edge = liveGameEdgePreview(game);
         if (edge != null && edge.available) return;
-        final int delay = Math.min(9000, Math.max(0, slateIndex) * 450);
+        // v430: tighter stagger so previews arrive in a few quick waves instead of trickling over ~9s
+        // (each arrival used to rebuild the whole slate, which was the lag). Combined with the longer
+        // refresh coalesce window below, this means far fewer full-slate rebuilds.
+        final int delay = Math.min(2600, Math.max(0, slateIndex) * 150);
         main.postDelayed(() -> {
             if (activePrimaryTab != TAB_MATCHUP || activeLiveGameMenu != null || matchupPathMode != MATCHUP_PATH_LIVE || matchupResultMode) return;
             startLiveMatchupEdgePreviewLoad(game);
