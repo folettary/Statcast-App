@@ -848,7 +848,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v419", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v420", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20832,7 +20832,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
     // v405: ticker draws from these instance fields so onDraw always reflects the latest data.
     private final java.util.ArrayList<GameContextCard> liveContextTickerCards = new java.util.ArrayList<>();
     // v419: fixed-slot grid — cards occupy permanent slot indices and never compact.
-    private static final int GRID_SLOTS = 12;
+    private static final int GRID_SLOTS = 9;
     private GameContextCard[] liveContextGrid = null;
     private int liveContextGridSlotW = 0;     // uniform slot width in px
     private int liveContextViewportW = 0;      // carousel viewport width (set by renderer)
@@ -21029,32 +21029,17 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         return out;
     }
 
-    // v419: choose the first empty slot, preferring one currently off-screen so newcomers crawl in.
+    // v420: choose where a newcomer goes. We fill the LOWEST empty slot first so the filled cards
+    // stay contiguous and any empty slots cluster at the high-index end (the wrap seam), which sits
+    // off-screen most of the time — so the viewer rarely sees a gap. This fixes the lone-blank-slot
+    // and the disappear-then-reappear: a freed slot is promptly refilled by the next desired card
+    // instead of lingering empty mid-strip.
     private int firstPreferredEmptySlot() {
         if (liveContextGrid == null) return -1;
-        // off-screen empty slots first
-        int onScreenFallback = -1;
         for (int i = 0; i < GRID_SLOTS; i++) {
-            if (liveContextGrid[i] == null) {
-                if (isSlotOffScreen(i)) return i;
-                if (onScreenFallback < 0) onScreenFallback = i;
-            }
+            if (liveContextGrid[i] == null) return i;
         }
-        return onScreenFallback; // none off-screen; use any empty slot
-    }
-
-    // Is grid slot i currently outside the visible viewport (given the live scroll position)?
-    private boolean isSlotOffScreen(int i) {
-        int slotW = liveContextTickerCycleW > 0 && GRID_SLOTS > 0 ? (liveContextGridSlotW) : dp(168);
-        int gap = liveContextTickerGap;
-        int vw = liveContextViewportW > 0 ? liveContextViewportW : dp(360);
-        float scroll = liveContextScrollPos;
-        float x = i * (slotW + gap) - scroll;
-        // wrap into the visible cycle space
-        int cycleW = Math.max(1, GRID_SLOTS * (slotW + gap));
-        while (x < -slotW) x += cycleW;
-        while (x > cycleW) x -= cycleW;
-        return (x + slotW < 0) || (x > vw); // fully left or fully right of the viewport
+        return -1;
     }
 
     // v406: create the ticker once into the persistent carousel host. Subsequent updates only refresh
@@ -25773,10 +25758,12 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         Team home = teamForLiveGame(game.homeTeamId, game.homeName, game.homeAbbr);
         TeamPalette awayPalette = away == null ? paletteForAbbr(game.awayAbbr) : paletteForTeam(away);
         TeamPalette homePalette = home == null ? paletteForAbbr(game.homeAbbr) : paletteForTeam(home);
-        activeLiveScoreHeroHost.removeAllViews();
+        // v420: build the new hero FIRST, then swap, so the host is never momentarily empty (that
+        // empty window contributed to the whole-page flash at the end of an at-bat).
         View hero = liveFocusMode
                 ? focusHeroHeader(game, away, home, awayPalette, homePalette)
                 : liveScoreHero(game, away, home, awayPalette, homePalette);
+        activeLiveScoreHeroHost.removeAllViews();
         activeLiveScoreHeroHost.addView(hero, new FrameLayout.LayoutParams(-1, -2));
     }
 
