@@ -861,7 +861,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v439", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v440", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20116,14 +20116,28 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                     // real result lands, then show only that final card. A hard timeout prevents hanging
                     // if the feed is slow (reviews, scoring plays).
                     long now = System.currentTimeMillis();
-                    boolean liveAbPendingResult = terminalPitch && curAb != null && !curAb.complete;
+                    // v440: detect a PRELIMINARY result deterministically from the text. MLB's feed first
+                    // reports an AB-ending in-play ball as "In play, out(s)" / "In play, run(s)" /
+                    // "In play, no out" and refines it to the real result ("Single", "Groundout"…) a beat
+                    // later. Those "In play…" strings are the intermediate we must never show. We treat
+                    // an AB as pending whenever its current result text is one of these placeholders OR a
+                    // terminal pitch landed with no result yet — and suppress rendering until it refines.
+                    boolean prelimResult = false;
+                    if (curAb != null) {
+                        String rr = safe(curAb.result).toLowerCase(Locale.US);
+                        prelimResult = rr.startsWith("in play") || rr.contains("in play,");
+                    }
+                    boolean liveAbPendingResult = (terminalPitch || prelimResult) && curAb != null
+                            && (!curAb.complete || prelimResult);
                     if (liveAbPendingResult && !awaitingAbResult) {
                         awaitingAbResult = true;
                         awaitingAbNumber = curAb.abNumber;
                         awaitingAbResultUntilMs = now + AWAIT_RESULT_TIMEOUT_MS;
                     }
-                    boolean resolvedNow = resultAppeared
-                            || (feedResultAb != null && awaitingAbNumber >= 0 && feedResultAb.abNumber == awaitingAbNumber);
+                    // resolved = the awaited AB now has a REAL (non-preliminary) result
+                    boolean resolvedNow = awaitingAbResult && curAb != null
+                            && curAb.abNumber == awaitingAbNumber
+                            && curAb.complete && !prelimResult && !safe(curAb.result).isEmpty();
                     boolean awaitTimedOut = awaitingAbResult && now >= awaitingAbResultUntilMs;
                     if (awaitingAbResult && (resolvedNow || awaitTimedOut)) {
                         awaitingAbResult = false;
@@ -20172,14 +20186,15 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                                 ? safe(curAb.pitches.get(curAb.pitches.size() - 1).result) : "";
                         liveHudState = "#" + liveHudPollCount
                                 + (liveFocusMode ? " FOCUS" : " MENU")
-                                + " bat=" + displayedBatter
-                                + " bChg=" + (batterChanged ? "Y" : "n")
-                                + " rApp=" + (resultAppeared ? "Y" : "n")
                                 + " term=" + (terminalPitch ? "Y" : "n")
+                                + " cmpl=" + (curAb != null && curAb.complete ? "Y" : "n")
+                                + " pend=" + (liveAbPendingResult ? "Y" : "n")
+                                + " resNow=" + (resolvedNow ? "Y" : "n")
                                 + " await=" + (awaitingAbResult ? "Y" : "n")
+                                + " abN=" + (curAb != null ? curAb.abNumber : -1)
+                                + " fResN=" + (feedResultAb != null ? feedResultAb.abNumber : -1)
                                 + " rebuild=" + (willRebuild ? "Y" : "n")
-                                + " lastPitch=" + (lp.length() > 10 ? lp.substring(0, 10) : lp)
-                                + " res=" + (curRes.length() > 12 ? curRes.substring(0, 12) : curRes);
+                                + " res=" + (curRes.length() > 14 ? curRes.substring(0, 14) : curRes);
                         if (liveHudView != null) liveHudView.setText("HUD: " + liveHudState);
                     }
                     // v412: only rebuilds when the feed actually changed (guard inside).
@@ -20506,7 +20521,7 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                     && feed.latestRosterMove != null && feed.latestRosterAbIndex == idx) {
                 eventChild = rosterMoveCard(feed.latestRosterMove);
                 eventKey = ("roster-" + idx + "-" + safe(feed.latestRosterMove.headline)).hashCode();
-            } else if (ab != null && ab.complete && !safe(ab.result).isEmpty()) {
+            } else if (ab != null && ab.complete && !safe(ab.result).isEmpty() && !isPreliminaryResult(ab.result)) {
                 eventChild = resultCard(ab, null, batColor);
                 // v435: key by fidx only (not the result text) so the terminal-pitch "pending" card and
                 // this final result share continuity. Combined with the pending key above, the slot
@@ -20640,7 +20655,7 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
         if (abs == null || abs.isEmpty()) return null;
         for (int i = abs.size() - 1; i >= 0; i--) {
             LiveAtBat ab = abs.get(i);
-            if (ab != null && ab.complete && !safe(ab.result).isEmpty()) return ab;
+            if (ab != null && ab.complete && !safe(ab.result).isEmpty() && !isPreliminaryResult(ab.result)) return ab;
         }
         return null;
     }
@@ -23131,6 +23146,14 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
         lp.setMargins(dp(2), 0, dp(2), 0);
         row.addView(resultMetricPill(value, accent, emphasis), lp);
+    }
+
+    // v440: MLB's feed reports an in-play AB-ending ball as a placeholder ("In play, out(s)",
+    // "In play, run(s)", "In play, no out") before refining it to the real result. These are the
+    // intermediate strings we must never surface — callers treat them as "not resolved yet".
+    private boolean isPreliminaryResult(String result) {
+        String r = safe(result).toLowerCase(Locale.US);
+        return r.startsWith("in play") || r.contains("in play,");
     }
 
     // v437: derive the at-bat result that a terminal pitch logically guarantees, so we never show a
