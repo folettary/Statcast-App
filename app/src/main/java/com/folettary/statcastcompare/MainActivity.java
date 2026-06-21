@@ -848,7 +848,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v417", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v418", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20837,6 +20837,62 @@ private View liveGameCard(LiveGame game, int slateIndex) {
     private int liveContextTickerGap = 0;
     private float liveContextTickerSpeed = 0.02f;
 
+    // v418: explicit classification of each card type by whose performance it describes.
+    // 1 = about the current HITTER, 2 = about the current PITCHER, 0 = pure game situation (no
+    // subject — legitimately updates in place). This drives slot identity so a batter/pitcher change
+    // cycles that player's cards off-screen rather than swapping their content in place.
+    private int cardSubjectKind(String eyebrow) {
+        String e = safe(eyebrow).toUpperCase(Locale.US);
+        switch (e) {
+            // hitter cards
+            case "BARREL RATE":
+            case "BASES EMPTY":
+            case "BATTER BASELINE":
+            case "BATTER SURVIVAL":
+            case "CHASE PROFILE":
+            case "CLUTCH SPLIT":
+            case "CONTACT PROFILE":
+            case "CONTACT QUALITY":
+            case "DAMAGE PROFILE":
+            case "EXPECTED VALUE":
+            case "HARD-HIT BASE":
+            case "MEN-ON SPLIT":
+            case "PLATE DISCIPLINE":
+            case "PLATOON SPLIT":
+            case "RAW POWER":
+            case "RECENT FORM":
+            case "TWO-OUT RISP":
+            case "LEVERAGE BAT":
+                return 1;
+            // pitcher cards
+            case "COMMAND INDEX":
+            case "DP PROFILE":
+            case "EV ALLOWED":
+            case "FATIGUE WATCH":
+            case "GROUND-BALL LEAN":
+            case "PITCH MIX":
+            case "PITCHER BASELINE":
+            case "PITCHER CLUTCH":
+            case "PITCHER LINE":
+            case "PITCHER PLATOON":
+            case "PUT-AWAY PROFILE":
+            case "SWING-MISS STUFF":
+            case "TIMES THROUGH":
+            case "VELOCITY SPREAD":
+            case "WALK PROFILE":
+            case "WHIFF BASELINE":
+                return 2;
+            // collisions compare both players → tie to the matchup (batter id is fine as the anchor)
+            case "CONTACT COLLISION":
+            case "WALK COLLISION":
+            case "WHIFF COLLISION":
+                return 1;
+            default:
+                return 0; // COUNT VALUE, COUNT EDGE, LEVERAGE, BASE-OUT VALUE, OUT COST, RUN VALUE,
+                          // SCOREBOARD, WPA SWING, DUE UP, GAME'S BIG SWING, INSIGHT ENGINE, etc.
+        }
+    }
+
     private java.util.ArrayList<GameContextCard> stableGameContextCards(LiveGame game, java.util.ArrayList<GameContextCard> fresh) {
         java.util.ArrayList<GameContextCard> sorted = new java.util.ArrayList<>();
         if (fresh != null) sorted.addAll(fresh);
@@ -21745,15 +21801,16 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         String pitSubj = ("P" + (game.sitPitcherId > 0 ? game.sitPitcherId : 0));
         for (GameContextCard c : cards) {
             c.contextSig = sig;
-            // v417: assign the subject by the card's ACCENT, which reliably identifies whose card it
-            // is — batAccent = the hitter, defAccent = the pitcher. The old approach matched the
-            // player's last name inside the headline, which silently failed for any card that didn't
-            // print the name, leaving those cards subject-less. Then on a batter change the new
-            // hitter's card collapsed onto the old slot and its CONTENT swapped in place (the
-            // "replaced while visible" you saw). Tying the subject to the player id makes each
-            // player's card a distinct slot, so the old one gracefully exits and the new one enters.
-            if (c.accent == batAccent && game.sitBatterId > 0) c.subject = batSubj;
-            else if (c.accent == defAccent && game.sitPitcherId > 0) c.subject = pitSubj;
+            // v418: assign the subject from an EXPLICIT classification of each card type, not from
+            // accent (which was wrong: COUNT VALUE flips accent by count) and not from headline
+            // name-matching (which silently failed). A card about the hitter is tagged with the
+            // batter id, a card about the pitcher with the pitcher id, and a pure game-situation
+            // card gets no subject (it legitimately updates in place). This makes each player's
+            // version of a card a distinct slot, so a batter change cycles cards instead of swapping.
+            int kind = cardSubjectKind(c.eyebrow);
+            if (kind == 1 && game.sitBatterId > 0) c.subject = batSubj;
+            else if (kind == 2 && game.sitPitcherId > 0) c.subject = pitSubj;
+            else c.subject = ""; // situation card — no subject
         }
         return cards;
     }
