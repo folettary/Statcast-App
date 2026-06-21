@@ -848,7 +848,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v415", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v416", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20784,6 +20784,14 @@ private View liveGameCard(LiveGame game, int slateIndex) {
     }
 
     private int gameContextCardWidth(GameContextCard c) {
+        // v416 TEST: force a single uniform width for every card. If the flashing stops, the cause is
+        // confirmed to be the variable-width reflow at the wrap boundary (cycleW changing by different
+        // amounts as cards of different sizes enter/leave). This is a diagnostic — if confirmed, the
+        // real fix keeps variety via a stable absolute-position track instead of modulo wrapping.
+        return dp(168);
+    }
+
+    private int gameContextCardWidthVariable(GameContextCard c) {
         if (c == null) return dp(120);
         // v398: measure the actual rendered widths so each card uses only the space it needs,
         // giving a natural variety of sizes instead of a wide uniform floor.
