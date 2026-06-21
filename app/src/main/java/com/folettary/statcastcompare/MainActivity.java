@@ -848,7 +848,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v435", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v436", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20087,6 +20087,19 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                     boolean batterChanged = displayedBatter > 0 && liveTrackerLastBatterId != 0
                             && displayedBatter != liveTrackerLastBatterId && host.getChildCount() > 0;
 
+                    // v436: detect a terminal pitch (one that ended the AB — in play, or strike 3). The
+                    // in-play/strike-3 pitch lands one poll BEFORE ab.result populates, so without this
+                    // it rebuilt the pager with an instant flash, then the result faded in — the
+                    // flash-then-result you saw. Treating the terminal pitch as a smooth-swap moment
+                    // makes the whole pitch→result sequence animate continuously.
+                    boolean terminalPitch = false;
+                    if (curAb != null && curAb.pitches != null && !curAb.pitches.isEmpty() && !curAb.complete) {
+                        LivePitch lp = curAb.pitches.get(curAb.pitches.size() - 1);
+                        terminalPitch = lp != null && (lp.isInPlay
+                                || (lp.strikes >= 2 && safe(lp.result).toLowerCase(Locale.US).contains("strike")
+                                    && !safe(lp.result).toLowerCase(Locale.US).contains("foul")));
+                    }
+
                     String trackerSig = trackerStateSignature(g);
                     boolean willRebuild = !trackerSig.equals(liveTrackerRenderSig) || host.getChildCount() == 0;
                     // a meaningful event should force a rebuild+animation even if the sig didn't move
@@ -20102,10 +20115,18 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                         View newPager = buildTrackerPager(g);
                         liveUpdateRebuild = false;
                         forceResultReveal = false;
-                        // A result reveal and a batter change shouldn't both animate the whole pager on
-                        // the same poll. The result reveal animates the result card itself; the batter
-                        // handoff animates the whole pager. Prefer the result reveal when both fire.
-                        swapTrackerPager(host, newPager, batterChanged && !resultAppeared);
+                        // v436: smooth-swap on a batter change, a result, OR a terminal pitch (the
+                        // in-play/strike-3 pitch that begins the result sequence) so the whole
+                        // pitch→result handoff is continuous, never an instant flash.
+                        boolean premiumSwap = batterChanged || resultAppeared || terminalPitch;
+                        if (premiumSwap) {
+                            swapTrackerPager(host, newPager, true);
+                        } else {
+                            // ordinary in-AB update (a normal ball/strike): a quick, soft crossfade so
+                            // each pitch eases in rather than snapping — removes per-poll abruptness
+                            // while staying clearly lighter than the premium handoff.
+                            softSwapTrackerPager(host, newPager);
+                        }
                     }
                     // v406: refresh the persistent carousel's data in place — never recreates its view.
                     updateCarouselData(g, currentTrackerAtBat(g));
@@ -23162,6 +23183,28 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
     // v424: swap the tracker pager. On a batter change, do a brief crossfade + gentle slide so the
     // handoff to the next hitter reads as an intentional, premium transition rather than a flash.
     // Other updates swap instantly (no animation) so rapid in-AB ticks stay calm.
+    // v436: a light, quick crossfade for ordinary in-AB pitch updates — just enough to remove the
+    // snap of an instant swap, clearly subtler than the premium handoff. Fades the old out fast, then
+    // fades the new in fast; sequential so the vertical host never stacks two pagers.
+    private void softSwapTrackerPager(LinearLayout host, View newPager) {
+        if (host == null || newPager == null) return;
+        if (host.getChildCount() == 0) {
+            host.addView(newPager, matchWrap());
+            newPager.setAlpha(0f);
+            newPager.animate().alpha(1f).setDuration(160).start();
+            return;
+        }
+        final View oldPager = host.getChildAt(0);
+        oldPager.animate().alpha(0f).setDuration(90)
+                .withEndAction(() -> {
+                    host.removeAllViews();
+                    host.addView(newPager, matchWrap());
+                    newPager.setAlpha(0f);
+                    newPager.animate().alpha(1f).setDuration(150)
+                            .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
+                }).start();
+    }
+
     private void swapTrackerPager(LinearLayout host, View newPager, boolean animate) {
         if (host == null || newPager == null) return;
         if (!animate || host.getChildCount() == 0) {
@@ -25275,6 +25318,12 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         LinearLayout.LayoutParams panelLp = matchWrap();
         panelLp.setMargins(0, dp(9), 0, dp(8));
         standingsBox.addView(panel, panelLp);
+        // v436: fade the whole panel in on (re)render so the staged assembly — carousel mounting,
+        // then hero, then tracker filling in around it — reads as one smooth appearance instead of a
+        // series of flashes that shove the layout around. A short fade hides the reflow.
+        panel.setAlpha(0f);
+        panel.animate().alpha(1f).setStartDelay(20).setDuration(240)
+                .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
 
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.HORIZONTAL);
