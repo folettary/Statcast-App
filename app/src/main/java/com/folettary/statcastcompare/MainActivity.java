@@ -848,7 +848,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v421", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v423", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20832,7 +20832,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
     // v405: ticker draws from these instance fields so onDraw always reflects the latest data.
     private final java.util.ArrayList<GameContextCard> liveContextTickerCards = new java.util.ArrayList<>();
     // v419: fixed-slot grid — cards occupy permanent slot indices and never compact.
-    private static final int GRID_SLOTS = 9;
+    private static final int GRID_SLOTS = 12;
     private GameContextCard[] liveContextGrid = null;
     private int liveContextGridSlotW = 0;     // uniform slot width in px
     private int liveContextViewportW = 0;      // carousel viewport width (set by renderer)
@@ -21028,7 +21028,13 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             }
         }
 
-        // 4) Emit the grid as a list with nulls preserved (the renderer draws gaps for nulls).
+        // 4) Off-screen compaction: pull cards into earlier empty slots ONLY when the card being
+        // moved is currently off-screen, so the viewer never sees a card jump. This closes interior
+        // gaps (left by departed cards during a set change) without disturbing visible cards — the
+        // gaps were the "empty rolled into view" you saw on inning changes.
+        compactGridOffScreen();
+
+        // 5) Emit the grid as a list with nulls preserved (the renderer draws gaps for nulls).
         java.util.ArrayList<GameContextCard> out = new java.util.ArrayList<>(GRID_SLOTS);
         for (int i = 0; i < GRID_SLOTS; i++) out.add(liveContextGrid[i]);
         // mirror into the legacy list (used by a couple of callers/fallbacks)
@@ -21037,17 +21043,57 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         return out;
     }
 
-    // v420: choose where a newcomer goes. We fill the LOWEST empty slot first so the filled cards
-    // stay contiguous and any empty slots cluster at the high-index end (the wrap seam), which sits
-    // off-screen most of the time — so the viewer rarely sees a gap. This fixes the lone-blank-slot
-    // and the disappear-then-reappear: a freed slot is promptly refilled by the next desired card
-    // instead of lingering empty mid-strip.
+    // v423: choose where a newcomer goes — lowest empty slot, keeping cards contiguous.
     private int firstPreferredEmptySlot() {
         if (liveContextGrid == null) return -1;
         for (int i = 0; i < GRID_SLOTS; i++) {
             if (liveContextGrid[i] == null) return i;
         }
         return -1;
+    }
+
+    // v423: pull cards into earlier empty slots, but ONLY when the card being moved is currently
+    // off-screen — so closing a gap never makes a visible card jump. Compaction runs back-to-front:
+    // for each empty slot, find the next occupied slot after it whose card is off-screen and move it
+    // down. Visible cards stay exactly where they are; off-screen ones quietly fill the holes so no
+    // empty stretch ever crawls into view.
+    private void compactGridOffScreen() {
+        if (liveContextGrid == null) return;
+        int slotW = liveContextGridSlotW > 0 ? liveContextGridSlotW : dp(168);
+        int gap = liveContextTickerGap > 0 ? liveContextTickerGap : dp(8);
+        int vw = liveContextViewportW > 0 ? liveContextViewportW : dp(360);
+        float scroll = liveContextScrollPos;
+        int filled = 0;
+        for (int i = 0; i < GRID_SLOTS; i++) if (liveContextGrid[i] != null) filled++;
+        int cycleW = Math.max(1, (filled > 0 ? lastFilledIndex() + 1 : 1) * (slotW + gap));
+
+        for (int target = 0; target < GRID_SLOTS; target++) {
+            if (liveContextGrid[target] != null) continue;
+            // find the next occupied slot after `target` whose card is off-screen
+            for (int src = target + 1; src < GRID_SLOTS; src++) {
+                GameContextCard c = liveContextGrid[src];
+                if (c == null) continue;
+                if (slotIsOffScreen(src, slotW, gap, vw, scroll, cycleW)) {
+                    liveContextGrid[target] = c;
+                    liveContextGrid[src] = null;
+                }
+                break; // only consider the immediate next occupied slot; preserves order
+            }
+        }
+    }
+
+    private int lastFilledIndex() {
+        if (liveContextGrid == null) return -1;
+        int last = -1;
+        for (int i = 0; i < GRID_SLOTS; i++) if (liveContextGrid[i] != null) last = i;
+        return last;
+    }
+
+    private boolean slotIsOffScreen(int i, int slotW, int gap, int vw, float scroll, int cycleW) {
+        float x = i * (slotW + gap) - scroll;
+        while (x < -slotW) x += cycleW;
+        while (x > cycleW) x -= cycleW;
+        return (x + slotW <= 0) || (x >= vw);
     }
 
     // v406: create the ticker once into the persistent carousel host. Subsequent updates only refresh
@@ -21104,6 +21150,16 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         int slotW = dp(168);
         liveContextGridSlotW = slotW;
         java.util.ArrayList<GameContextCard> cards = new java.util.ArrayList<>(data); // may contain nulls
+        // v423: trim trailing empty slots so the crawl loop spans only up to the last occupied slot.
+        // Interior gaps keep their fixed positions (a card that left leaves a hole that fills off-
+        // screen), but trailing empties shouldn't add dead space to the strip. During a full set
+        // change the occupied range temporarily grows (old cards departing in low slots + new cards
+        // entering higher slots), so the loop lengthens to fit both, then tightens again after.
+        int lastFilled = -1;
+        for (int i = 0; i < cards.size(); i++) if (cards.get(i) != null) lastFilled = i;
+        // keep at least the occupied range; if everything is null, keep one slot to avoid a 0-cycle.
+        int keep = Math.max(1, lastFilled + 1);
+        while (cards.size() > keep) cards.remove(cards.size() - 1);
         java.util.ArrayList<Integer> widths = new java.util.ArrayList<>();
         int cycle = 0;
         for (int i = 0; i < cards.size(); i++) { widths.add(slotW); cycle += slotW + gap; }
@@ -21237,31 +21293,34 @@ private View liveGameCard(LiveGame game, int slateIndex) {
 
             float startX = -offset;
             while (startX > 0) startX -= cycleW;
-            // v415: track which departing cards have fully exited the left edge this frame, so the
-            // next merge can prune them. A departing card is drawn only in the leftmost cycle pass
-            // (where it's exiting); it is never redrawn as the strip loops, so it can't pop back in
-            // on the right — it simply slides off and is gone.
+            // v422: a departing card is drawn wherever it currently sits on screen (the old "first
+            // pass only" rule wrongly hid departing cards that were on the RIGHT side of the strip,
+            // making them vanish mid-screen). To stop a departing card from looping back around after
+            // it exits left, we track ids that have exited this frame and skip them in later passes
+            // AND flag them for the merge to free the slot.
             java.util.HashSet<String> departedThisFrame = null;
+            java.util.HashSet<String> exitedLeft = new java.util.HashSet<>();
             boolean firstPass = true;
             for (float cycleStart = startX; cycleStart < vw; cycleStart += cycleW) {
                 float x = cycleStart;
                 for (int i = 0; i < cards.size(); i++) {
                     GameContextCard card = cards.get(i);
                     int w = widths.get(i);
-                    if (card == null) { x += w + gap; continue; } // v419: empty slot → fixed gap
+                    if (card == null) { x += w + gap; continue; } // empty slot → fixed gap
                     boolean onScreen = x < vw && x + w > 0;
                     if (card.departing) {
-                        // only ever draw a departing card in the first (leftmost) cycle pass
-                        if (firstPass) {
-                            if (onScreen) {
-                                drawCard(canvas, card, x, 0, w, rowH);
-                            } else if (x + w <= 0) {
-                                // fully past the left edge → it's gone; flag for pruning
-                                if (departedThisFrame == null) departedThisFrame = new java.util.HashSet<>();
-                                departedThisFrame.add(gameContextCardId(card));
-                            }
+                        String id = gameContextCardId(card);
+                        if (exitedLeft.contains(id)) { x += w + gap; continue; } // already left this frame
+                        if (x + w <= 0) {
+                            // fully past the left edge → mark exited so it won't loop back, and flag
+                            // for the merge to free its slot.
+                            exitedLeft.add(id);
+                            if (departedThisFrame == null) departedThisFrame = new java.util.HashSet<>();
+                            departedThisFrame.add(id);
+                        } else if (onScreen || x > 0) {
+                            // still on screen or to the right (about to exit) → keep drawing it
+                            if (onScreen) drawCard(canvas, card, x, 0, w, rowH);
                         }
-                        // in later passes (loop repeats), skip departing cards entirely
                     } else {
                         if (onScreen) drawCard(canvas, card, x, 0, w, rowH);
                     }
