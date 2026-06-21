@@ -848,7 +848,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v423", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v424", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -1283,6 +1283,7 @@ public class MainActivity extends Activity {
         stopLiveTrackerPolling(); // v273: left the game; stop the live feed loop
         activeLiveTrackerGame = null;
         activeLiveTrackerHost = null;
+        liveTrackerLastBatterId = 0;
         activeCarouselHost = null;
         activeCarouselTicker = null;
         activePlayFeedHost = null;
@@ -19881,15 +19882,16 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                     // main-thread layout pass that froze the carousel crawl.
                     String trackerSig = trackerStateSignature(g);
                     if (!trackerSig.equals(liveTrackerRenderSig) || host.getChildCount() == 0) {
+                        // v424: detect a batter change so we can animate that transition as an
+                        // intentional, premium handoff instead of a jarring rebuild flash. Small
+                        // in-AB updates (a count tick) swap silently.
+                        boolean batterChanged = g.sitBatterId != liveTrackerLastBatterId && liveTrackerLastBatterId != 0 && host.getChildCount() > 0;
+                        liveTrackerLastBatterId = g.sitBatterId;
                         liveTrackerRenderSig = trackerSig;
                         liveUpdateRebuild = true;
-                        // v414: build the new pager FIRST, then swap, so the host is never visibly
-                        // empty mid-rebuild (that empty window was the "whole page flashes" on a
-                        // batter change). removeAllViews + addView now happen back-to-back.
                         View newPager = buildTrackerPager(g);
                         liveUpdateRebuild = false;
-                        host.removeAllViews();
-                        host.addView(newPager, matchWrap());
+                        swapTrackerPager(host, newPager, batterChanged);
                     }
                     // v406: refresh the persistent carousel's data in place — never recreates its view.
                     updateCarouselData(g, currentTrackerAtBat(g));
@@ -22656,6 +22658,39 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         return card;
     }
 
+
+    private int liveTrackerLastBatterId = 0; // v424: detect batter changes for animated handoff
+
+    // v424: swap the tracker pager. On a batter change, do a brief crossfade + gentle slide so the
+    // handoff to the next hitter reads as an intentional, premium transition rather than a flash.
+    // Other updates swap instantly (no animation) so rapid in-AB ticks stay calm.
+    private void swapTrackerPager(LinearLayout host, View newPager, boolean animate) {
+        if (host == null || newPager == null) return;
+        if (!animate || host.getChildCount() == 0) {
+            host.removeAllViews();
+            host.addView(newPager, matchWrap());
+            return;
+        }
+        final View oldPager = host.getChildAt(0);
+        // Fade the current pager out, then swap in the new one and fade+slide it in. Sequential (not
+        // overlapping) so the vertical host never stacks two pagers at once. Reads as a deliberate
+        // handoff to the next hitter rather than a hard rebuild flash.
+        if (oldPager != null) {
+            oldPager.animate().alpha(0f).setDuration(150)
+                    .setInterpolator(new android.view.animation.AccelerateInterpolator())
+                    .withEndAction(() -> {
+                        host.removeAllViews();
+                        host.addView(newPager, matchWrap());
+                        newPager.setAlpha(0f);
+                        newPager.setTranslationX(dp(16));
+                        newPager.animate().alpha(1f).translationX(0f).setDuration(260)
+                                .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
+                    }).start();
+        } else {
+            host.removeAllViews();
+            host.addView(newPager, matchWrap());
+        }
+    }
 
     private void rerenderTracker(LiveGame game) {
         if (game == null || activeLiveTrackerHost == null) return;
