@@ -848,7 +848,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v418", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v419", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20831,6 +20831,11 @@ private View liveGameCard(LiveGame game, int slateIndex) {
     // v399: reuse the same ticker view across rebuilds to eliminate the replace-on-poll flash.
     // v405: ticker draws from these instance fields so onDraw always reflects the latest data.
     private final java.util.ArrayList<GameContextCard> liveContextTickerCards = new java.util.ArrayList<>();
+    // v419: fixed-slot grid — cards occupy permanent slot indices and never compact.
+    private static final int GRID_SLOTS = 12;
+    private GameContextCard[] liveContextGrid = null;
+    private int liveContextGridSlotW = 0;     // uniform slot width in px
+    private int liveContextViewportW = 0;      // carousel viewport width (set by renderer)
     private final java.util.ArrayList<Integer> liveContextTickerWidths = new java.util.ArrayList<>();
     private int liveContextTickerCycleW = 1;
     private int liveContextTickerRowH = 1;
@@ -20908,6 +20913,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
             liveContextLastFrameMs = 0L;
             liveContextRotationEpochMs = android.os.SystemClock.uptimeMillis();
             liveContextRotationStep = 0;
+            liveContextGrid = null; // v419: fresh grid for a new game
             liveContextCarouselStableCards.clear();
         }
 
@@ -20958,62 +20964,97 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         java.util.HashMap<String, GameContextCard> desiredById = new java.util.HashMap<>();
         for (GameContextCard c : visible) desiredById.put(gameContextCardId(c), c);
 
-        // First time: seed the slots and return.
-        if (liveContextCarouselStableCards.isEmpty()) {
-            liveContextCarouselStableCards.addAll(visible);
-            return new java.util.ArrayList<>(liveContextCarouselStableCards);
+        // v419: TRUE FIXED-SLOT GRID. liveContextGrid is a fixed array of GRID_SLOTS positions. Each
+        // slot's x-position is permanent (index × slotWidth). A slot holds a card or is null (drawn as
+        // a gap). The list NEVER compacts, so removing a card frees its slot to empty — nothing slides
+        // to fill it. This is what finally kills the "card swapped in place" effect: a given screen
+        // position is bound to a slot index, and a slot's occupant only changes while off-screen.
+        if (liveContextGrid == null) liveContextGrid = new GameContextCard[GRID_SLOTS];
+
+        // 1) Update slots whose card is still desired (in place); mark the rest departing.
+        java.util.HashSet<String> placed = new java.util.HashSet<>();
+        for (int i = 0; i < GRID_SLOTS; i++) {
+            GameContextCard slot = liveContextGrid[i];
+            if (slot == null) continue;
+            String id = gameContextCardId(slot);
+            GameContextCard desired = desiredById.get(id);
+            if (desired != null && !placed.contains(id)) {
+                desired.departing = false;
+                liveContextGrid[i] = desired; // same slot index → same position
+                placed.add(id);
+            } else if (placed.contains(id)) {
+                liveContextGrid[i] = null; // duplicate slot → free it
+            } else {
+                slot.departing = true; // no longer desired → cycle out off-screen, then free
+            }
         }
 
-        java.util.ArrayList<GameContextCard> slots = new java.util.ArrayList<>();
-        java.util.HashSet<String> present = new java.util.HashSet<>();
-        for (GameContextCard old : liveContextCarouselStableCards) {
-            String id = gameContextCardId(old);
-            if (present.contains(id)) continue; // de-dupe defensively
-            GameContextCard desired = desiredById.get(id);
-            if (desired != null) {
-                // still relevant → update content in place, keep its slot/position, clear departing
-                desired.departing = false;
-                slots.add(desired);
-            } else {
-                // no longer relevant → keep drawing it but mark departing so it cycles out off-screen
-                old.departing = true;
-                slots.add(old);
+        // 2) Free slots whose departing card has scrolled fully off-screen (flagged by the renderer).
+        synchronized (liveContextDrawLock) {
+            for (int i = 0; i < GRID_SLOTS; i++) {
+                GameContextCard slot = liveContextGrid[i];
+                if (slot != null && slot.departing && liveContextDepartedIds.contains(gameContextCardId(slot))) {
+                    liveContextGrid[i] = null;
+                }
             }
-            present.add(id);
+            liveContextDepartedIds.clear();
         }
-        // Append newly-relevant cards to the tail (they enter from off-screen right).
+
+        // 3) Place newly-desired cards (not yet in the grid) into empty slots. Prefer slots that are
+        // currently OFF-SCREEN so the card appears to crawl in rather than pop in mid-view. If the
+        // grid is full, the card waits for the next update (a slot will free as situations change).
+        java.util.ArrayList<GameContextCard> toPlace = new java.util.ArrayList<>();
         for (GameContextCard c : visible) {
             String id = gameContextCardId(c);
-            if (!present.contains(id)) { c.departing = false; slots.add(c); present.add(id); }
+            if (!placed.contains(id)) toPlace.add(c);
         }
-        // Prune departing cards that the draw loop has flagged as fully off-screen (offscreenDeparted).
-        // Cap total slots so the ring can't grow unbounded if many situations churn at once.
-        java.util.ArrayList<GameContextCard> pruned = new java.util.ArrayList<>();
-        for (GameContextCard c : slots) {
-            if (c.departing && liveContextDepartedIds.contains(gameContextCardId(c))) continue; // fully gone
-            pruned.add(c);
+        if (!toPlace.isEmpty()) {
+            // sort newcomers by priority so the most important fill first
+            java.util.Collections.sort(toPlace, (a, b) -> b.priority - a.priority);
+            for (GameContextCard c : toPlace) {
+                int slotIdx = firstPreferredEmptySlot();
+                if (slotIdx < 0) break; // grid full; place on a later update
+                c.departing = false;
+                liveContextGrid[slotIdx] = c;
+                placed.add(gameContextCardId(c));
+            }
         }
-        liveContextDepartedIds.clear();
-        // Hard cap: keep at most 14 slots; if over, drop the lowest-priority departing ones first.
-        if (pruned.size() > 14) {
-            java.util.ArrayList<GameContextCard> departingFirst = new java.util.ArrayList<>(pruned);
-            java.util.Collections.sort(departingFirst, (a, b) -> {
-                if (a.departing != b.departing) return a.departing ? -1 : 1;
-                return a.priority - b.priority;
-            });
-            java.util.HashSet<String> drop = new java.util.HashSet<>();
-            int toDrop = pruned.size() - 14;
-            for (int i = 0; i < departingFirst.size() && drop.size() < toDrop; i++) drop.add(gameContextCardId(departingFirst.get(i)));
-            java.util.ArrayList<GameContextCard> capped = new java.util.ArrayList<>();
-            for (GameContextCard c : pruned) if (!drop.contains(gameContextCardId(c))) capped.add(c);
-            pruned = capped;
-        }
-        if (pruned.isEmpty()) {
-            for (int i = 0; i < Math.min(6, sorted.size()); i++) pruned.add(sorted.get(i));
-        }
+
+        // 4) Emit the grid as a list with nulls preserved (the renderer draws gaps for nulls).
+        java.util.ArrayList<GameContextCard> out = new java.util.ArrayList<>(GRID_SLOTS);
+        for (int i = 0; i < GRID_SLOTS; i++) out.add(liveContextGrid[i]);
+        // mirror into the legacy list (used by a couple of callers/fallbacks)
         liveContextCarouselStableCards.clear();
-        liveContextCarouselStableCards.addAll(pruned);
-        return new java.util.ArrayList<>(liveContextCarouselStableCards);
+        for (GameContextCard c : out) if (c != null) liveContextCarouselStableCards.add(c);
+        return out;
+    }
+
+    // v419: choose the first empty slot, preferring one currently off-screen so newcomers crawl in.
+    private int firstPreferredEmptySlot() {
+        if (liveContextGrid == null) return -1;
+        // off-screen empty slots first
+        int onScreenFallback = -1;
+        for (int i = 0; i < GRID_SLOTS; i++) {
+            if (liveContextGrid[i] == null) {
+                if (isSlotOffScreen(i)) return i;
+                if (onScreenFallback < 0) onScreenFallback = i;
+            }
+        }
+        return onScreenFallback; // none off-screen; use any empty slot
+    }
+
+    // Is grid slot i currently outside the visible viewport (given the live scroll position)?
+    private boolean isSlotOffScreen(int i) {
+        int slotW = liveContextTickerCycleW > 0 && GRID_SLOTS > 0 ? (liveContextGridSlotW) : dp(168);
+        int gap = liveContextTickerGap;
+        int vw = liveContextViewportW > 0 ? liveContextViewportW : dp(360);
+        float scroll = liveContextScrollPos;
+        float x = i * (slotW + gap) - scroll;
+        // wrap into the visible cycle space
+        int cycleW = Math.max(1, GRID_SLOTS * (slotW + gap));
+        while (x < -slotW) x += cycleW;
+        while (x > cycleW) x -= cycleW;
+        return (x + slotW < 0) || (x > vw); // fully left or fully right of the viewport
     }
 
     // v406: create the ticker once into the persistent carousel host. Subsequent updates only refresh
@@ -21050,38 +21091,32 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         java.util.ArrayList<GameContextCard> data;
         try { data = stableGameContextCards(game, built); }
         catch (Exception e) { data = built; }
-        if (data.isEmpty() && game != null) {
+        // data is the fixed grid (size GRID_SLOTS, may contain nulls for empty slots). If totally
+        // empty, drop in a single fallback card so the strip isn't blank.
+        boolean anyCard = false;
+        for (GameContextCard c : data) if (c != null) { anyCard = true; break; }
+        if (!anyCard && game != null) {
             String head = game.sitInning > 0 ? liveInningHeroLabel(game) : safe(game.statusLabel());
             String sub = ab != null && !safe(ab.batter).isEmpty()
                     ? lastNameOnly(ab.batter) + " vs " + lastNameOnly(ab.pitcher)
                     : displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr) + " " + game.awayScoreText()
                     + "–" + game.homeScoreText() + " " + displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr);
-            data.add(new GameContextCard(1, "GAME CONTEXT", head, sub, Color.rgb(244, 207, 100)));
+            if (data.isEmpty()) data.add(new GameContextCard(1, "GAME CONTEXT", head, sub, Color.rgb(244, 207, 100)));
+            else data.set(0, new GameContextCard(1, "GAME CONTEXT", head, sub, Color.rgb(244, 207, 100)));
         }
-        java.util.LinkedHashMap<String, GameContextCard> uniqueCards = new java.util.LinkedHashMap<>();
-        for (GameContextCard c : data) {
-            String id = gameContextCardId(c);
-            if (!uniqueCards.containsKey(id)) uniqueCards.put(id, c);
-        }
-        java.util.ArrayList<GameContextCard> cards = new java.util.ArrayList<>(uniqueCards.values());
-        // v415: do NOT hard-cap here. The slot model (stableGameContextCards) governs how many cards
-        // exist and lets stale ones cycle off-screen gracefully; chopping the list here would yank
-        // cards out abruptly and reintroduce the jump.
 
         if (liveContextTickerEpochMs <= 0L) liveContextTickerEpochMs = android.os.SystemClock.uptimeMillis();
         int rowH = dp(104), gap = dp(8);
+        // v419: uniform slot width — a fixed grid requires equal widths so each slot's x is stable.
+        int slotW = dp(168);
+        liveContextGridSlotW = slotW;
+        java.util.ArrayList<GameContextCard> cards = new java.util.ArrayList<>(data); // may contain nulls
         java.util.ArrayList<Integer> widths = new java.util.ArrayList<>();
         int cycle = 0;
-        for (int i = 0; i < cards.size(); i++) { int w = gameContextCardWidth(cards.get(i)); widths.add(w); cycle += w + gap; }
+        for (int i = 0; i < cards.size(); i++) { widths.add(slotW); cycle += slotW + gap; }
         int cycleW = Math.max(1, cycle);
         float speedPxPerMs = Math.max(0.028f, dp(19) / 1000f);
-        // v407: the ticker view is now PERSISTENT (lives in its own host, never recreated), so the
-        // epoch stays constant and the crawl is inherently continuous. We must NOT re-anchor here —
-        // re-solving the epoch on every data update was what nudged the cards forward each poll.
-        if (liveContextTickerEpochMs <= 0L) liveContextTickerEpochMs = android.os.SystemClock.uptimeMillis();
         liveContextCarouselCycleWidth = cycleW;
-        // v413: write the shared card data under the same lock the render thread reads it with, so the
-        // off-thread crawl never sees a half-updated card list (which could flicker or crash).
         synchronized (liveContextDrawLock) {
             liveContextTickerCards.clear(); liveContextTickerCards.addAll(cards);
             liveContextTickerWidths.clear(); liveContextTickerWidths.addAll(widths);
@@ -21189,6 +21224,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 speedPxPerMs = liveContextTickerSpeed;
             }
             int vw = canvas.getWidth();
+            liveContextViewportW = vw; // v419: feed viewport width back for off-screen slot placement
             if (vw <= 0 || cards.isEmpty() || widths.size() != cards.size()) return;
 
             canvas.save();
@@ -21219,6 +21255,7 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 for (int i = 0; i < cards.size(); i++) {
                     GameContextCard card = cards.get(i);
                     int w = widths.get(i);
+                    if (card == null) { x += w + gap; continue; } // v419: empty slot → fixed gap
                     boolean onScreen = x < vw && x + w > 0;
                     if (card.departing) {
                         // only ever draw a departing card in the first (leftmost) cycle pass
