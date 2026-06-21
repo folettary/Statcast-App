@@ -848,7 +848,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v430", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v432", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -3345,6 +3345,12 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             matchupResultMode = false;
             if (homeBox != null) homeBox.setVisibility(View.VISIBLE);
             rebuildHomeFavorites();
+            // v431: re-render the home live slate on landing so a team favorited elsewhere (e.g. from
+            // a matchup) re-features immediately, instead of staying stale until the app relaunches.
+            if (homeLiveMatchupsBox != null && lastRenderedSlate != null) {
+                sortGamesByStatus(lastRenderedSlate);
+                renderHomeLiveMatchupsGames(lastRenderedSlate);
+            }
             if (matchupHubBox != null) matchupHubBox.setVisibility(View.GONE);
             if (form != null) form.setVisibility(View.GONE);
             if (resultsBox != null) resultsBox.setVisibility(View.GONE);
@@ -18678,7 +18684,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                     && standingsBox != null && standingsBox.getVisibility() == View.VISIBLE) {
                 renderLiveMatchupGames(lastRenderedSlate);
             }
-        }, 600);
+        }, 250);
     }
 
 private String liveStateSummary(LiveGame game) {
@@ -18814,14 +18820,8 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
     status.setPadding(dp(7), dp(3), dp(7), dp(3));
     status.setBackground(roundedStroke(Color.argb(94, 8, 13, 22), Color.argb(120, Color.red(statusColor), Color.green(statusColor), Color.blue(statusColor)), 12, 1));
     top.addView(status);
-    // v428: favorite-team controls on the slate card. A gold filled star = already a favorite. Tap a
-    // team's star to toggle it; favorited teams sort to the top of their status tier and are starred
-    // here and in the matchup header. These are separate click targets from the card body.
-    final Team slateAway = away, slateHome = home;
     Space favSpacer = new Space(this);
     top.addView(favSpacer, new LinearLayout.LayoutParams(0, dp(1), 1));
-    if (slateAway != null) top.addView(buildTeamFavStar(game.awayTeamId, displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr), slateAway));
-    if (slateHome != null) top.addView(buildTeamFavStar(game.homeTeamId, displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr), slateHome));
     TextView time = text(game.isPregame() ? game.timeLabel() : "", 9, Color.argb(232, 247, 249, 252), true);
     time.setGravity(Gravity.RIGHT);
     time.setSingleLine(true);
@@ -20984,7 +20984,12 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
     private String liveContextSignature(LiveGame game) {
         if (game == null) return "";
         int baseMask = (game.onFirst ? 1 : 0) | (game.onSecond ? 2 : 0) | (game.onThird ? 4 : 0);
-        return baseMask + "|" + Math.max(0, Math.min(3, game.sitOuts)) + "|" + game.sitInning + "|" + safe(game.sitInningState);
+        // v432: include the batter and pitcher ids. Without them, a batter change that left the
+        // base/out state unchanged read as the "same situation", so the transient-miss guard kept the
+        // previous batter's cards alive and new-batter cards never cycled in — the bug where the same
+        // batter's cards persisted across at-bats. Tying the signature to who's actually up fixes it.
+        return baseMask + "|" + Math.max(0, Math.min(3, game.sitOuts)) + "|" + game.sitInning + "|"
+                + safe(game.sitInningState) + "|B" + game.sitBatterId + "|P" + game.sitPitcherId;
     }
 
     private String gameContextCardId(GameContextCard c) {
@@ -21610,9 +21615,18 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
             canvas.drawText(fitText(c.eyebrow, textPaint, maxTextW * 0.86f), tx, y + dp(20), textPaint);
 
             textPaint.setLetterSpacing(0f);
-            textPaint.setTextSize(sp(12));
             textPaint.setColor(INK);
-            canvas.drawText(fitText(c.headline, textPaint, maxTextW), tx, y + dp(50), textPaint);
+            // v432: auto-fit the headline size so long stat headlines shrink to fit rather than
+            // ellipsizing awkwardly or appearing to clip. Start at sp(12), step down to sp(9.5) min.
+            float headSize = sp(12);
+            textPaint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+            String headStr = safe(c.headline).replace('\n', ' ').trim();
+            while (headSize > sp(9.5f) && textPaint.measureText(headStr) > maxTextW) {
+                headSize -= sp(0.5f);
+                textPaint.setTextSize(headSize);
+            }
+            textPaint.setTextSize(headSize);
+            canvas.drawText(fitText(headStr, textPaint, maxTextW), tx, y + dp(50), textPaint);
 
             textPaint.setTextSize(sp(9));
             textPaint.setColor(INK_DIM);
@@ -21854,9 +21868,17 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                         String sub = "Due up · " + qualifyXwoba(dx) + (safe(db.line).isEmpty() ? "" : " · " + db.line + " today");
                         addInsightCard(cards, used, 134 - shown, "DUE UP", head, sub, upAccent);
                         shown++;
-                    } else if (!safe(db.line).isEmpty()) {
-                        addInsightCard(cards, used, 112 - shown, "DUE UP", safe(db.name) + " up next", db.line + " today", upAccent);
-                        shown++;
+                    } else {
+                        // v432: only show a due-up card if we have something meaningful — a season OPS
+                        // or today's line with context. A bare "X up next" with no stat is exactly the
+                        // empty card to avoid, so we skip it entirely when there's nothing to say.
+                        Double dops = liveStat(ds, "ops");
+                        if (dops != null) {
+                            String head = safe(db.name) + " " + liveRate(dops) + " OPS";
+                            String sub = "Due up · " + qualifyOpsSplit(dops) + (safe(db.line).isEmpty() ? "" : " · " + db.line + " today");
+                            addInsightCard(cards, used, 120 - shown, "DUE UP", head, sub, upAccent);
+                            shown++;
+                        }
                     }
                 }
             }
@@ -21876,14 +21898,23 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                 String why = bigPlay.length() > 60 ? bigPlay.substring(0, 58) + "…" : bigPlay;
                 addInsightCard(cards, used, 100, "GAME'S BIG SWING", "+" + Math.round(bigSwing) + "% WP play", why, neutralAccent);
             }
-            // Scoreboard context: the run situation framed for the inning break.
-            if (margin >= 0) {
+            // v432: replaced the score-restating SCOREBOARD card with a WIN PROBABILITY read — the
+            // score is already visible on the tracker, so a card should add what you DON'T see: how
+            // much that lead is actually worth at this point in the game. Only shown when we have a
+            // real win-prob figure from the feed.
+            double wpHome = (game.wpLoaded && game.wpHome >= 0f) ? game.wpHome : -1;
+            if (wpHome >= 0 && inning >= 1) {
                 String aA = displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr);
                 String hA = displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr);
-                String head = margin == 0 ? "Tied " + game.awayScoreText() + "–" + game.homeScoreText()
-                        : (game.awayScore > game.homeScore ? aA : hA) + " up " + margin;
-                String sub = "Through " + ordinalNum(inning) + (game.awayHits >= 0 && game.homeHits >= 0 ? " · " + aA + " " + game.awayHits + "H, " + hA + " " + game.homeHits + "H" : "");
-                addInsightCard(cards, used, 90, "SCOREBOARD", head, sub, neutralAccent);
+                int favPct; String favAbbr;
+                if (wpHome >= 50) { favPct = (int) Math.round(wpHome); favAbbr = hA; }
+                else { favPct = (int) Math.round(100 - wpHome); favAbbr = aA; }
+                String head = favAbbr + " " + favPct + "% to win";
+                String sub;
+                if (favPct >= 85) sub = "Commanding spot · " + ordinalNum(inning) + " inning";
+                else if (favPct >= 65) sub = "Clear edge but live · " + ordinalNum(inning);
+                else sub = "Toss-up — anyone's game · " + ordinalNum(inning);
+                addInsightCard(cards, used, 92, "WIN PROBABILITY", head, sub, neutralAccent);
             }
         }
 
@@ -25664,10 +25695,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         if (game == null || !game.isPregame()) return;
         LiveMatchupEdgePreview edge = liveGameEdgePreview(game);
         if (edge != null && edge.available) return;
-        // v430: tighter stagger so previews arrive in a few quick waves instead of trickling over ~9s
-        // (each arrival used to rebuild the whole slate, which was the lag). Combined with the longer
-        // refresh coalesce window below, this means far fewer full-slate rebuilds.
-        final int delay = Math.min(2600, Math.max(0, slateIndex) * 150);
+        final int delay = Math.min(9000, Math.max(0, slateIndex) * 450);
         main.postDelayed(() -> {
             if (activePrimaryTab != TAB_MATCHUP || activeLiveGameMenu != null || matchupPathMode != MATCHUP_PATH_LIVE || matchupResultMode) return;
             startLiveMatchupEdgePreviewLoad(game);
@@ -25907,65 +25935,40 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         final LiveGame targetGame = game;
 
         io.execute(() -> {
+            // v431: REVERTED to the pre-v427 sequential form. The parallel version (15 games × 3
+            // concurrent fanout tasks = ~45 simultaneous fetches, each committing+rebuilding the slate
+            // separately) is what made this screen lag. Computing the three sections in sequence and
+            // committing ONCE per game restores the original smooth loading.
+            final ArrayList<LiveMatchupEdgeBuild> builds = new ArrayList<>();
             try {
                 Team awayTeam = teamForLiveGame(targetGame.awayTeamId, targetGame.awayName, targetGame.awayAbbr);
                 Team homeTeam = teamForLiveGame(targetGame.homeTeamId, targetGame.homeName, targetGame.homeAbbr);
-                if (awayTeam == null || homeTeam == null) {
-                    main.post(() -> commitLivePreviewBuilds(targetGame, tileKeys, new ArrayList<>(), baseKey, liveMatchupSecondaryEdgePreviewInFlight));
-                    return;
-                }
-
-                // v427: run the three independent secondary reads IN PARALLEL and commit each one the
-                // moment it's ready, rather than computing them in sequence and revealing all at once
-                // after the slowest. This makes the edge tiles populate noticeably faster and
-                // progressively instead of in one delayed batch. A shared counter clears the in-flight
-                // flag once all three have reported in.
-                final java.util.concurrent.atomic.AtomicInteger remaining = new java.util.concurrent.atomic.AtomicInteger(3);
-                final Team aTeam = awayTeam, hTeam = homeTeam;
-
-                // bullpen
-                fanout.submit(() -> {
-                    ArrayList<LiveMatchupEdgeBuild> b = new ArrayList<>();
+                if (awayTeam != null && homeTeam != null) {
                     try {
-                        Future<BullpenReport> awayFuture = fanout.submit(() -> fetchBullpenReport(aTeam, season, targetGame.gamePk));
-                        BullpenReport homeReport = fetchBullpenReport(hTeam, season, targetGame.gamePk);
+                        Future<BullpenReport> awayFuture = fanout.submit(() -> fetchBullpenReport(awayTeam, season, targetGame.gamePk));
+                        BullpenReport homeReport = fetchBullpenReport(homeTeam, season, targetGame.gamePk);
                         BullpenReport awayReport = awayFuture.get();
                         HeadToHeadComparison bullpenH = bullpenHeadToHeadComparison(awayReport, homeReport);
-                        b.add(new LiveMatchupEdgeBuild("bullpen", bullpenH, new ArrayList<>(bullpenH.keyEdgeMetricsSnapshot), "Bullpen", "bullpen", Color.rgb(120, 220, 207)));
+                        builds.add(new LiveMatchupEdgeBuild("bullpen", bullpenH, new ArrayList<>(bullpenH.keyEdgeMetricsSnapshot), "Bullpen", "bullpen", Color.rgb(120, 220, 207)));
                     } catch (Exception ignored) { }
-                    commitSecondarySection(targetGame, b, baseKey, remaining);
-                });
 
-                boolean probablesKnown = !safe(targetGame.awayPitcher).isEmpty() && !safe(targetGame.homePitcher).isEmpty();
-                final Player awayStarter = probablesKnown ? findPlayerByName(targetGame.awayPitcher) : null;
-                final Player homeStarter = probablesKnown ? findPlayerByName(targetGame.homePitcher) : null;
-
-                // starters
-                fanout.submit(() -> {
-                    ArrayList<LiveMatchupEdgeBuild> b = new ArrayList<>();
+                    boolean probablesKnown = !safe(targetGame.awayPitcher).isEmpty() && !safe(targetGame.homePitcher).isEmpty();
+                    Player awayStarter = probablesKnown ? findPlayerByName(targetGame.awayPitcher) : null;
+                    Player homeStarter = probablesKnown ? findPlayerByName(targetGame.homePitcher) : null;
                     if (awayStarter != null && homeStarter != null) {
                         try {
                             HeadToHeadComparison starters = buildLivePlayerPreviewComparison(awayStarter, homeStarter, season, StatScope.PITCH_ONLY, livePitcherPreviewMetrics());
-                            b.add(new LiveMatchupEdgeBuild("starters", starters, livePitcherPreviewMetrics(), "Starting Pitchers", "pitcher", Color.rgb(247, 197, 77)));
+                            builds.add(new LiveMatchupEdgeBuild("starters", starters, livePitcherPreviewMetrics(), "Starting Pitchers", "pitcher", Color.rgb(247, 197, 77)));
                         } catch (Exception ignored) { }
-                    }
-                    commitSecondarySection(targetGame, b, baseKey, remaining);
-                });
-
-                // offense vs starter
-                fanout.submit(() -> {
-                    ArrayList<LiveMatchupEdgeBuild> b = new ArrayList<>();
-                    if (awayStarter != null && homeStarter != null) {
                         try {
-                            HeadToHeadComparison ovs = buildOffenseVsStarterComparison(targetGame, aTeam, hTeam, awayStarter, homeStarter, season);
-                            b.add(new LiveMatchupEdgeBuild("ovs", ovs, new ArrayList<>(ovs.keyEdgeMetricsSnapshot), "Offense vs SP", "ovs", Color.rgb(255, 155, 92)));
+                            HeadToHeadComparison ovs = buildOffenseVsStarterComparison(targetGame, awayTeam, homeTeam, awayStarter, homeStarter, season);
+                            builds.add(new LiveMatchupEdgeBuild("ovs", ovs, new ArrayList<>(ovs.keyEdgeMetricsSnapshot), "Offense vs SP", "ovs", Color.rgb(255, 155, 92)));
                         } catch (Exception ignored) { }
                     }
-                    commitSecondarySection(targetGame, b, baseKey, remaining);
-                });
-            } catch (Exception ignored) {
-                main.post(() -> commitLivePreviewBuilds(targetGame, tileKeys, new ArrayList<>(), baseKey, liveMatchupSecondaryEdgePreviewInFlight));
-            }
+                }
+            } catch (Exception ignored) { }
+
+            main.post(() -> commitLivePreviewBuilds(targetGame, tileKeys, builds, baseKey, liveMatchupSecondaryEdgePreviewInFlight));
         });
     }
 
@@ -25996,40 +25999,6 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         // v346: slate cards can also show the pregame Game Edge, so refresh the visible slate
         // after previews land. This is throttled and only runs when the slate is visible.
         refreshVisibleGameTiles();
-    }
-
-    // v427: commit a single secondary section (bullpen / starters / ovs) as soon as it finishes, so
-    // tiles appear progressively. The in-flight flag is cleared only after all three have reported
-    // (via the shared counter), and a fallback "unavailable" tile is written for any section that
-    // produced nothing so the card doesn't sit blank forever.
-    private void commitSecondarySection(LiveGame targetGame, ArrayList<LiveMatchupEdgeBuild> builds, String baseKey,
-                                        java.util.concurrent.atomic.AtomicInteger remaining) {
-        main.post(() -> {
-            if (builds != null) {
-                for (LiveMatchupEdgeBuild b : builds) {
-                    if (b == null || b.h == null) continue;
-                    String cacheKey = liveEdgeCacheKey(targetGame, b.tileKey);
-                    liveMatchupEdgePreviewCache.put(cacheKey, livePreviewFromBuild(cacheKey, b));
-                }
-            }
-            int left = remaining.decrementAndGet();
-            if (left <= 0) {
-                liveMatchupSecondaryEdgePreviewInFlight.remove(baseKey);
-                // write unavailable fallbacks for any secondary tile still missing
-                for (String k : new String[] { "bullpen", "starters", "ovs" }) {
-                    if (!liveMatchupEdgePreviewCache.containsKey(liveEdgeCacheKey(targetGame, k))) {
-                        liveMatchupEdgePreviewCache.put(liveEdgeCacheKey(targetGame, k),
-                                new LiveMatchupEdgePreview(liveEdgeCacheKey(targetGame, k), false, "", "", "", Color.rgb(146, 164, 188)));
-                    }
-                }
-            }
-            if (activeLiveGameMenu == targetGame && "matchups".equals(gameHubTab) && activePrimaryTab == TAB_MATCHUP && !matchupResultMode) {
-                int keepY = mainScroll == null ? 0 : mainScroll.getScrollY();
-                renderLiveGameMenu(targetGame);
-                if (mainScroll != null) mainScroll.post(() -> mainScroll.scrollTo(0, keepY));
-            }
-            refreshVisibleGameTiles();
-        });
     }
 
     private HeadToHeadComparison buildLiveTeamPreviewComparison(Team a, Team b, int season, String mode) throws Exception {
