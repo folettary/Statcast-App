@@ -352,6 +352,15 @@ public class MainActivity extends Activity {
     private TeamPalette activeLiveTrackerAwayPal = null, activeLiveTrackerHomePal = null;
     private LiveGame activeLiveTrackerGame = null;
     private boolean liveTrackerPolling = false;
+    // v438: when an AB-ending pitch (in play / strike 3 / ball 4) arrives but the DETAILED result
+    // (groundout, single, strikeout, walk…) hasn't resolved in the feed yet, we suppress rendering
+    // that intermediate state entirely and poll rapidly until the real result lands, then show only
+    // that final card. These fields drive that burst-poll window.
+    private boolean awaitingAbResult = false;     // currently bursting toward a pending AB result
+    private long awaitingAbResultUntilMs = 0L;     // hard timeout so we never hang
+    private int awaitingAbNumber = -1;             // which AB we're waiting on
+    private static final long BURST_POLL_MS = 700L;        // fast poll cadence while awaiting
+    private static final long AWAIT_RESULT_TIMEOUT_MS = 5200L; // give up and show what we have
     private boolean liveFeedPlaysExpanded = false; // v275: play feed compact by default
     private int liveFeedInningFilter = 0;          // v279: 0 = all innings, else filter to that inning
     private String gameHubTab = "live";            // v276: live | matchups | box
@@ -848,7 +857,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v436", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v438", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20072,53 +20081,73 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                     // and no animation played (and the raw flash showed through). Now we compute the
                     // events first and force the animation whenever they occur.
                     LiveAtBat curAb = currentTrackerAtBat(g);
-                    String resultKey = (curAb != null && curAb.complete && !safe(curAb.result).isEmpty())
-                            ? ("res|" + curAb.inning + "|" + curAb.abNumber + "|" + safe(curAb.result)) : "";
+                    // v437: robust event detection for the poll. We look at three independent facts and
+                    // resolve them with a clear priority so combined events on one poll (a result AND a
+                    // batter change, or a batter change AND a first pitch) never cancel each other out:
+                    //   1) a NEW completed at-bat result appeared (from the feed's latest complete AB),
+                    //   2) the DISPLAYED batter changed,
+                    //   3) the latest pitch is a terminal pitch (ends the AB).
+                    // Detection of (1) is based on the FEED's latest completed AB, independent of the
+                    // held-display heuristic, so a short result-hold can't cause us to miss firing the
+                    // result reveal.
+                    LiveAtBat feedResultAb = latestCompletedAb(g);
+                    String resultKey = (feedResultAb != null)
+                            ? ("res|" + feedResultAb.inning + "|" + feedResultAb.abNumber + "|" + safe(feedResultAb.result)) : "";
                     boolean resultAppeared = !resultKey.isEmpty() && !resultKey.equals(liveTrackerLastResultKey);
-                    // v435: the batter-change animation must key off the batter the tracker is actually
-                    // DISPLAYING, not g.sitBatterId. When an AB ends, sitBatterId jumps to the next
-                    // hitter immediately, but the tracker is still showing the completed AB's result
-                    // (held). The old code consumed the "batter changed" flag during that held-result
-                    // poll, so when the tracker finally advanced to show the new batter live, the change
-                    // had already been used up → no animation → the flash you saw. We track the
-                    // displayed batter (the current AB's batter) so the handoff animates exactly when
-                    // the visible batter actually changes.
+
                     int displayedBatter = curAb != null && curAb.batterId > 0 ? curAb.batterId : g.sitBatterId;
                     boolean batterChanged = displayedBatter > 0 && liveTrackerLastBatterId != 0
                             && displayedBatter != liveTrackerLastBatterId && host.getChildCount() > 0;
 
-                    // v436: detect a terminal pitch (one that ended the AB — in play, or strike 3). The
-                    // in-play/strike-3 pitch lands one poll BEFORE ab.result populates, so without this
-                    // it rebuilt the pager with an instant flash, then the result faded in — the
-                    // flash-then-result you saw. Treating the terminal pitch as a smooth-swap moment
-                    // makes the whole pitch→result sequence animate continuously.
                     boolean terminalPitch = false;
                     if (curAb != null && curAb.pitches != null && !curAb.pitches.isEmpty() && !curAb.complete) {
                         LivePitch lp = curAb.pitches.get(curAb.pitches.size() - 1);
-                        terminalPitch = lp != null && (lp.isInPlay
-                                || (lp.strikes >= 2 && safe(lp.result).toLowerCase(Locale.US).contains("strike")
-                                    && !safe(lp.result).toLowerCase(Locale.US).contains("foul")));
+                        terminalPitch = lp != null && deriveTerminalResult(curAb, lp) != null;
                     }
+
+                    // v438: INTERCEPT an AB-ending pitch whose detailed result hasn't resolved yet. When
+                    // the live AB just ended (terminal pitch) but the feed hasn't populated the real
+                    // outcome (groundout / single / strikeout…), we do NOT render that intermediate
+                    // state at all — we keep the prior content on screen and poll rapidly until the
+                    // real result lands, then show only that final card. A hard timeout prevents hanging
+                    // if the feed is slow (reviews, scoring plays).
+                    long now = System.currentTimeMillis();
+                    boolean liveAbPendingResult = terminalPitch && curAb != null && !curAb.complete;
+                    if (liveAbPendingResult && !awaitingAbResult) {
+                        awaitingAbResult = true;
+                        awaitingAbNumber = curAb.abNumber;
+                        awaitingAbResultUntilMs = now + AWAIT_RESULT_TIMEOUT_MS;
+                    }
+                    boolean resolvedNow = resultAppeared
+                            || (feedResultAb != null && awaitingAbNumber >= 0 && feedResultAb.abNumber == awaitingAbNumber);
+                    boolean awaitTimedOut = awaitingAbResult && now >= awaitingAbResultUntilMs;
+                    if (awaitingAbResult && (resolvedNow || awaitTimedOut)) {
+                        awaitingAbResult = false;
+                        awaitingAbNumber = -1;
+                    }
+                    // While awaiting (and not yet resolved/timed out), suppress the tracker rebuild and
+                    // schedule a fast burst poll. The carousel/score still refresh below.
+                    boolean suppressRenderThisPoll = awaitingAbResult && !resolvedNow && !awaitTimedOut;
 
                     String trackerSig = trackerStateSignature(g);
                     boolean willRebuild = !trackerSig.equals(liveTrackerRenderSig) || host.getChildCount() == 0;
                     // a meaningful event should force a rebuild+animation even if the sig didn't move
                     if (resultAppeared || batterChanged) willRebuild = true;
+                    if (suppressRenderThisPoll) willRebuild = false; // hold prior content until result lands
 
                     if (willRebuild) {
                         liveTrackerLastResultKey = resultKey;
                         liveTrackerLastBatterId = displayedBatter;
                         liveTrackerRenderSig = trackerSig;
                         // tell the result-card builder to play the grand reveal this pass
-                        forceResultReveal = resultAppeared;
+                        forceResultReveal = resultAppeared || resolvedNow;
                         liveUpdateRebuild = true;
                         View newPager = buildTrackerPager(g);
                         liveUpdateRebuild = false;
                         forceResultReveal = false;
-                        // v436: smooth-swap on a batter change, a result, OR a terminal pitch (the
-                        // in-play/strike-3 pitch that begins the result sequence) so the whole
+                        // v436: smooth-swap on a batter change, a result, OR a terminal pitch so the
                         // pitch→result handoff is continuous, never an instant flash.
-                        boolean premiumSwap = batterChanged || resultAppeared || terminalPitch;
+                        boolean premiumSwap = batterChanged || resultAppeared || resolvedNow || terminalPitch;
                         if (premiumSwap) {
                             swapTrackerPager(host, newPager, true);
                         } else {
@@ -20133,7 +20162,10 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                     // v412: only rebuilds when the feed actually changed (guard inside).
                     rebuildPlayFeedHost(g, false);
                     if (!g.isLive()) { stopLiveTrackerPolling(); return; }
-                    main.postDelayed(liveTrackerPollRunnable, 10000L);
+                    // v438: while awaiting a pending AB result, poll rapidly so the real result lands
+                    // (and renders) almost immediately; otherwise use the normal live cadence.
+                    long nextDelay = awaitingAbResult ? BURST_POLL_MS : 10000L;
+                    main.postDelayed(liveTrackerPollRunnable, nextDelay);
                 });
             });
         }
@@ -20148,6 +20180,8 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
 
     private void stopLiveTrackerPolling() {
         liveTrackerPolling = false;
+        awaitingAbResult = false;
+        awaitingAbNumber = -1;
         main.removeCallbacks(liveTrackerPollRunnable);
     }
 
@@ -20172,8 +20206,15 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                 rebuildPlayFeedHost(game, true); // v412: initial render
                 if (liveFocusMode && mainScroll != null) main.post(() -> mainScroll.scrollTo(0, 0));
                 host.setVisibility(View.VISIBLE);
-                host.setAlpha(0f);
-                host.animate().alpha(1f).setDuration(220).start();
+                // v437: fade just the freshly-mounted tracker content in. The host already reserved its
+                // height, so this fades content into place without the layout reflow that shoved the
+                // carousel down.
+                View mounted = host.getChildCount() > 0 ? host.getChildAt(0) : null;
+                if (mounted != null) {
+                    mounted.setAlpha(0f);
+                    mounted.animate().alpha(1f).setDuration(240)
+                            .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
+                }
             });
         });
     }
@@ -20451,20 +20492,23 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                 nextResultIsComplete = true; // v427: this is a finished at-bat → grand reveal
             } else if (ab != null && !ab.pitches.isEmpty()) {
                 LivePitch latest = ab.pitches.get(ab.pitches.size() - 1);
-                eventChild = resultCard(ab, latest, batColor);
-                // v435: if this pitch ended the at-bat (in play, or strike 3), reuse the SAME event key
-                // the completed-AB result card will use, so the slot treats the pitch→result handoff
-                // as one continuous element instead of two separate cards animating in. This removes
-                // the "Strike 3" then "Strikeout" (or "in play" then "runs") double-reveal — they now
-                // crossfade as a single evolving result rather than two pops.
-                boolean pitchEndedAb = latest != null && (
-                        latest.isInPlay
-                        || (latest.strikes >= 2 && safe(latest.result).toLowerCase(Locale.US).contains("strike") && !safe(latest.result).toLowerCase(Locale.US).contains("foul")));
-                if (pitchEndedAb) {
-                    eventKey = ("res-" + fidx + "-pending").hashCode();
-                } else {
+                // v438: if this pitch ended the at-bat, we do NOT render an intermediate card here —
+                // the poll loop is burst-polling for the real detailed result and will rebuild with it
+                // momentarily. Until then we keep the prior content (eventChild stays null → slot keeps
+                // its current view). Only ordinary, non-terminal pitches render a live pitch card.
+                String derived = deriveTerminalResult(ab, latest);
+                if (derived == null) {
+                    eventChild = resultCard(ab, latest, batColor);
                     eventKey = (fidx * 1000) + latest.number;
+                } else if (!awaitingAbResult) {
+                    // await window ended without the feed resolving (timeout) → fall back to the
+                    // derived terminal result so the slot is never blank. For strike-3/ball-4/HBP this
+                    // is exact; for in-play it's a clean "In play" rather than the raw intermediate.
+                    eventChild = derivedResultCard(ab, latest, derived, batColor);
+                    eventKey = ("res-" + fidx + "-pending").hashCode();
+                    nextResultIsComplete = true;
                 }
+                // terminal pitch, still awaiting → leave eventChild null (render suppressed upstream)
             }
 
             LinearLayout.LayoutParams slotLp = new LinearLayout.LayoutParams(-1, resultEventSlotHeight());
@@ -20564,6 +20608,19 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
     // removes a heavy main-thread layout pass that was starving the carousel animation (the flash).
     private String liveFeedRenderSig = "";
     private String liveTrackerRenderSig = ""; // v412: skip tracker rebuild when state is unchanged
+
+    // v437: the feed's most recent COMPLETED at-bat, independent of the held-display window. Used to
+    // detect "a result appeared" reliably even if the result hold is short.
+    private LiveAtBat latestCompletedAb(LiveGame game) {
+        if (game == null || game.liveFeed == null || !game.liveFeed.loaded) return null;
+        java.util.ArrayList<LiveAtBat> abs = game.liveFeed.atBats;
+        if (abs == null || abs.isEmpty()) return null;
+        for (int i = abs.size() - 1; i >= 0; i--) {
+            LiveAtBat ab = abs.get(i);
+            if (ab != null && ab.complete && !safe(ab.result).isEmpty()) return ab;
+        }
+        return null;
+    }
 
     private String trackerStateSignature(LiveGame game) {
         if (game == null) return "null";
@@ -23051,6 +23108,43 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
         lp.setMargins(dp(2), 0, dp(2), 0);
         row.addView(resultMetricPill(value, accent, emphasis), lp);
+    }
+
+    // v437: derive the at-bat result that a terminal pitch logically guarantees, so we never show a
+    // raw "Strike 3" / "Ball 4" pitch card or an "In play, out(s)" intermediate. Returns the result
+    // string to display, or null if this pitch does NOT end the at-bat (an ordinary ball/strike/foul).
+    //   • strike 3 (called or swinging, not a foul) → "Strikeout"
+    //   • ball 4 → "Walk"
+    //   • a hit-by-pitch → "Hit By Pitch"
+    //   • in play → AB is over; we show a clean "In play" placeholder until ab.result resolves
+    //     (single vs out needs the feed). We never echo the feed's raw "In play, out(s)" string.
+    private String deriveTerminalResult(LiveAtBat ab, LivePitch p) {
+        if (p == null) return null;
+        String r = safe(p.result).toLowerCase(Locale.US);
+        boolean foul = r.contains("foul");
+        if (r.contains("hit by pitch") || r.equals("hbp")) return "Hit By Pitch";
+        if (!foul && p.strikes >= 3 && (r.contains("strike") || r.contains("swinging") || r.contains("called"))) {
+            return r.contains("swinging") ? "Strikeout (swinging)" : (r.contains("called") ? "Strikeout (looking)" : "Strikeout");
+        }
+        if ((p.isBall || r.contains("ball")) && p.balls >= 4) return "Walk";
+        if (p.isInPlay) {
+            if (ab != null && ab.complete && !safe(ab.result).isEmpty()) return ab.result;
+            return "In play";
+        }
+        return null; // ordinary ball/strike/foul — not AB-ending
+    }
+
+    // Render a derived terminal result in RESULT mode (not pitch mode), so it reads as the outcome
+    // rather than "LATEST PITCH". Temporarily lends resultCard a result string without mutating the
+    // cached feed object permanently.
+    private View derivedResultCard(LiveAtBat ab, LivePitch p, String resultText, int batColor) {
+        if (ab == null) return resultCard(null, p, batColor);
+        String prev = ab.result;
+        boolean restore = false;
+        if (safe(ab.result).isEmpty()) { ab.result = resultText; restore = true; }
+        View v = resultCard(ab, null, batColor); // result mode
+        if (restore) ab.result = prev;
+        return v;
     }
 
     private View resultCard(LiveAtBat ab, LivePitch pitch, int batColor) {
@@ -25577,7 +25671,12 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
             // and play-feed hosts rebuild on poll; the carousel between them is never destroyed.
             LinearLayout trackerHost = new LinearLayout(this);
             trackerHost.setOrientation(LinearLayout.VERTICAL);
-            trackerHost.setVisibility(View.GONE);
+            // v437: reserve the tracker's height up front instead of starting GONE. Starting GONE meant
+            // the host had zero height, so when the feed loaded and the tracker mounted it EXPANDED and
+            // shoved the carousel and play feed down — the "everything jumps around and pushes the
+            // carousel down" the user saw. A reserved min-height holds the space so content fades into
+            // place without reflowing the layout.
+            trackerHost.setMinimumHeight(dp(286));
             LinearLayout.LayoutParams thLp = matchWrap(); thLp.setMargins(dp(4), 0, dp(4), dp(2));
             panel.addView(trackerHost, thLp);
             activeLiveTrackerHost = trackerHost;
