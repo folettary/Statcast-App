@@ -848,7 +848,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v420", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v421", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20971,7 +20971,12 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         // position is bound to a slot index, and a slot's occupant only changes while off-screen.
         if (liveContextGrid == null) liveContextGrid = new GameContextCard[GRID_SLOTS];
 
-        // 1) Update slots whose card is still desired (in place); mark the rest departing.
+        // 1) Update slots whose card is still desired (in place); mark the rest departing — but ONLY
+        // if the situation actually changed. A card can briefly drop out of the desired set because
+        // its source stat hasn't reloaded this poll (async cache miss/refresh); departing it then would
+        // make it vanish and reappear a second later. So we keep a card whose situation signature still
+        // matches the current one, and only truly depart it when the situation has moved on.
+        String curSig = liveContextSignature(game);
         java.util.HashSet<String> placed = new java.util.HashSet<>();
         for (int i = 0; i < GRID_SLOTS; i++) {
             GameContextCard slot = liveContextGrid[i];
@@ -20984,8 +20989,11 @@ private View liveGameCard(LiveGame game, int slateIndex) {
                 placed.add(id);
             } else if (placed.contains(id)) {
                 liveContextGrid[i] = null; // duplicate slot → free it
+            } else if (safe(slot.contextSig).equals(curSig) && !slot.departing) {
+                // not in desired set, but situation unchanged → transient data miss; keep it as-is
+                placed.add(id);
             } else {
-                slot.departing = true; // no longer desired → cycle out off-screen, then free
+                slot.departing = true; // situation moved on → cycle out off-screen, then free
             }
         }
 
