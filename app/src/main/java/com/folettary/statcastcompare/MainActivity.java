@@ -848,7 +848,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v432", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v434", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20065,20 +20065,36 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                     boolean followingLive = (g.viewAtBatIndex < 0) || (f != null && f.loaded && g.viewAtBatIndex >= f.atBats.size() - 1);
                     if (followingLive) g.viewAtBatIndex = -1;
                     refreshActiveLiveScoreHero(g);
-                    // v412: only rebuild the tracker pager when its state actually changed (count,
-                    // score, bases, outs, AB, pitch). Skipping unchanged polls removes the heavy
-                    // main-thread layout pass that froze the carousel crawl.
+                    // v433: drive the transition animations off the EVENTS themselves (a result
+                    // appearing, the batter changing), not off whether the pager happened to rebuild.
+                    // Previously the animations only fired inside the signature-guarded rebuild block,
+                    // so they were inconsistent — sometimes a meaningful change didn't trip the guard
+                    // and no animation played (and the raw flash showed through). Now we compute the
+                    // events first and force the animation whenever they occur.
+                    LiveAtBat curAb = currentTrackerAtBat(g);
+                    String resultKey = (curAb != null && curAb.complete && !safe(curAb.result).isEmpty())
+                            ? ("res|" + curAb.inning + "|" + curAb.abNumber + "|" + safe(curAb.result)) : "";
+                    boolean resultAppeared = !resultKey.isEmpty() && !resultKey.equals(liveTrackerLastResultKey);
+                    boolean batterChanged = g.sitBatterId > 0 && liveTrackerLastBatterId != 0
+                            && g.sitBatterId != liveTrackerLastBatterId && host.getChildCount() > 0;
+
                     String trackerSig = trackerStateSignature(g);
-                    if (!trackerSig.equals(liveTrackerRenderSig) || host.getChildCount() == 0) {
-                        // v424: detect a batter change so we can animate that transition as an
-                        // intentional, premium handoff instead of a jarring rebuild flash. Small
-                        // in-AB updates (a count tick) swap silently.
-                        boolean batterChanged = g.sitBatterId != liveTrackerLastBatterId && liveTrackerLastBatterId != 0 && host.getChildCount() > 0;
+                    boolean willRebuild = !trackerSig.equals(liveTrackerRenderSig) || host.getChildCount() == 0;
+                    // a meaningful event should force a rebuild+animation even if (somehow) the sig didn't move
+                    if (resultAppeared || batterChanged) willRebuild = true;
+
+                    if (willRebuild) {
+                        liveTrackerLastResultKey = resultKey;
                         liveTrackerLastBatterId = g.sitBatterId;
                         liveTrackerRenderSig = trackerSig;
+                        // tell the result-card builder to play the grand reveal this pass
+                        forceResultReveal = resultAppeared;
                         liveUpdateRebuild = true;
                         View newPager = buildTrackerPager(g);
                         liveUpdateRebuild = false;
+                        forceResultReveal = false;
+                        // batter change → animate the whole pager handoff; otherwise swap instantly
+                        // (the result reveal animates itself inside the pager).
                         swapTrackerPager(host, newPager, batterChanged);
                     }
                     // v406: refresh the persistent carousel's data in place — never recreates its view.
@@ -20086,7 +20102,7 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                     // v412: only rebuilds when the feed actually changed (guard inside).
                     rebuildPlayFeedHost(g, false);
                     if (!g.isLive()) { stopLiveTrackerPolling(); return; }
-                    main.postDelayed(liveTrackerPollRunnable, 15000L);
+                    main.postDelayed(liveTrackerPollRunnable, 10000L);
                 });
             });
         }
@@ -20096,7 +20112,7 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
         if (game == null || !game.isLive()) return;
         liveTrackerPolling = true;
         main.removeCallbacks(liveTrackerPollRunnable);
-        main.postDelayed(liveTrackerPollRunnable, 15000L);
+        main.postDelayed(liveTrackerPollRunnable, 10000L);
     }
 
     private void stopLiveTrackerPolling() {
@@ -20667,13 +20683,16 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
     // the underlying re-render. Used only for finished ABs; in-progress pitch updates keep the subtle
     // slide so rapid mid-AB ticks stay calm.
     private void playResultReveal(View v) {
+        // v433: a more pronounced, deliberate reveal so it reads as an intentional "here's the result"
+        // moment rather than a flash. Starts smaller and lower with a brief settle delay, rises and
+        // scales up with a noticeable overshoot bounce, over a longer duration the eye can track.
         v.setAlpha(0f);
-        v.setScaleX(0.86f);
-        v.setScaleY(0.86f);
-        v.setTranslationY(dp(6));
+        v.setScaleX(0.78f);
+        v.setScaleY(0.78f);
+        v.setTranslationY(dp(14));
         v.animate().alpha(1f).scaleX(1f).scaleY(1f).translationY(0f)
-                .setStartDelay(20).setDuration(300)
-                .setInterpolator(new android.view.animation.OvershootInterpolator(1.6f))
+                .setStartDelay(40).setDuration(420)
+                .setInterpolator(new android.view.animation.OvershootInterpolator(2.4f))
                 .start();
     }
     private void animateResultIn(View v, int key) {
@@ -20684,10 +20703,18 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
             lastResultKey = key;
             return;
         }
+        // v433: if the poll detected a genuine new AB result, ALWAYS play the grand reveal — this is
+        // the consistency fix. Previously the reveal was suppressed unless liveUpdateRebuild was set
+        // and the key differed, which made it fire inconsistently. The event flag overrides both.
+        if (forceResultReveal && complete) {
+            lastResultKey = key;
+            playResultReveal(v);
+            return;
+        }
         if (!liveUpdateRebuild) { lastResultKey = key; return; } // user navigation — update key, don't animate
         if (key == lastResultKey) return;   // same content on a live poll — don't re-animate
         lastResultKey = key;
-        if (complete) playResultReveal(v);  // v427: grand reveal for a finished at-bat
+        if (complete) playResultReveal(v);
         else playCardIn(v);
     }
 
@@ -21050,6 +21077,7 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
     // v419: fixed-slot grid — cards occupy permanent slot indices and never compact.
     private static final int GRID_SLOTS = 12;
     private GameContextCard[] liveContextGrid = null;
+    private int liveContextGridBatterId = 0;   // v434: last batter the grid was built for
     private int liveContextGridSlotW = 0;     // uniform slot width in px
     private int liveContextViewportW = 0;      // carousel viewport width (set by renderer)
     private final java.util.ArrayList<Integer> liveContextTickerWidths = new java.util.ArrayList<>();
@@ -21135,6 +21163,7 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
             liveContextRotationEpochMs = android.os.SystemClock.uptimeMillis();
             liveContextRotationStep = 0;
             liveContextGrid = null; // v419: fresh grid for a new game
+            liveContextGridBatterId = 0;
             liveContextCarouselStableCards.clear();
         }
 
@@ -21198,6 +21227,13 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
         // make it vanish and reappear a second later. So we keep a card whose situation signature still
         // matches the current one, and only truly depart it when the situation has moved on.
         String curSig = liveContextSignature(game);
+        // v434: detect a batter change at the grid level. On a real batter change we don't want the
+        // previous hitter's departing cards to linger and pile up (especially across quick at-bats),
+        // so any departing card that's already off-screen is freed immediately rather than waiting to
+        // be flagged by the renderer. On-screen ones still crawl out gracefully.
+        int gridBatter = game.sitBatterId;
+        boolean batterChangedGrid = gridBatter > 0 && liveContextGridBatterId != 0 && gridBatter != liveContextGridBatterId;
+        liveContextGridBatterId = gridBatter;
         java.util.HashSet<String> placed = new java.util.HashSet<>();
         for (int i = 0; i < GRID_SLOTS; i++) {
             GameContextCard slot = liveContextGrid[i];
@@ -21215,6 +21251,23 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                 placed.add(id);
             } else {
                 slot.departing = true; // situation moved on → cycle out off-screen, then free
+            }
+        }
+
+        // v434: on a batter change, immediately free any departing card that's already off-screen so
+        // stale cards from the previous (or a skipped) batter don't accumulate. Visible departing
+        // cards are left to crawl out so nothing pops away mid-view.
+        if (batterChangedGrid) {
+            int slotW = liveContextGridSlotW > 0 ? liveContextGridSlotW : dp(168);
+            int gap = liveContextTickerGap > 0 ? liveContextTickerGap : dp(8);
+            int vw = liveContextViewportW > 0 ? liveContextViewportW : dp(360);
+            float scroll = liveContextScrollPos;
+            int cycleW = Math.max(1, (lastFilledIndex() + 1) * (slotW + gap));
+            for (int i = 0; i < GRID_SLOTS; i++) {
+                GameContextCard slot = liveContextGrid[i];
+                if (slot != null && slot.departing && slotIsOffScreen(i, slotW, gap, vw, scroll, cycleW)) {
+                    liveContextGrid[i] = null;
+                }
             }
         }
 
@@ -22278,6 +22331,19 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
         final int pitcherId = game.sitPitcherId > 0 ? game.sitPitcherId : (ab == null ? 0 : ab.pitcherId);
         if (batterId > 0) warmOneSplit(batterId, true, season);
         if (pitcherId > 0) warmOneSplit(pitcherId, false, season);
+        // v434: proactively warm the NEXT hitters' splits so their cards are ready the instant they
+        // come to bat. Without this, a new batter's stats only started loading once they were already
+        // up, so for a poll or two the carousel had no cards for them — the old batter's cards lingered
+        // and slots sat empty until the async fetch finished. Pre-warming the on-deck/in-the-hole
+        // hitters closes that gap so the swap is clean.
+        if (game.dueUp != null) {
+            int warmed = 0;
+            for (DueUpBatter db : game.dueUp) {
+                if (db == null || db.id <= 0 || db.id == batterId) continue;
+                warmOneSplit(db.id, true, season);
+                if (++warmed >= 3) break; // next three hitters is plenty of lookahead
+            }
+        }
     }
 
     private void warmOneSplit(int playerId, boolean hitting, int season) {
@@ -23065,6 +23131,8 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
 
 
     private int liveTrackerLastBatterId = 0; // v424: detect batter changes for animated handoff
+    private String liveTrackerLastResultKey = ""; // v433: detect a new AB result for a consistent reveal
+    private boolean forceResultReveal = false;    // v433: force the grand reveal this pass (event-driven)
 
     // v424: swap the tracker pager. On a batter change, do a brief crossfade + gentle slide so the
     // handoff to the next hitter reads as an intentional, premium transition rather than a flash.
