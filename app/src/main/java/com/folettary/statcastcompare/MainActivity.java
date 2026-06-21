@@ -363,6 +363,7 @@ public class MainActivity extends Activity {
     private boolean awaitingAbResult = false;     // currently bursting toward a pending AB result
     private long awaitingAbResultUntilMs = 0L;     // hard timeout so we never hang
     private int awaitingAbNumber = -1;             // which AB we're waiting on
+    private boolean liveAbPendingForBurst = false; // v442: current AB still pending → keep bursting
     private static final long BURST_POLL_MS = 700L;        // fast poll cadence while awaiting
     private static final long AWAIT_RESULT_TIMEOUT_MS = 5200L; // give up and show what we have
     private boolean liveFeedPlaysExpanded = false; // v275: play feed compact by default
@@ -861,7 +862,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v441", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v442", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20142,14 +20143,18 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                     // resolved = the AB we were awaiting now has a real (non-preliminary) result, i.e.
                     // it's no longer pending.
                     boolean resolvedNow = awaitingAbResult && awaitingAbNumber == curAbNum && !curAbPending;
-                    if (awaitingAbResult && (resolvedNow || awaitTimedOut)) {
+                    if (awaitingAbResult && resolvedNow) {
                         awaitingAbResult = false;
                         awaitingAbNumber = -1;
                     }
-                    // Suppress the tracker rebuild while the current at-bat is still pending a real
-                    // result (and we haven't timed out). This holds the prior content on screen instead
-                    // of flashing the "In play" intermediate.
-                    boolean suppressRenderThisPoll = curAbPending && !awaitTimedOut;
+                    // v442: CRITICAL — the timeout is only a safety net against the feed never resolving.
+                    // It must NOT cause us to render the "In play" intermediate, which is the whole thing
+                    // we're hiding. So: while the current at-bat is still pending (terminal pitch with no
+                    // result, or an "In play" placeholder), we ALWAYS suppress the intermediate, timeout
+                    // or not. The timeout only relaxes the fast burst-poll cadence so we don't hammer the
+                    // network forever; it never lets the placeholder through.
+                    boolean suppressRenderThisPoll = curAbPending;
+                    liveAbPendingForBurst = curAbPending;
 
                     String trackerSig = trackerStateSignature(g);
                     boolean willRebuild = !trackerSig.equals(liveTrackerRenderSig) || host.getChildCount() == 0;
@@ -20194,6 +20199,8 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                                 + " cmpl=" + (curAb != null && curAb.complete ? "Y" : "n")
                                 + " pend=" + (curAbPending ? "Y" : "n")
                                 + " supp=" + (suppressRenderThisPoll ? "Y" : "n")
+                                + " tmo=" + (awaitTimedOut ? "Y" : "n")
+                                + " dt=" + (awaitingAbResultUntilMs - now)
                                 + " resNow=" + (resolvedNow ? "Y" : "n")
                                 + " await=" + (awaitingAbResult ? "Y" : "n")
                                 + " abN=" + (curAb != null ? curAb.abNumber : -1)
@@ -20205,9 +20212,16 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                     // v412: only rebuilds when the feed actually changed (guard inside).
                     rebuildPlayFeedHost(g, false);
                     if (!g.isLive()) { stopLiveTrackerPolling(); return; }
-                    // v438: while awaiting a pending AB result, poll rapidly so the real result lands
-                    // (and renders) almost immediately; otherwise use the normal live cadence.
-                    long nextDelay = awaitingAbResult ? BURST_POLL_MS : 10000L;
+                    // v442: while the current at-bat is pending a real result, keep polling fast so it
+                    // resolves quickly. After the soft timeout we slow to a middle cadence (so we don't
+                    // hammer the network indefinitely on a stuck feed) but still poll faster than normal
+                    // until it resolves. Once resolved, normal cadence.
+                    long nextDelay;
+                    if (liveAbPendingForBurst) {
+                        nextDelay = (now >= awaitingAbResultUntilMs) ? 1500L : BURST_POLL_MS;
+                    } else {
+                        nextDelay = 10000L;
+                    }
                     main.postDelayed(liveTrackerPollRunnable, nextDelay);
                 });
             });
