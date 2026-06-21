@@ -80,6 +80,10 @@ public class MainActivity extends Activity {
     // reviewed against real data. Set back to false to restore normal behavior. (v277) =====
     static boolean DEBUG_FORCE_LIVE = true;
     static boolean DEBUG_TRACKING_WINDOW = true; // v375: show full pitch-tracking window bounds
+    static boolean DEBUG_LIVE_HUD = true; // v439: on-screen live-state readout to diagnose animations
+    private String liveHudState = "—";    // updated each poll; shown when DEBUG_LIVE_HUD is on
+    private int liveHudPollCount = 0;
+    private TextView liveHudView = null;
     private static final String PREF_TRACKING_WINDOW = "pitch_tracking_window_overlay";
     private enum StatScope { HIT_ONLY, PITCH_ONLY, BOTH }
     private static final int STATCAST_START_YEAR = 2015;
@@ -857,7 +861,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v438", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v439", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20159,6 +20163,25 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                     }
                     // v406: refresh the persistent carousel's data in place — never recreates its view.
                     updateCarouselData(g, currentTrackerAtBat(g));
+                    // v439: debug HUD — surfaces exactly what the poll decided, so we can see at runtime
+                    // why an animation did or didn't fire instead of guessing.
+                    if (DEBUG_LIVE_HUD) {
+                        liveHudPollCount++;
+                        String curRes = curAb != null ? safe(curAb.result) : "";
+                        String lp = (curAb != null && curAb.pitches != null && !curAb.pitches.isEmpty())
+                                ? safe(curAb.pitches.get(curAb.pitches.size() - 1).result) : "";
+                        liveHudState = "#" + liveHudPollCount
+                                + (liveFocusMode ? " FOCUS" : " MENU")
+                                + " bat=" + displayedBatter
+                                + " bChg=" + (batterChanged ? "Y" : "n")
+                                + " rApp=" + (resultAppeared ? "Y" : "n")
+                                + " term=" + (terminalPitch ? "Y" : "n")
+                                + " await=" + (awaitingAbResult ? "Y" : "n")
+                                + " rebuild=" + (willRebuild ? "Y" : "n")
+                                + " lastPitch=" + (lp.length() > 10 ? lp.substring(0, 10) : lp)
+                                + " res=" + (curRes.length() > 12 ? curRes.substring(0, 12) : curRes);
+                        if (liveHudView != null) liveHudView.setText("HUD: " + liveHudState);
+                    }
                     // v412: only rebuilds when the feed actually changed (guard inside).
                     rebuildPlayFeedHost(g, false);
                     if (!g.isLive()) { stopLiveTrackerPolling(); return; }
@@ -25682,6 +25705,11 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
             activeLiveTrackerHost = trackerHost;
             liveTrackerRenderSig = ""; // v412: force first render
             liveFeedRenderSig = "";
+            if (DEBUG_LIVE_HUD) {
+                liveHudView = text("HUD: " + liveHudState, 8, Color.rgb(255, 120, 120), true);
+                liveHudView.setPadding(dp(8), dp(2), dp(8), dp(2));
+                panel.addView(liveHudView, matchWrap());
+            }
 
             if (!"Final".equals(game.statusLabel())) {
                 FrameLayout carouselHost = new FrameLayout(this);
