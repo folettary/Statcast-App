@@ -848,7 +848,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v416", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v417", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -21741,13 +21741,19 @@ private View liveGameCard(LiveGame game, int slateIndex) {
         // v401: stamp a per-player subject so that when the batter or pitcher changes, that player's
         // cards become distinct IDs — the old player's cards crawl off the tail and the new player's
         // crawl in, instead of swapping content in place (which read as a flash).
-        String batSubj = batLast.isEmpty() ? "" : ("B" + (game.sitBatterId > 0 ? game.sitBatterId : 0) + ":" + batLast);
-        String pitSubj = pitLast.isEmpty() ? "" : ("P" + (game.sitPitcherId > 0 ? game.sitPitcherId : 0) + ":" + pitLast);
+        String batSubj = ("B" + (game.sitBatterId > 0 ? game.sitBatterId : 0));
+        String pitSubj = ("P" + (game.sitPitcherId > 0 ? game.sitPitcherId : 0));
         for (GameContextCard c : cards) {
             c.contextSig = sig;
-            String head = safe(c.headline);
-            if (!batLast.isEmpty() && head.contains(batLast)) c.subject = batSubj;
-            else if (!pitLast.isEmpty() && head.contains(pitLast)) c.subject = pitSubj;
+            // v417: assign the subject by the card's ACCENT, which reliably identifies whose card it
+            // is — batAccent = the hitter, defAccent = the pitcher. The old approach matched the
+            // player's last name inside the headline, which silently failed for any card that didn't
+            // print the name, leaving those cards subject-less. Then on a batter change the new
+            // hitter's card collapsed onto the old slot and its CONTENT swapped in place (the
+            // "replaced while visible" you saw). Tying the subject to the player id makes each
+            // player's card a distinct slot, so the old one gracefully exits and the new one enters.
+            if (c.accent == batAccent && game.sitBatterId > 0) c.subject = batSubj;
+            else if (c.accent == defAccent && game.sitPitcherId > 0) c.subject = pitSubj;
         }
         return cards;
     }
