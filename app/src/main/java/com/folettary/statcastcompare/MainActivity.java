@@ -848,7 +848,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v427", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v429", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -1726,6 +1726,23 @@ public class MainActivity extends Activity {
 
     private LiveGame pickFeaturedHomeGame(ArrayList<LiveGame> games) {
         if (games == null || games.isEmpty()) return null;
+        // v429: prefer a favorite team's game as the home hero — a live one first, otherwise any game
+        // involving a favorite — so opening the app puts your team front and center. Falls back to the
+        // normal "live, else not-final, else first" logic when no favorite is on today's slate.
+        java.util.Set<Integer> favIds = favoriteTeamIdSet();
+        if (!favIds.isEmpty()) {
+            for (LiveGame game : games) {
+                if (game != null && gameInvolvesFavorite(game, favIds)
+                        && safe(game.abstractState).toLowerCase(Locale.US).contains("live")) return game;
+            }
+            for (LiveGame game : games) {
+                if (game != null && gameInvolvesFavorite(game, favIds)
+                        && !safe(game.abstractState).toLowerCase(Locale.US).contains("final")) return game;
+            }
+            for (LiveGame game : games) {
+                if (game != null && gameInvolvesFavorite(game, favIds)) return game;
+            }
+        }
         for (LiveGame game : games) {
             if (game != null && safe(game.abstractState).toLowerCase(Locale.US).contains("live")) return game;
         }
@@ -18503,10 +18520,61 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
             empty.setBackground(roundedStroke(Color.argb(76, 8, 13, 22), Color.argb(52, 255, 255, 255), 14, 1));
             panel.addView(empty, matchWrap());
         } else {
-            LinearLayout grid = new LinearLayout(this);
-            grid.setOrientation(LinearLayout.VERTICAL);
+            // v429: split favorited-team games into a dedicated "MY TEAMS" strip pulled OUT of the main
+            // slate, so they're elevated and never shown twice. The remaining games render in the
+            // normal two-up grid below. We preserve each game's original slate index so taps and edge
+            // previews still resolve to the right game.
+            java.util.Set<Integer> favIds = favoriteTeamIdSet();
+            ArrayList<LiveGame> favGames = new ArrayList<>();
+            ArrayList<Integer> favIndexes = new ArrayList<>();
+            ArrayList<LiveGame> restGames = new ArrayList<>();
+            ArrayList<Integer> restIndexes = new ArrayList<>();
+            for (int gi = 0; gi < games.size(); gi++) {
+                LiveGame g = games.get(gi);
+                if (gameInvolvesFavorite(g, favIds)) { favGames.add(g); favIndexes.add(gi); }
+                else { restGames.add(g); restIndexes.add(gi); }
+            }
+
+            if (!favGames.isEmpty()) {
+                LinearLayout myTeamsHeader = new LinearLayout(this);
+                myTeamsHeader.setOrientation(LinearLayout.HORIZONTAL);
+                myTeamsHeader.setGravity(Gravity.CENTER_VERTICAL);
+                LinearLayout.LayoutParams mthLp = matchWrap();
+                mthLp.setMargins(0, dp(10), 0, dp(2));
+                TextView star = text("★", 11, Color.rgb(244, 192, 54), true);
+                star.setPadding(0, 0, dp(5), 0);
+                myTeamsHeader.addView(star);
+                TextView myTeams = text("MY TEAMS", 10, Color.rgb(244, 192, 54), true);
+                myTeams.setLetterSpacing(0.12f);
+                myTeamsHeader.addView(myTeams);
+                panel.addView(myTeamsHeader, mthLp);
+
+                // favorites render full-width (one per row) so they read as the elevated, richer slot
+                for (int fi = 0; fi < favGames.size(); fi++) {
+                    LinearLayout.LayoutParams favLp = new LinearLayout.LayoutParams(-1, dp(140));
+                    favLp.setMargins(0, dp(6), 0, 0);
+                    panel.addView(liveGameCard(favGames.get(fi), favIndexes.get(fi)), favLp);
+                }
+
+                // a thin divider before the rest of the slate
+                View divider = new View(this);
+                divider.setBackgroundColor(Color.argb(40, 255, 255, 255));
+                LinearLayout.LayoutParams divLp = new LinearLayout.LayoutParams(-1, Math.max(1, dp(1)));
+                divLp.setMargins(0, dp(12), 0, dp(2));
+                panel.addView(divider, divLp);
+
+                if (!restGames.isEmpty()) {
+                    TextView restLabel = text("ALL GAMES", 10, INK_DIM, true);
+                    restLabel.setLetterSpacing(0.12f);
+                    LinearLayout.LayoutParams rlLp = matchWrap();
+                    rlLp.setMargins(0, dp(6), 0, dp(2));
+                    panel.addView(restLabel, rlLp);
+                }
+            }
+
+            // remaining games in the normal two-up grid, preserving original slate indexes
             int i = 0;
-            while (i < games.size()) {
+            while (i < restGames.size()) {
                 LinearLayout row = new LinearLayout(this);
                 row.setOrientation(LinearLayout.HORIZONTAL);
                 LinearLayout.LayoutParams rowLp = matchWrap();
@@ -18514,11 +18582,11 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 panel.addView(row, rowLp);
 
                 LinearLayout.LayoutParams leftLp = new LinearLayout.LayoutParams(0, dp(140), 1);
-                row.addView(liveGameCard(games.get(i), i), leftLp);
-                if (i + 1 < games.size()) {
+                row.addView(liveGameCard(restGames.get(i), restIndexes.get(i)), leftLp);
+                if (i + 1 < restGames.size()) {
                     LinearLayout.LayoutParams rightLp = new LinearLayout.LayoutParams(0, dp(140), 1);
                     rightLp.setMargins(dp(7), 0, 0, 0);
-                    row.addView(liveGameCard(games.get(i + 1), i + 1), rightLp);
+                    row.addView(liveGameCard(restGames.get(i + 1), restIndexes.get(i + 1)), rightLp);
                 } else {
                     Space spacer = new Space(this);
                     LinearLayout.LayoutParams rightLp = new LinearLayout.LayoutParams(0, dp(140), 1);
@@ -18742,11 +18810,19 @@ private View liveGameCard(LiveGame game, int slateIndex) {
     status.setPadding(dp(7), dp(3), dp(7), dp(3));
     status.setBackground(roundedStroke(Color.argb(94, 8, 13, 22), Color.argb(120, Color.red(statusColor), Color.green(statusColor), Color.blue(statusColor)), 12, 1));
     top.addView(status);
+    // v428: favorite-team controls on the slate card. A gold filled star = already a favorite. Tap a
+    // team's star to toggle it; favorited teams sort to the top of their status tier and are starred
+    // here and in the matchup header. These are separate click targets from the card body.
+    final Team slateAway = away, slateHome = home;
+    Space favSpacer = new Space(this);
+    top.addView(favSpacer, new LinearLayout.LayoutParams(0, dp(1), 1));
+    if (slateAway != null) top.addView(buildTeamFavStar(game.awayTeamId, displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr), slateAway));
+    if (slateHome != null) top.addView(buildTeamFavStar(game.homeTeamId, displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr), slateHome));
     TextView time = text(game.isPregame() ? game.timeLabel() : "", 9, Color.argb(232, 247, 249, 252), true);
     time.setGravity(Gravity.RIGHT);
     time.setSingleLine(true);
     time.setShadowLayer(dp(1.8f), 0, dp(1), Color.argb(150, 0, 0, 0));
-    top.addView(time, new LinearLayout.LayoutParams(0, -2, 1));
+    top.addView(time, new LinearLayout.LayoutParams(-2, -2));
     content.addView(top, matchWrap());
 
     // Two-column score row: away (left) · @ · home (right), each with team-color underline.
@@ -24944,6 +25020,42 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         if (mainScroll != null) mainScroll.post(() -> mainScroll.scrollTo(0, 0));
     }
 
+    // v428: a compact "★ ABBR" toggle that favorites/unfavorites a team. Gold + filled star when
+    // favorited, dim + hollow otherwise. Tapping re-renders so the slate/matchup reorders and the
+    // star state updates immediately.
+    private View buildTeamFavStar(final int teamId, String abbr, final Team team) {
+        boolean fav = isFavoriteTeam(teamId);
+        TextView chip = text((fav ? "★ " : "☆ ") + safe(abbr), 9, fav ? Color.rgb(244, 192, 54) : INK_DIM, true);
+        chip.setGravity(Gravity.CENTER);
+        chip.setSingleLine(true);
+        chip.setPadding(dp(7), dp(4), dp(7), dp(4));
+        chip.setBackground(roundedStroke(
+                Color.argb(fav ? 30 : 16, 244, 192, 54),
+                Color.argb(fav ? 110 : 50, 244, 192, 54), 999, 1));
+        chip.setForeground(ripple(true));
+        chip.setClickable(true);
+        chip.setContentDescription((fav ? "Unfavorite " : "Favorite ") + safe(abbr));
+        chip.setOnClickListener(v -> {
+            boolean nowFav = toggleFavoriteTeam(team);
+            Toast.makeText(this, nowFav ? (safe(abbr) + " added to favorites") : (safe(abbr) + " removed from favorites"), Toast.LENGTH_SHORT).show();
+            rebuildHomeFavorites();
+            // re-render whichever surface is showing so the new ordering + star state take effect. We
+            // re-sort the cached slate and render from it (no network refetch) for an instant update.
+            if (activeLiveGameMenu != null && activePrimaryTab == TAB_MATCHUP && standingsBox != null && standingsBox.getVisibility() == View.VISIBLE && !"matchups".equals(gameHubTab)) {
+                renderLiveGameMenu(activeLiveGameMenu);
+            } else if (lastRenderedSlate != null && activePrimaryTab == TAB_MATCHUP && matchupPathMode == MATCHUP_PATH_LIVE && !matchupResultMode) {
+                sortGamesByStatus(lastRenderedSlate);
+                renderLiveMatchupGames(lastRenderedSlate);
+            } else {
+                renderLiveMatchupsPanel();
+            }
+        });
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+        lp.setMargins(dp(4), 0, 0, 0);
+        chip.setLayoutParams(lp);
+        return chip;
+    }
+
     private void renderLiveGameMenu(LiveGame game) {
         if (standingsBox == null || activePrimaryTab != TAB_MATCHUP) return;
         if (liveFocusMode && game != null && game.isLive()) {
@@ -25000,6 +25112,11 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         top.addView(back);
         Space refreshSpacer = new Space(this);
         top.addView(refreshSpacer, new LinearLayout.LayoutParams(0, dp(1), 1));
+        // v428: favorite-team toggles right in the matchup header. Tap a team's star to favorite it;
+        // favorited teams sort to the top of the slate and matchups and show a gold star there.
+        final Team favAway = away, favHome = home;
+        if (favAway != null) top.addView(buildTeamFavStar(game.awayTeamId, displayGameAbbr(game.awayTeamId, game.awayName, game.awayAbbr), favAway));
+        if (favHome != null) top.addView(buildTeamFavStar(game.homeTeamId, displayGameAbbr(game.homeTeamId, game.homeName, game.homeAbbr), favHome));
         TextView livePill = text(game.isPregame() ? "GAME FEED" : "LIVE FEED", 9, game.isPregame() ? INK_DIM : Color.rgb(82, 226, 176), true);
         livePill.setGravity(Gravity.CENTER);
         livePill.setSingleLine(true);
@@ -30394,11 +30511,37 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         return out;
     }
 
-    // v329: order the slate so live action is always on top:
-    //   1 in progress / delayed, 2 not started, 3 final, 4 postponed. Ties keep schedule order.
+    // v428: order the slate so live action is on top, AND favorited teams float up within each
+    // status tier. Primary key = status (live, upcoming, final, postponed). Secondary key = whether
+    // the game involves one of your favorite teams. So a live game is still above an upcoming one,
+    // but among games of the same status, your teams come first. Ties keep schedule order.
     private void sortGamesByStatus(ArrayList<LiveGame> games) {
         if (games == null) return;
-        java.util.Collections.sort(games, (a, b) -> Integer.compare(gameStatusRank(a), gameStatusRank(b)));
+        final java.util.Set<Integer> favIds = favoriteTeamIdSet();
+        java.util.Collections.sort(games, (a, b) -> {
+            int rs = Integer.compare(gameStatusRank(a), gameStatusRank(b));
+            if (rs != 0) return rs;
+            int fa = gameInvolvesFavorite(a, favIds) ? 0 : 1;
+            int fb = gameInvolvesFavorite(b, favIds) ? 0 : 1;
+            return Integer.compare(fa, fb);
+        });
+    }
+
+    // lightweight id-only favorite-team lookup (avoids resolving full Team objects during a sort)
+    private java.util.Set<Integer> favoriteTeamIdSet() {
+        java.util.HashSet<Integer> out = new java.util.HashSet<>();
+        SharedPreferences prefs = getSharedPreferences(PREFS_FAVORITES, MODE_PRIVATE);
+        for (int i = 0; i < MAX_FAVORITES; i++) {
+            String idStr = prefs.getString("ftid_" + i, null);
+            if (idStr == null) continue;
+            try { out.add(Integer.parseInt(idStr)); } catch (Exception ignored) {}
+        }
+        return out;
+    }
+
+    private boolean gameInvolvesFavorite(LiveGame g, java.util.Set<Integer> favIds) {
+        if (g == null || favIds == null || favIds.isEmpty()) return false;
+        return favIds.contains(g.awayTeamId) || favIds.contains(g.homeTeamId);
     }
     private int gameStatusRank(LiveGame g) {
         if (g == null) return 5;
