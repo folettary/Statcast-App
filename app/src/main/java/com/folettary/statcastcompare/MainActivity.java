@@ -863,7 +863,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v444", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v445", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -24873,7 +24873,7 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                 int inn = (innings.size() == n && innings.get(si) > 0) ? innings.get(si) : -1;
                 String line1 = who + " " + pct + "%" + (inn > 0 ? "  ·  " + ordinalNum(inn) + " inn" : "");
 
-                p.setTextSize(sp(11)); p.setFakeBoldText(true);
+                p.setTextSize(dp(11)); p.setFakeBoldText(true);
                 float bw = p.measureText(line1) + dp(16);
                 float bh = dp(26);
                 float bx = Math.max(plotL, Math.min(sx - bw / 2f, plotR - bw));
@@ -24886,7 +24886,7 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                 p.setColor(Color.argb(90, 255, 255, 255));
                 canvas.drawRoundRect(bub, dp(8), dp(8), p);
                 p.setStyle(Paint.Style.FILL);
-                p.setColor(Color.WHITE); p.setTextSize(sp(11)); p.setFakeBoldText(true);
+                p.setColor(Color.WHITE); p.setTextSize(dp(11)); p.setFakeBoldText(true);
                 canvas.drawText(line1, bx + dp(8), by + dp(17), p);
             }
         }
