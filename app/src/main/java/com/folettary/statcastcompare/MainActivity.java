@@ -863,7 +863,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v443", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v444", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20244,6 +20244,57 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
         main.removeCallbacks(liveTrackerPollRunnable);
     }
 
+    // v444: a polished loading placeholder shown the instant you enter the live feed, so there's never
+    // an empty box snapping to content. A soft team-tinted card with a gently pulsing "LOADING" pip —
+    // calm and intentional rather than a spinner. Cross-faded out when the real tracker arrives.
+    private View buildTrackerLoadingState(TeamPalette awayPalette, TeamPalette homePalette) {
+        FrameLayout wrap = new FrameLayout(this);
+        wrap.setLayoutParams(new FrameLayout.LayoutParams(-1, -1));
+
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setGravity(Gravity.CENTER);
+        FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams(-1, -1);
+        wrap.addView(col, clp);
+
+        // three pulsing pips in the team accent, staggered, reading as "live data incoming"
+        LinearLayout pips = new LinearLayout(this);
+        pips.setOrientation(LinearLayout.HORIZONTAL);
+        pips.setGravity(Gravity.CENTER);
+        int accent = awayPalette != null ? awayPalette.primary : Color.rgb(120, 170, 255);
+        for (int i = 0; i < 3; i++) {
+            View pip = new View(this);
+            android.graphics.drawable.GradientDrawable g = new android.graphics.drawable.GradientDrawable();
+            g.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+            g.setColor(accent);
+            pip.setBackground(g);
+            LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(dp(9), dp(9));
+            plp.setMargins(dp(5), 0, dp(5), 0);
+            pips.addView(pip, plp);
+            pip.setAlpha(0.3f);
+            pip.animate().alpha(1f).setStartDelay(i * 160L).setDuration(520)
+                    .withEndAction(new Runnable() {
+                        @Override public void run() {
+                            pip.animate().alpha(0.3f).setDuration(520)
+                                .withEndAction(new Runnable() {
+                                    @Override public void run() {
+                                        if (pip.getParent() != null)
+                                            pip.animate().alpha(1f).setDuration(520).withEndAction(this).start();
+                                    }
+                                }).start();
+                        }
+                    }).start();
+        }
+        col.addView(pips, matchWrap());
+
+        TextView label = text("LOADING LIVE DATA", 9, INK_DIM, true);
+        label.setLetterSpacing(0.18f);
+        LinearLayout.LayoutParams llp = matchWrap();
+        llp.setMargins(0, dp(14), 0, 0);
+        col.addView(label, llp);
+        return wrap;
+    }
+
     private void loadLiveTracker(LiveGame game, LinearLayout host, TeamPalette awayPalette, TeamPalette homePalette) {
         if (game == null || host == null || !game.isLive()) return;
         io.execute(() -> {
@@ -20257,10 +20308,21 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                 activeLiveTrackerAwayPal = awayPalette;
                 activeLiveTrackerHomePal = homePalette;
                 refreshActiveLiveScoreHero(game);
-                host.removeAllViews();
+                // v444: cross-fade from the loading placeholder to the real tracker instead of an
+                // abrupt removeAllViews/add. Fade the loading out, then fade the content in.
+                final View loadingView = host.getChildCount() > 0 ? host.getChildAt(0) : null;
                 liveUpdateRebuild = true;
-                host.addView(buildTrackerPager(game), matchWrap());
+                final View pager = buildTrackerPager(game);
                 liveUpdateRebuild = false;
+                pager.setAlpha(0f);
+                host.addView(pager, matchWrap());
+                if (loadingView != null) {
+                    loadingView.animate().alpha(0f).setDuration(160).withEndAction(() -> {
+                        if (loadingView.getParent() == host) host.removeView(loadingView);
+                    }).start();
+                }
+                pager.animate().alpha(1f).setStartDelay(120).setDuration(280)
+                        .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
                 updateCarouselData(game, currentTrackerAtBat(game)); // v406: fill carousel once data is in
                 rebuildPlayFeedHost(game, true); // v412: initial render
                 if (liveFocusMode && mainScroll != null) main.post(() -> mainScroll.scrollTo(0, 0));
@@ -20269,7 +20331,7 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                 // so the reserved box is exactly right (no guessed pixel height, no bottom gap, no
                 // clip). Once locked, the host never changes size, so the carousel and play feed below
                 // never move regardless of what re-renders inside the tracker.
-                final View mountedPager = host.getChildCount() > 0 ? host.getChildAt(0) : null;
+                final View mountedPager = pager;
                 if (mountedPager != null) {
                     mountedPager.getViewTreeObserver().addOnGlobalLayoutListener(
                         new android.view.ViewTreeObserver.OnGlobalLayoutListener() {
@@ -20277,23 +20339,16 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                                 int h = mountedPager.getHeight();
                                 if (h > 0) {
                                     mountedPager.getViewTreeObserver().removeOnGlobalLayoutListener(this);
-                                    if (host.getLayoutParams() != null && host.getLayoutParams().height != h) {
-                                        host.getLayoutParams().height = h;
+                                    // hold the real measured height as the floor so the host never
+                                    // collapses on a later rebuild (anti-reflow), without ever clipping.
+                                    lockedTrackerHostH = h;
+                                    if (host.getMinimumHeight() != h) {
+                                        host.setMinimumHeight(h);
                                         host.requestLayout();
-                                        lockedTrackerHostH = h;
                                     }
                                 }
                             }
                         });
-                }
-                // v437: fade just the freshly-mounted tracker content in. The host already reserved its
-                // height, so this fades content into place without the layout reflow that shoved the
-                // carousel down.
-                View mounted = host.getChildCount() > 0 ? host.getChildAt(0) : null;
-                if (mounted != null) {
-                    mounted.setAlpha(0f);
-                    mounted.animate().alpha(1f).setDuration(240)
-                            .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
                 }
             });
         });
@@ -24613,6 +24668,9 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
         private final String awayAbbr, homeAbbr;
         private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
         private Bitmap awayLogo, homeLogo;
+        private float[] xs = null, ys = null; // v444: cached plotted points for the scrubber
+        private float midYcache = 0;
+        private int scrubIndex = -1;          // v444: index the user is scrubbing to, -1 = none
 
         WinProbChartView(android.content.Context ctx, java.util.ArrayList<Float> homeSeries,
                          java.util.ArrayList<Integer> innings, java.util.ArrayList<Float> swings,
@@ -24638,6 +24696,7 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
             float plotL = gutterL, plotR = w - padR;
             float plotW = plotR - plotL, plotH = h - padTop - padBottom;
             float midY = padTop + plotH / 2f;
+            midYcache = midY;
 
             // Helper: away-advantage value (0..100, where 50=even, >50 favors away) → y.
             // Away dominates the TOP half, home the BOTTOM half.
@@ -24711,7 +24770,7 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
             // Map play index → y. awayAdv = 100 - homeWin%. y above center when away leads.
             // y = midY - (awayAdv-50)/50 * (plotH/2).
             float halfH = plotH / 2f;
-            float[] xs = new float[n], ys = new float[n];
+            xs = new float[n]; ys = new float[n];
             for (int i = 0; i < n; i++) {
                 float homeWin = Math.max(0f, Math.min(100f, homeSeries.get(i)));
                 float awayAdv = 100f - homeWin; // >50 favors away
@@ -24785,6 +24844,74 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
             canvas.drawCircle(xs[n - 1], ys[n - 1], dp(3.2f), p);
             p.setColor(Color.argb(255, Color.red(endColor), Color.green(endColor), Color.blue(endColor)));
             canvas.drawCircle(xs[n - 1], ys[n - 1], dp(2f), p);
+
+            // v444: scrubber — when the user touches/drags the chart, draw a vertical guide at the
+            // nearest data point with a readout bubble showing that point's exact win probability,
+            // inning, and play. This makes every point readable ("what was the WP in the 8th?")
+            // instead of relying on a few gridlines.
+            if (scrubIndex >= 0 && scrubIndex < n) {
+                int si = scrubIndex;
+                float sx = xs[si], sy = ys[si];
+                p.setStyle(Paint.Style.STROKE);
+                p.setStrokeWidth(dp(1f));
+                p.setColor(Color.argb(120, 255, 255, 255));
+                canvas.drawLine(sx, padTop, sx, padTop + plotH, p);
+                // marker dot
+                p.setStyle(Paint.Style.FILL);
+                p.setColor(Color.WHITE);
+                canvas.drawCircle(sx, sy, dp(4f), p);
+                int leadColor = sy <= midYcache ? awayColor : homeColor;
+                p.setColor(leadColor);
+                canvas.drawCircle(sx, sy, dp(2.5f), p);
+
+                // readout bubble
+                float homeWin = Math.max(0f, Math.min(100f, homeSeries.get(si)));
+                float awayWin = 100f - homeWin;
+                boolean awayLeads = awayWin >= homeWin;
+                String who = awayLeads ? safe(awayAbbr) : safe(homeAbbr);
+                int pct = Math.round(awayLeads ? awayWin : homeWin);
+                int inn = (innings.size() == n && innings.get(si) > 0) ? innings.get(si) : -1;
+                String line1 = who + " " + pct + "%" + (inn > 0 ? "  ·  " + ordinalNum(inn) + " inn" : "");
+
+                p.setTextSize(sp(11)); p.setFakeBoldText(true);
+                float bw = p.measureText(line1) + dp(16);
+                float bh = dp(26);
+                float bx = Math.max(plotL, Math.min(sx - bw / 2f, plotR - bw));
+                float by = padTop + dp(4);
+                p.setStyle(Paint.Style.FILL);
+                p.setColor(Color.argb(235, 18, 24, 34));
+                android.graphics.RectF bub = new android.graphics.RectF(bx, by, bx + bw, by + bh);
+                canvas.drawRoundRect(bub, dp(8), dp(8), p);
+                p.setStyle(Paint.Style.STROKE); p.setStrokeWidth(dp(1f));
+                p.setColor(Color.argb(90, 255, 255, 255));
+                canvas.drawRoundRect(bub, dp(8), dp(8), p);
+                p.setStyle(Paint.Style.FILL);
+                p.setColor(Color.WHITE); p.setTextSize(sp(11)); p.setFakeBoldText(true);
+                canvas.drawText(line1, bx + dp(8), by + dp(17), p);
+            }
+        }
+
+        @Override public boolean onTouchEvent(android.view.MotionEvent ev) {
+            if (xs == null || xs.length == 0) return super.onTouchEvent(ev);
+            int action = ev.getActionMasked();
+            if (action == android.view.MotionEvent.ACTION_DOWN
+                    || action == android.view.MotionEvent.ACTION_MOVE) {
+                getParent().requestDisallowInterceptTouchEvent(true); // let me scrub without the page scrolling
+                float tx = ev.getX();
+                int best = 0; float bestD = Float.MAX_VALUE;
+                for (int i = 0; i < xs.length; i++) {
+                    float d = Math.abs(xs[i] - tx);
+                    if (d < bestD) { bestD = d; best = i; }
+                }
+                if (best != scrubIndex) { scrubIndex = best; invalidate(); }
+                return true;
+            } else if (action == android.view.MotionEvent.ACTION_UP
+                    || action == android.view.MotionEvent.ACTION_CANCEL) {
+                getParent().requestDisallowInterceptTouchEvent(false);
+                scrubIndex = -1; invalidate();
+                return true;
+            }
+            return super.onTouchEvent(ev);
         }
 
         private void drawLogoWatermark(Canvas canvas, Bitmap logo, float cx, float cy, int size) {
@@ -25759,17 +25886,22 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
             // and play-feed hosts rebuild on poll; the carousel between them is never destroyed.
             LinearLayout trackerHost = new LinearLayout(this);
             trackerHost.setOrientation(LinearLayout.VERTICAL);
-            // v443: give the tracker a FIXED height equal to its real content height, not a min-height.
-            // The pager's pieces are all constant height (header + pitch zone dp(293) + result slot
-            // dp(126) + margins), so a fixed box means the carousel and play feed BELOW it never move —
-            // no matter what renders inside the tracker (result card appearing, zone redrawing, await
-            // holds). This is the root fix for "the context cards jump around whenever anything renders":
-            // the tracker was wrap-content, so its height changed and shoved everything beneath it.
-            int trackerFixedH = dp(508);
-            LinearLayout.LayoutParams thLp = new LinearLayout.LayoutParams(-1, trackerFixedH);
+            // v444: the tracker host is wrap-content (so it NEVER clips the result card — the v443 fixed
+            // 508dp was too short and cut it off), but we hold a min-height equal to the real measured
+            // pager height so it never COLLAPSES smaller either. Net: the host is exactly the pager's
+            // natural height and stays there, so the carousel/play feed below never reflow, and nothing
+            // is clipped. The min-height is seeded from the last lock and refined after first layout.
+            LinearLayout.LayoutParams thLp = matchWrap();
             thLp.setMargins(dp(4), 0, dp(4), dp(2));
+            if (lockedTrackerHostH > 0) trackerHost.setMinimumHeight(lockedTrackerHostH);
+            else trackerHost.setMinimumHeight(dp(508)); // initial reservation to avoid the empty→full jump
             panel.addView(trackerHost, thLp);
             activeLiveTrackerHost = trackerHost;
+            // v444: show a polished loading state immediately so entering the live feed never shows an
+            // empty box that then snaps to content. The pulsing placeholder fills the reserved height
+            // and is cross-faded out when the real tracker mounts (in loadLiveTracker).
+            trackerHost.addView(buildTrackerLoadingState(awayPalette, homePalette),
+                    new LinearLayout.LayoutParams(-1, -1));
             liveTrackerRenderSig = ""; // v412: force first render
             liveFeedRenderSig = "";
             if (DEBUG_LIVE_HUD) {
