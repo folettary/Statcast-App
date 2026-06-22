@@ -364,6 +364,7 @@ public class MainActivity extends Activity {
     private long awaitingAbResultUntilMs = 0L;     // hard timeout so we never hang
     private int awaitingAbNumber = -1;             // which AB we're waiting on
     private boolean liveAbPendingForBurst = false; // v442: current AB still pending → keep bursting
+    private int lockedTrackerHostH = 0;             // v443: real measured tracker height (anti-reflow)
     private static final long BURST_POLL_MS = 700L;        // fast poll cadence while awaiting
     private static final long AWAIT_RESULT_TIMEOUT_MS = 5200L; // give up and show what we have
     private boolean liveFeedPlaysExpanded = false; // v275: play feed compact by default
@@ -862,7 +863,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v442", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v443", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -1297,6 +1298,7 @@ public class MainActivity extends Activity {
         stopLiveTrackerPolling(); // v273: left the game; stop the live feed loop
         activeLiveTrackerGame = null;
         activeLiveTrackerHost = null;
+        lockedTrackerHostH = 0;
         liveTrackerLastBatterId = 0;
         activeCarouselHost = null;
         activeCarouselTicker = null;
@@ -20263,6 +20265,27 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                 rebuildPlayFeedHost(game, true); // v412: initial render
                 if (liveFocusMode && mainScroll != null) main.post(() -> mainScroll.scrollTo(0, 0));
                 host.setVisibility(View.VISIBLE);
+                // v443: lock the tracker host to the pager's REAL measured height after first layout,
+                // so the reserved box is exactly right (no guessed pixel height, no bottom gap, no
+                // clip). Once locked, the host never changes size, so the carousel and play feed below
+                // never move regardless of what re-renders inside the tracker.
+                final View mountedPager = host.getChildCount() > 0 ? host.getChildAt(0) : null;
+                if (mountedPager != null) {
+                    mountedPager.getViewTreeObserver().addOnGlobalLayoutListener(
+                        new android.view.ViewTreeObserver.OnGlobalLayoutListener() {
+                            @Override public void onGlobalLayout() {
+                                int h = mountedPager.getHeight();
+                                if (h > 0) {
+                                    mountedPager.getViewTreeObserver().removeOnGlobalLayoutListener(this);
+                                    if (host.getLayoutParams() != null && host.getLayoutParams().height != h) {
+                                        host.getLayoutParams().height = h;
+                                        host.requestLayout();
+                                        lockedTrackerHostH = h;
+                                    }
+                                }
+                            }
+                        });
+                }
                 // v437: fade just the freshly-mounted tracker content in. The host already reserved its
                 // height, so this fades content into place without the layout reflow that shoved the
                 // carousel down.
@@ -25736,13 +25759,15 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
             // and play-feed hosts rebuild on poll; the carousel between them is never destroyed.
             LinearLayout trackerHost = new LinearLayout(this);
             trackerHost.setOrientation(LinearLayout.VERTICAL);
-            // v437: reserve the tracker's height up front instead of starting GONE. Starting GONE meant
-            // the host had zero height, so when the feed loaded and the tracker mounted it EXPANDED and
-            // shoved the carousel and play feed down — the "everything jumps around and pushes the
-            // carousel down" the user saw. A reserved min-height holds the space so content fades into
-            // place without reflowing the layout.
-            trackerHost.setMinimumHeight(dp(286));
-            LinearLayout.LayoutParams thLp = matchWrap(); thLp.setMargins(dp(4), 0, dp(4), dp(2));
+            // v443: give the tracker a FIXED height equal to its real content height, not a min-height.
+            // The pager's pieces are all constant height (header + pitch zone dp(293) + result slot
+            // dp(126) + margins), so a fixed box means the carousel and play feed BELOW it never move —
+            // no matter what renders inside the tracker (result card appearing, zone redrawing, await
+            // holds). This is the root fix for "the context cards jump around whenever anything renders":
+            // the tracker was wrap-content, so its height changed and shoved everything beneath it.
+            int trackerFixedH = dp(508);
+            LinearLayout.LayoutParams thLp = new LinearLayout.LayoutParams(-1, trackerFixedH);
+            thLp.setMargins(dp(4), 0, dp(4), dp(2));
             panel.addView(trackerHost, thLp);
             activeLiveTrackerHost = trackerHost;
             liveTrackerRenderSig = ""; // v412: force first render
