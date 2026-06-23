@@ -871,7 +871,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v451", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v452", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20685,6 +20685,10 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
         // ---- Strike zone + pitch list for the selected at-bat ----
         if (ab != null) {
             final int fidx = idx;
+            // v450: liveAb tells the zone/event-slot sections whether this card is the live AB (vs a
+            // browsed past AB). Its declaration moved out of the matchup row when the count/bases/outs
+            // block was extracted into buildCountCenter, so it's re-declared here for this scope.
+            boolean liveAb = feed != null && idx == feed.atBats.size() - 1;
             // AB navigation header — cleaner than bare arrows. Swipe the zone to move between ABs;
             // a dots strip shows position; a prominent pill returns to the live AB when browsing.
             LinearLayout abNav = new LinearLayout(this);
