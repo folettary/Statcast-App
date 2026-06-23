@@ -870,7 +870,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v447", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v448", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -1307,7 +1307,7 @@ public class MainActivity extends Activity {
         activeLiveTrackerHost = null;
         lockedTrackerHostH = 0;
         trackerHeaderSig = ""; trackerZoneSig = ""; trackerSlotSig = "";
-        lastSlotInPlaceKey = "";
+        lastSlotInPlaceKey = Integer.MIN_VALUE;
         liveTrackerLastBatterId = 0;
         activeCarouselHost = null;
         activeCarouselTicker = null;
@@ -20439,7 +20439,7 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
 
     private static class EventSlotContent { View child; int key; boolean isResult; }
 
-    private String lastSlotInPlaceKey = "";
+    private int lastSlotInPlaceKey = Integer.MIN_VALUE;
 
     // v447: compute the event/result slot content for the current LIVE at-bat, mirroring the logic in
     // the card builder but standalone so the poll can refresh just the slot. Returns null if the slot
