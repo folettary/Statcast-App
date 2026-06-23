@@ -372,7 +372,8 @@ public class MainActivity extends Activity {
     private FrameLayout activeTrackerZoneHost = null;
     private FrameLayout activeTrackerSlotHost = null;
     private FrameLayout activeTrackerCenterHost = null; // v450: count/bases/outs block
-    private String trackerHeaderSig = "", trackerZoneSig = "", trackerSlotSig = "", trackerCenterSig = "";
+    private FrameLayout activeTrackerZoneHost = null;   // v454: pitch zone + legend region
+    private String trackerHeaderSig = "", trackerZoneSig = "", trackerSlotSig = "", trackerCenterSig = "", trackerZoneRegionSig = "";
     private static final long BURST_POLL_MS = 700L;        // fast poll cadence while awaiting
     private static final long AWAIT_RESULT_TIMEOUT_MS = 5200L; // give up and show what we have
     private boolean liveFeedPlaysExpanded = false; // v275: play feed compact by default
@@ -871,7 +872,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v453", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v454", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -1307,8 +1308,9 @@ public class MainActivity extends Activity {
         activeLiveTrackerGame = null;
         activeLiveTrackerHost = null;
         lockedTrackerHostH = 0;
-        trackerHeaderSig = ""; trackerZoneSig = ""; trackerSlotSig = ""; trackerCenterSig = "";
+        trackerHeaderSig = ""; trackerZoneSig = ""; trackerSlotSig = ""; trackerCenterSig = ""; trackerZoneRegionSig = "";
         activeTrackerCenterHost = null;
+        activeTrackerZoneHost = null;
         lastSlotInPlaceKey = Integer.MIN_VALUE;
         liveTrackerLastBatterId = 0;
         activeCarouselHost = null;
@@ -20213,6 +20215,26 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                         willRebuild = false;
                     }
 
+                    // v454: INCREMENTAL PITCH UPDATE. An ordinary pitch (no batter change, no result)
+                    // changes the zone (new dot), the legend (new row), the count, and the pitch card in
+                    // the slot — but NOT the portraits. Previously this forced a full card rebuild (the
+                    // per-pitch flash). Now, when the header (portrait identity) is unchanged and there's
+                    // no result/batter event, we update each affected region in place: zone+legend, count
+                    // center, and the event slot. The portraits and everything else stay perfectly still.
+                    boolean pitchOnly = willRebuild && headerSame && !batterChanged
+                            && !resultAppeared && !resolvedNow && !suppressRenderThisPoll
+                            && host.getChildCount() > 0
+                            && activeTrackerZoneHost != null && activeTrackerCenterHost != null;
+                    if (pitchOnly && updateZoneRegionInPlace(g)) {
+                        updateCountCenterInPlace(g);
+                        updateEventSlotInPlace(g, false);
+                        liveTrackerRenderSig = trackerSig;
+                        liveTrackerLastResultKey = resultKey;
+                        trackerHeaderSig = newHeaderSig;
+                        trackerZoneSig = newZoneSig;
+                        willRebuild = false;
+                    }
+
                     // v449: PHANTOM-ANIMATION GUARD. If a full rebuild was triggered but the header AND
                     // zone are both unchanged AND there's no genuine event (no result, no real batter
                     // change), there is nothing visible to animate — rebuilding+swapping would fire an
@@ -20618,6 +20640,97 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
         return true;
     }
 
+    // v454: build the pitch zone + legend row. Extracted so the live card can host it persistently and
+    // refresh it in place on each pitch (new dot + new legend row) without rebuilding the whole card.
+    private View buildZoneRow(LiveGame game, LiveAtBat ab, LiveFeed feed) {
+        LinearLayout zoneRow = new LinearLayout(this);
+        zoneRow.setOrientation(LinearLayout.HORIZONTAL);
+        zoneRow.setGravity(Gravity.TOP);
+        zoneRow.setClipChildren(false);
+        zoneRow.setClipToPadding(false);
+        int trackingTopRunway = dp(29);
+        int zoneH = dp(264);
+        int zoneCanvasH = zoneH + trackingTopRunway;
+        StrikeZoneView zone = new StrikeZoneView(this, ab.pitches, ab, strikeZoneBoundsForFeed(feed));
+        LinearLayout.LayoutParams zLp = new LinearLayout.LayoutParams(0, zoneCanvasH, 1f);
+        zoneRow.addView(zone, zLp);
+        FrameLayout legendClip = new FrameLayout(this);
+        legendClip.setTranslationX(-dp(4));
+        legendClip.setClipChildren(true);
+        ScrollView legendScroll = new ScrollView(this);
+        legendScroll.setVerticalScrollBarEnabled(false);
+        legendScroll.setFillViewport(false);
+        legendScroll.setClipToPadding(true);
+        legendScroll.setPadding(0, 0, 0, 0);
+        legendScroll.setOnTouchListener((v, ev) -> {
+            v.getParent().requestDisallowInterceptTouchEvent(true);
+            if (ev.getAction() == android.view.MotionEvent.ACTION_UP
+                    || ev.getAction() == android.view.MotionEvent.ACTION_CANCEL) {
+                v.getParent().requestDisallowInterceptTouchEvent(false);
+            }
+            return false;
+        });
+        LinearLayout legend = new LinearLayout(this);
+        legend.setOrientation(LinearLayout.VERTICAL);
+        legend.setPadding(0, 0, 0, 0);
+        if (ab.pitches.isEmpty()) {
+            TextView waiting = text("Waiting for the first pitch…", 10, INK_DIM, false);
+            waiting.setMaxLines(3);
+            legend.addView(waiting, matchWrap());
+        } else {
+            for (int pi = ab.pitches.size() - 1; pi >= 0; pi--) legend.addView(pitchLegendRow(ab.pitches.get(pi), ab), matchWrap());
+        }
+        legendScroll.addView(legend, new ScrollView.LayoutParams(-1, -2));
+        FrameLayout.LayoutParams legendScrollLp = new FrameLayout.LayoutParams(-1, zoneH);
+        legendScrollLp.topMargin = trackingTopRunway;
+        legendClip.addView(legendScroll, legendScrollLp);
+        int screenW = getResources().getDisplayMetrics().widthPixels;
+        int railW = Math.min(dp(98), Math.max(dp(90), screenW * 22 / 100));
+        LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(railW, zoneCanvasH); lgLp.setMargins(-dp(2), 0, -dp(12), 0);
+        zoneRow.addView(legendClip, lgLp);
+        return zoneRow;
+    }
+
+    // signature of everything the zone region draws — the AB and the full pitch sequence (count +
+    // each pitch's type/result), so any change to a pitch or a new pitch re-renders the region.
+    private String zoneRegionSignature(LiveAtBat ab) {
+        if (ab == null) return "null";
+        StringBuilder sb = new StringBuilder();
+        sb.append(ab.abNumber).append('|').append(ab.pitches == null ? 0 : ab.pitches.size());
+        if (ab.pitches != null) {
+            for (LivePitch p : ab.pitches) {
+                sb.append('|').append(safe(p.typeCode)).append(p.balls).append(p.strikes)
+                  .append(safe(p.result)).append(p.isInPlay ? 'X' : '.');
+            }
+        }
+        return sb.toString();
+    }
+
+    // v454: refresh ONLY the zone+legend host in place (no full card rebuild) when a pitch lands. The
+    // new zone (with the added pitch) cross-fades over the old so the dot/legend appear smoothly while
+    // the rest of the card stays perfectly still.
+    private boolean updateZoneRegionInPlace(LiveGame game) {
+        if (activeTrackerZoneHost == null) return false;
+        LiveFeed feed = game == null ? null : game.liveFeed;
+        if (feed == null || !feed.loaded || feed.atBats.isEmpty()) return false;
+        int idx = heldLiveResultIndex(game, feed);
+        if (idx < 0) idx = liveAtBatIndex(game, feed);
+        if (idx < 0 || idx >= feed.atBats.size()) return false;
+        LiveAtBat ab = feed.atBats.get(idx);
+        if (ab == null) return false;
+        String sig = zoneRegionSignature(ab);
+        if (sig.equals(trackerZoneRegionSig)) return true; // unchanged
+        trackerZoneRegionSig = sig;
+        View fresh = buildZoneRow(game, ab, feed);
+        final View old = activeTrackerZoneHost.getChildCount() > 0 ? activeTrackerZoneHost.getChildAt(0) : null;
+        fresh.setAlpha(0f);
+        activeTrackerZoneHost.addView(fresh, new FrameLayout.LayoutParams(-1, -2));
+        fresh.animate().alpha(1f).setDuration(160).start();
+        if (old != null) old.animate().alpha(0f).setDuration(110)
+                .withEndAction(() -> { if (old.getParent() == activeTrackerZoneHost) activeTrackerZoneHost.removeView(old); }).start();
+        return true;
+    }
+
     private View liveTrackerCard(LiveGame game, TeamPalette awayPalette, TeamPalette homePalette) {
         // Null-safe palettes: a neighbour render during fast paging can briefly arrive before the
         // active palettes are set. Falling back to a neutral palette prevents an NPE that previously
@@ -20717,68 +20830,17 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
             }
             card.addView(abNav, abLp);
 
-            // v312: use ALL available space for tracking. Cancel the card's left padding so the
-            // plot reaches the card's left edge, push the rail to the right with just enough width
-            // for the longest label ("Swinging Strike") and no more, and keep the gap tight. The
-            // view is also taller so the tracking window extends below the plate hint.
-            LinearLayout zoneRow = new LinearLayout(this);
-            zoneRow.setOrientation(LinearLayout.HORIZONTAL);
-            zoneRow.setGravity(Gravity.TOP);
-            zoneRow.setClipChildren(false);
-            zoneRow.setClipToPadding(false);
-            // v382: restore full-size bases and keep the pitcher line close to the outs, but do
-            // not let the tracking window cover the pitcher line. The window hugs the line with a
-            // tiny clean gap while preserving the reclaimed tracking runway.
-            int trackingTopRunway = dp(29);
-            LinearLayout.LayoutParams zrLp = matchWrap(); zrLp.setMargins(-dp(8), dp(2), -dp(2), 0);
-            int zoneH = dp(264);
-            int zoneCanvasH = zoneH + trackingTopRunway;
-            StrikeZoneView zone = new StrikeZoneView(this, ab.pitches, ab, strikeZoneBoundsForFeed(feed));
-            LinearLayout.LayoutParams zLp = new LinearLayout.LayoutParams(0, zoneCanvasH, 1f);
-            zoneRow.addView(zone, zLp);
-            // pitch list: newest first, in a fixed-height window that scrolls independently of the
-            // page. A nested same-direction ScrollView won't reliably clip/scroll on its own, so we
-            // (a) host it in a clipping FrameLayout of exactly zoneH, and (b) hand it the vertical
-            // gesture by disallowing the parent scroll from intercepting while the finger is on it.
-            FrameLayout legendClip = new FrameLayout(this);
-            // v394: keep the tracking window size unchanged; nudge the pitch list left a hair
-            // so the larger v392 text doesn't clip on the screen's right edge.
-            legendClip.setTranslationX(-dp(4));
-            legendClip.setClipChildren(true);
-            ScrollView legendScroll = new ScrollView(this);
-            legendScroll.setVerticalScrollBarEnabled(false);
-            legendScroll.setFillViewport(false);
-            legendScroll.setClipToPadding(true);
-            legendScroll.setPadding(0, 0, 0, 0);
-            legendScroll.setOnTouchListener((v, ev) -> {
-                v.getParent().requestDisallowInterceptTouchEvent(true);
-                if (ev.getAction() == android.view.MotionEvent.ACTION_UP
-                        || ev.getAction() == android.view.MotionEvent.ACTION_CANCEL) {
-                    v.getParent().requestDisallowInterceptTouchEvent(false);
-                }
-                return false;
-            });
-            LinearLayout legend = new LinearLayout(this);
-            legend.setOrientation(LinearLayout.VERTICAL);
-            legend.setPadding(0, 0, 0, 0);
-            if (ab.pitches.isEmpty()) {
-                TextView waiting = text("Waiting for the first pitch…", 10, INK_DIM, false);
-                waiting.setMaxLines(3);
-                legend.addView(waiting, matchWrap());
-            } else {
-                for (int pi = ab.pitches.size() - 1; pi >= 0; pi--) legend.addView(pitchLegendRow(ab.pitches.get(pi), ab), matchWrap());
-            }
-            legendScroll.addView(legend, new ScrollView.LayoutParams(-1, -2));
-            FrameLayout.LayoutParams legendScrollLp = new FrameLayout.LayoutParams(-1, zoneH);
-            legendScrollLp.topMargin = trackingTopRunway;
-            legendClip.addView(legendScroll, legendScrollLp);
-            int screenW = getResources().getDisplayMetrics().widthPixels;
-            // Rail hugs the right edge: just wide enough for the dot + "Swinging Strike" on one line,
-            // and no more, so the plot gets every other pixel. Flush to the card's right edge.
-            int railW = Math.min(dp(98), Math.max(dp(90), screenW * 22 / 100));
-            LinearLayout.LayoutParams lgLp = new LinearLayout.LayoutParams(railW, zoneCanvasH); lgLp.setMargins(-dp(2), 0, -dp(12), 0);
-            zoneRow.addView(legendClip, lgLp);
-            card.addView(zoneRow, zrLp);
+            // v454: the pitch zone + legend live in a persistent host so a new pitch updates JUST this
+            // region in place (new dot in the zone, new legend row) without rebuilding the whole card.
+            // This is the region that was forcing a full rebuild on every pitch — the biggest source of
+            // the per-pitch flashing. zoneRow is rebuilt cheaply and swapped inside its own host.
+            FrameLayout zoneHost = new FrameLayout(this);
+            zoneHost.setTag("tracker_zone_region");
+            zoneHost.addView(buildZoneRow(game, ab, feed), new FrameLayout.LayoutParams(-1, -2));
+            boolean liveAbForZone = feed != null && idx == feed.atBats.size() - 1;
+            if (liveAbForZone) { activeTrackerZoneHost = zoneHost; trackerZoneRegionSig = zoneRegionSignature(ab); }
+            LinearLayout.LayoutParams zhLp = matchWrap(); zhLp.setMargins(-dp(8), dp(2), -dp(2), 0);
+            card.addView(zoneHost, zhLp);
 
             // ---- Unified result card: ONE card, content depends on the situation ----
             //   AB complete  → outcome result (color by outcome) + EV/LA/distance on contact
