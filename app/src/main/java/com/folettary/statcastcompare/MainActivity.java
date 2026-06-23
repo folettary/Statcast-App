@@ -871,7 +871,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v455", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v456", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20227,6 +20227,16 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                     if (pitchOnly && updateZoneRegionInPlace(g)) {
                         updateCountCenterInPlace(g);
                         updateEventSlotInPlace(g, false);
+                        // v455: the pitcher's pitch-count line ("97 P · 64S 33B") increments each pitch;
+                        // refresh just that text in place so it stays current without rebuilding the
+                        // portrait (which would reload the image and cause the flash).
+                        if (activeLiveTrackerHost != null) {
+                            View subV = activeLiveTrackerHost.findViewWithTag("portrait_subtitle");
+                            if (subV instanceof TextView) {
+                                String line = pitcherPitchLine(g.liveFeed, g.sitPitcherId);
+                                if (line != null) ((TextView) subV).setText(line);
+                            }
+                        }
                         liveTrackerRenderSig = trackerSig;
                         liveTrackerLastResultKey = resultKey;
                         trackerHeaderSig = newHeaderSig;
@@ -20296,6 +20306,7 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                                 + " fResN=" + (feedResultAb != null ? feedResultAb.abNumber : -1)
                                 + " rebuild=" + (willRebuild ? "Y" : "n")
                                 + " slotOnly=" + (slotOnly ? "Y" : "n")
+                                + " pitchOnly=" + (pitchOnly ? "Y" : "n")
                                 + " hSame=" + (headerSame ? "Y" : "n")
                                 + " zSame=" + (zoneSame ? "Y" : "n")
                                 + " bChg=" + (batterChanged ? "Y" : "n")
@@ -21035,12 +21046,13 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
     private String trackerHeaderSignature(LiveGame game) {
         if (game == null) return "null";
         LiveAtBat ab = currentTrackerAtBat(game);
-        // v450: the header signature now covers only the PORTRAIT identity (pitcher/batter) plus the
-        // pitcher's stat line, because the count/bases/outs moved into their own persistent host
-        // (activeTrackerCenterHost) updated separately. So a count tick no longer counts as a "header"
-        // change and won't block the slot-only / center-only in-place paths.
+        // v455: the header signature identifies only WHICH players are shown (pitcher/batter), NOT
+        // their live stat lines. The pitcher's "97 P · 64S 33B" line increments every pitch, so
+        // including it (as it did before) made headerSame false on every pitch — which defeated the
+        // whole incremental-pitch path and rebuilt the entire card (portraits flashing) on each pitch.
+        // The stat line is cheap text refreshed separately by the pitch-only path.
         return game.sitBatterId + "|" + game.sitPitcherId + "|" + (ab == null ? -1 : ab.batterId)
-                + "|" + safe(pitcherPitchLine(game.liveFeed, game.sitPitcherId));
+                + "|" + (ab == null ? -1 : ab.pitcherId);
     }
     private String trackerZoneSignature(LiveGame game) {
         if (game == null) return "null";
@@ -24237,6 +24249,7 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
         if (!safe(subtitle).isEmpty()) {
             TextView sub = text(subtitle, 7, INK_DIM, true);
             sub.setGravity(Gravity.CENTER); sub.setSingleLine(true);
+            sub.setTag("portrait_subtitle"); // v455: refreshable in place (pitch count updates each pitch)
             col.addView(sub, matchWrap());
         }
         return col;
