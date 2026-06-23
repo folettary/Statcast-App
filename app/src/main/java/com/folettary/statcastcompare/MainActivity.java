@@ -871,7 +871,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v450", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v451", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20665,6 +20665,10 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
         int abPitchColor = ensureReadableColor(abPitchPal.primary, 150);
 
         // ---- Situation board: pitcher portrait | big count | batter portrait ----
+        LinearLayout matchRow = new LinearLayout(this);
+        matchRow.setOrientation(LinearLayout.HORIZONTAL);
+        matchRow.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        LinearLayout.LayoutParams mrLp = matchWrap(); mrLp.setMargins(0, 0, 0, 0);
         matchRow.addView(playerPortraitColumn(pitcherId, pitcherNm, "PITCHING", abPitchColor, pitcherPitchLine(feed, pitcherId)), new LinearLayout.LayoutParams(0, -2, 1f));
         // v450: the count/bases/outs block lives in a persistent host so a pitch can update JUST this
         // block in place (count ticks, bases/outs change) without rebuilding the portraits or anything
