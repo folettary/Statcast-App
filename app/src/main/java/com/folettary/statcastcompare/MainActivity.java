@@ -369,10 +369,9 @@ public class MainActivity extends Activity {
     // place without rebuilding (and fading) the whole card. headerHost = matchup row; zoneHost = pitch
     // zone + legend; slotHost = result/event slot. Built once per live-card mount; reused on polls.
     private FrameLayout activeTrackerHeaderHost = null;
-    private FrameLayout activeTrackerZoneHost = null;
+    private FrameLayout activeTrackerZoneHost = null;   // v454: pitch zone + legend region (now used)
     private FrameLayout activeTrackerSlotHost = null;
     private FrameLayout activeTrackerCenterHost = null; // v450: count/bases/outs block
-    private FrameLayout activeTrackerZoneHost = null;   // v454: pitch zone + legend region
     private String trackerHeaderSig = "", trackerZoneSig = "", trackerSlotSig = "", trackerCenterSig = "", trackerZoneRegionSig = "";
     private static final long BURST_POLL_MS = 700L;        // fast poll cadence while awaiting
     private static final long AWAIT_RESULT_TIMEOUT_MS = 5200L; // give up and show what we have
@@ -872,7 +871,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v454", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v455", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
