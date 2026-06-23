@@ -871,7 +871,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v452", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v453", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20140,8 +20140,14 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                     // its result text says "in play" and the AB hasn't resolved to a real result yet.
                     LivePitch lastPitch = (curAb != null && curAb.pitches != null && !curAb.pitches.isEmpty())
                             ? curAb.pitches.get(curAb.pitches.size() - 1) : null;
+                    // v453: detect in-play from THREE signals, because MLB populates them out of lockstep
+                    // and any one can lag a poll: the isInPlay flag, the result string ("in play"), OR an
+                    // exit velocity (only set when the ball is put in play). The HUD caught a case where
+                    // the flag and string both lagged but the card still derived "In play" — adding the
+                    // exitVelo signal closes that race (a batted ball always has a launchSpeed).
                     boolean pitchInPlay = lastPitch != null && (lastPitch.isInPlay
-                            || safe(lastPitch.result).toLowerCase(Locale.US).contains("in play"));
+                            || safe(lastPitch.result).toLowerCase(Locale.US).contains("in play")
+                            || !Double.isNaN(lastPitch.exitVelo));
                     boolean abResultPrelim = curAb != null && isPreliminaryResult(curAb.result);
                     boolean abHasRealResult = curAb != null && curAb.complete
                             && !safe(curAb.result).isEmpty() && !isPreliminaryResult(curAb.result);
@@ -23495,9 +23501,11 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
             return r.contains("swinging") ? "Strikeout (swinging)" : (r.contains("called") ? "Strikeout (looking)" : "Strikeout");
         }
         if ((p.isBall || r.contains("ball")) && p.balls >= 4) return "Walk";
-        // v446: catch in-play via the result STRING too — the isInPlay flag isn't always set even when
-        // the pitch result reads "In play, …". This was the leak that let the intermediate render.
-        if (p.isInPlay || r.contains("in play")) {
+        // v453: catch in-play via the result STRING or an exit velocity too — neither the isInPlay flag
+        // nor the result string is reliably set the instant the pitch lands, but a batted ball always
+        // has a launchSpeed (exitVelo). Using all three keeps this in lockstep with the poll's pending
+        // detection so the slot and the suppression logic never disagree.
+        if (p.isInPlay || r.contains("in play") || !Double.isNaN(p.exitVelo)) {
             if (ab != null && ab.complete && !safe(ab.result).isEmpty() && !isPreliminaryResult(ab.result)) return ab.result;
             return "In play";
         }
