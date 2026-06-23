@@ -371,7 +371,8 @@ public class MainActivity extends Activity {
     private FrameLayout activeTrackerHeaderHost = null;
     private FrameLayout activeTrackerZoneHost = null;
     private FrameLayout activeTrackerSlotHost = null;
-    private String trackerHeaderSig = "", trackerZoneSig = "", trackerSlotSig = "";
+    private FrameLayout activeTrackerCenterHost = null; // v450: count/bases/outs block
+    private String trackerHeaderSig = "", trackerZoneSig = "", trackerSlotSig = "", trackerCenterSig = "";
     private static final long BURST_POLL_MS = 700L;        // fast poll cadence while awaiting
     private static final long AWAIT_RESULT_TIMEOUT_MS = 5200L; // give up and show what we have
     private boolean liveFeedPlaysExpanded = false; // v275: play feed compact by default
@@ -870,7 +871,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v449", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v450", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -1306,7 +1307,8 @@ public class MainActivity extends Activity {
         activeLiveTrackerGame = null;
         activeLiveTrackerHost = null;
         lockedTrackerHostH = 0;
-        trackerHeaderSig = ""; trackerZoneSig = ""; trackerSlotSig = "";
+        trackerHeaderSig = ""; trackerZoneSig = ""; trackerSlotSig = ""; trackerCenterSig = "";
+        activeTrackerCenterHost = null;
         lastSlotInPlaceKey = Integer.MIN_VALUE;
         liveTrackerLastBatterId = 0;
         activeCarouselHost = null;
@@ -20197,6 +20199,7 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                             && host.getChildCount() > 0 && !batterChanged;
                     if (slotOnly && updateEventSlotInPlace(g, resultAppeared || resolvedNow)) {
                         // handled in place; keep the render signature in sync and skip the full rebuild
+                        updateCountCenterInPlace(g); // v450: also refresh count/bases/outs in place
                         liveTrackerRenderSig = trackerSig;
                         liveTrackerLastResultKey = resultKey;
                         trackerHeaderSig = newHeaderSig;
@@ -20497,6 +20500,118 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
         return null;
     }
 
+    // v450: build the count/bases/outs center block (the middle column of the matchup row). Extracted
+    // so it can live in a persistent host and be refreshed in place every pitch without rebuilding the
+    // portraits or the rest of the card.
+    private View buildCountCenter(LiveGame game, LiveAtBat ab, int idx, int abBatColor) {
+        LiveFeed feed = game.liveFeed;
+        LinearLayout center = new LinearLayout(this);
+        center.setOrientation(LinearLayout.VERTICAL);
+        center.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        boolean liveAb = ab != null && feed != null && idx == feed.atBats.size() - 1;
+        boolean liveBetweenInnings = liveAb && isBetweenInningsState(game);
+        String countStr;
+        if (liveBetweenInnings) {
+            countStr = "SIDE\nRETIRED";
+        } else if (liveAb) {
+            if (ab != null && !ab.pitches.isEmpty()) {
+                LivePitch lastP = ab.pitches.get(ab.pitches.size() - 1);
+                boolean abEnded = ab.complete;
+                countStr = abEnded ? "0-0" : (lastP.balls + "-" + lastP.strikes);
+            } else {
+                countStr = game.sitBalls + "-" + game.sitStrikes;
+            }
+        } else {
+            if (ab != null && !ab.pitches.isEmpty()) {
+                LivePitch lastP = ab.pitches.get(ab.pitches.size() - 1);
+                countStr = lastP.balls + "-" + lastP.strikes;
+            } else {
+                countStr = "—";
+            }
+        }
+        TextView bigCount = text(countStr, liveBetweenInnings ? 15 : 28, Color.WHITE, true);
+        bigCount.setGravity(Gravity.CENTER);
+        if (liveBetweenInnings) bigCount.setLetterSpacing(0.12f);
+        center.addView(bigCount, matchWrap());
+        if (liveBetweenInnings) {
+            TextView state = text(liveInningHeroLabel(game), 9, INK_DIM, true);
+            state.setGravity(Gravity.CENTER);
+            state.setPadding(0, dp(1), 0, 0);
+            center.addView(state, matchWrap());
+        } else {
+            boolean bFirst = liveAb ? game.onFirst : (ab != null && ab.onFirst);
+            boolean bSecond = liveAb ? game.onSecond : (ab != null && ab.onSecond);
+            boolean bThird = liveAb ? game.onThird : (ab != null && ab.onThird);
+            BaseDiamondView dia = new BaseDiamondView(this, bFirst, bSecond, bThird, abBatColor);
+            LinearLayout.LayoutParams diaLp = new LinearLayout.LayoutParams(dp(44), dp(44));
+            diaLp.gravity = Gravity.CENTER_HORIZONTAL; diaLp.setMargins(0, -dp(7), 0, 0);
+            center.addView(dia, diaLp);
+            LinearLayout outsRow = new LinearLayout(this);
+            outsRow.setOrientation(LinearLayout.HORIZONTAL);
+            outsRow.setGravity(Gravity.CENTER);
+            int shownOuts = liveAb ? game.sitOuts : (ab != null && ab.outsAtStart >= 0 ? ab.outsAtStart : 0);
+            for (int i = 0; i < 3; i++) {
+                View dot = new View(this);
+                boolean on = i < shownOuts;
+                GradientDrawable gd = new GradientDrawable(); gd.setShape(GradientDrawable.OVAL);
+                gd.setColor(on ? Color.rgb(247, 197, 77) : Color.argb(30, 255, 255, 255));
+                if (!on) gd.setStroke(dp(1), Color.argb(80, 255, 255, 255));
+                dot.setBackground(gd);
+                LinearLayout.LayoutParams dl = new LinearLayout.LayoutParams(dp(6), dp(6)); dl.setMargins(dp(2), 0, dp(2), 0);
+                outsRow.addView(dot, dl);
+            }
+            LinearLayout.LayoutParams outsLp = matchWrap();
+            outsLp.setMargins(0, -dp(5), 0, 0);
+            center.addView(outsRow, outsLp);
+        }
+        return center;
+    }
+
+    // signature capturing everything the count center displays — count, bases, outs, between-innings
+    private String countCenterSignature(LiveGame game, LiveAtBat ab, int idx) {
+        LiveFeed feed = game.liveFeed;
+        boolean liveAb = ab != null && feed != null && idx == feed.atBats.size() - 1;
+        int balls = 0, strikes = 0;
+        if (liveAb && ab != null && !ab.pitches.isEmpty() && !ab.complete) {
+            LivePitch lp = ab.pitches.get(ab.pitches.size() - 1);
+            balls = lp.balls; strikes = lp.strikes;
+        } else if (liveAb && ab != null && ab.complete) { balls = 0; strikes = 0; }
+        boolean bf = liveAb ? game.onFirst : (ab != null && ab.onFirst);
+        boolean bs = liveAb ? game.onSecond : (ab != null && ab.onSecond);
+        boolean bt = liveAb ? game.onThird : (ab != null && ab.onThird);
+        int outs = liveAb ? game.sitOuts : (ab != null ? ab.outsAtStart : 0);
+        return balls + "-" + strikes + "|" + (bf ? 1 : 0) + (bs ? 1 : 0) + (bt ? 1 : 0) + "|" + outs
+                + "|" + (isBetweenInningsState(game) ? "B" : "") + "|" + (ab == null ? -1 : ab.batterId);
+    }
+
+    // v450: refresh ONLY the count/bases/outs host in place (no card rebuild). Used by the poll when
+    // a pitch changes the count/bases/outs but nothing structural. The new count fades/scales in
+    // subtly so a ball/strike feels acknowledged without any flash.
+    private boolean updateCountCenterInPlace(LiveGame game) {
+        if (activeTrackerCenterHost == null) return false;
+        LiveFeed feed = game == null ? null : game.liveFeed;
+        if (feed == null || !feed.loaded || feed.atBats.isEmpty()) return false;
+        int idx = heldLiveResultIndex(game, feed);
+        if (idx < 0) idx = liveAtBatIndex(game, feed);
+        if (idx < 0 || idx >= feed.atBats.size()) return false;
+        LiveAtBat ab = feed.atBats.get(idx);
+        String sig = countCenterSignature(game, ab, idx);
+        if (sig.equals(trackerCenterSig)) return true; // unchanged → nothing to do
+        trackerCenterSig = sig;
+        boolean topHalf = ab != null && ab.topHalf;
+        TeamPalette batPal = topHalf ? activeLiveTrackerAwayPal : activeLiveTrackerHomePal;
+        if (batPal == null) batPal = neutralPalette();
+        int batColor = ensureReadableColor(batPal.primary, 150);
+        View fresh = buildCountCenter(game, ab, idx, batColor);
+        final View old = activeTrackerCenterHost.getChildCount() > 0 ? activeTrackerCenterHost.getChildAt(0) : null;
+        fresh.setAlpha(0f);
+        activeTrackerCenterHost.addView(fresh, new FrameLayout.LayoutParams(-1, -2, Gravity.CENTER_HORIZONTAL));
+        fresh.animate().alpha(1f).setDuration(140).start();
+        if (old != null) old.animate().alpha(0f).setDuration(90)
+                .withEndAction(() -> { if (old.getParent() == activeTrackerCenterHost) activeTrackerCenterHost.removeView(old); }).start();
+        return true;
+    }
+
     private View liveTrackerCard(LiveGame game, TeamPalette awayPalette, TeamPalette homePalette) {
         // Null-safe palettes: a neighbour render during fast paging can briefly arrive before the
         // active palettes are set. Falling back to a neutral palette prevents an NPE that previously
@@ -20550,84 +20665,16 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
         int abPitchColor = ensureReadableColor(abPitchPal.primary, 150);
 
         // ---- Situation board: pitcher portrait | big count | batter portrait ----
-        LinearLayout matchRow = new LinearLayout(this);
-        matchRow.setOrientation(LinearLayout.HORIZONTAL);
-        matchRow.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
-        LinearLayout.LayoutParams mrLp = matchWrap(); mrLp.setMargins(0, 0, 0, 0);
         matchRow.addView(playerPortraitColumn(pitcherId, pitcherNm, "PITCHING", abPitchColor, pitcherPitchLine(feed, pitcherId)), new LinearLayout.LayoutParams(0, -2, 1f));
-        LinearLayout center = new LinearLayout(this);
-        center.setOrientation(LinearLayout.VERTICAL);
-        center.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
-        int abInning = ab != null ? ab.inning : game.sitInning;
-        boolean liveAb = ab != null && idx == feed.atBats.size() - 1;
-        // big count. When following the live AB, derive the count from the feed's LATEST pitch
-        // (its balls/strikes are the count AFTER that pitch) rather than the separate /linescore.
-        // The linescore and feed don't always update in lockstep on MLB's side, which made the count
-        // appear "a pitch behind"; sourcing both count and pitch from the same feed snapshot fixes it.
-        boolean liveBetweenInnings = liveAb && isBetweenInningsState(game);
-        String countStr;
-        if (liveBetweenInnings) {
-            countStr = "SIDE\nRETIRED";
-        } else if (liveAb) {
-            if (ab != null && !ab.pitches.isEmpty()) {
-                LivePitch lastP = ab.pitches.get(ab.pitches.size() - 1);
-                // if the last pitch ended the AB (in play / strikeout / walk), the count resets to 0-0
-                boolean abEnded = ab.complete;
-                countStr = abEnded ? "0-0" : (lastP.balls + "-" + lastP.strikes);
-            } else {
-                countStr = game.sitBalls + "-" + game.sitStrikes;
-            }
-        } else {
-            // Past AB: show the count when the at-bat ended (the last pitch's balls/strikes — the
-            // count that produced the result), giving a frame of reference for where you are browsing.
-            if (ab != null && !ab.pitches.isEmpty()) {
-                LivePitch lastP = ab.pitches.get(ab.pitches.size() - 1);
-                countStr = lastP.balls + "-" + lastP.strikes;
-            } else {
-                countStr = "—";
-            }
-        }
-        TextView bigCount = text(countStr, liveBetweenInnings ? 15 : 28, Color.WHITE, true);
-        bigCount.setGravity(Gravity.CENTER);
-        if (liveBetweenInnings) bigCount.setLetterSpacing(0.12f);
-        center.addView(bigCount, matchWrap());
-        if (liveBetweenInnings) {
-            TextView state = text(liveInningHeroLabel(game), 9, INK_DIM, true);
-            state.setGravity(Gravity.CENTER);
-            state.setPadding(0, dp(1), 0, 0);
-            center.addView(state, matchWrap());
-        } else {
-            // bases diamond — live AB uses the live situation; a past AB uses its captured end-state.
-            boolean bFirst = liveAb ? game.onFirst : (ab != null && ab.onFirst);
-            boolean bSecond = liveAb ? game.onSecond : (ab != null && ab.onSecond);
-            boolean bThird = liveAb ? game.onThird : (ab != null && ab.onThird);
-            BaseDiamondView dia = new BaseDiamondView(this, bFirst, bSecond, bThird, abBatColor);
-            LinearLayout.LayoutParams diaLp = new LinearLayout.LayoutParams(dp(44), dp(44));
-            // v385: move the bases+outs block upward as a unit so it sits centered between the
-            // count and pitcher line. Keep the base size unchanged.
-            diaLp.gravity = Gravity.CENTER_HORIZONTAL; diaLp.setMargins(0, -dp(7), 0, 0);
-            center.addView(dia, diaLp);
-            // outs — 3 dots
-            LinearLayout outsRow = new LinearLayout(this);
-            outsRow.setOrientation(LinearLayout.HORIZONTAL);
-            outsRow.setGravity(Gravity.CENTER);
-            int shownOuts = liveAb ? game.sitOuts : (ab != null && ab.outsAtStart >= 0 ? ab.outsAtStart : 0);
-            for (int i = 0; i < 3; i++) {
-                View dot = new View(this);
-                boolean on = i < shownOuts;
-                GradientDrawable gd = new GradientDrawable(); gd.setShape(GradientDrawable.OVAL);
-                gd.setColor(on ? Color.rgb(247, 197, 77) : Color.argb(30, 255, 255, 255));
-                if (!on) gd.setStroke(dp(1), Color.argb(80, 255, 255, 255));
-                dot.setBackground(gd);
-                LinearLayout.LayoutParams dl = new LinearLayout.LayoutParams(dp(6), dp(6)); dl.setMargins(dp(2), 0, dp(2), 0);
-                outsRow.addView(dot, dl);
-            }
-            LinearLayout.LayoutParams outsLp = matchWrap();
-            outsLp.setMargins(0, -dp(5), 0, 0);
-            center.addView(outsRow, outsLp);
-
-        }
-        matchRow.addView(center, new LinearLayout.LayoutParams(0, -2, 1.2f));
+        // v450: the count/bases/outs block lives in a persistent host so a pitch can update JUST this
+        // block in place (count ticks, bases/outs change) without rebuilding the portraits or anything
+        // else. This is the first region of the universal "update only what changed" design.
+        FrameLayout centerHost = new FrameLayout(this);
+        centerHost.setTag("tracker_count_center");
+        boolean liveAbForCenter = ab != null && idx == feed.atBats.size() - 1;
+        centerHost.addView(buildCountCenter(game, ab, idx, abBatColor), new FrameLayout.LayoutParams(-1, -2, Gravity.CENTER_HORIZONTAL));
+        if (liveAbForCenter) { activeTrackerCenterHost = centerHost; trackerCenterSig = countCenterSignature(game, ab, idx); }
+        matchRow.addView(centerHost, new LinearLayout.LayoutParams(0, -2, 1.2f));
         matchRow.addView(playerPortraitColumn(batterId, batterNm, "AT BAT", abBatColor), new LinearLayout.LayoutParams(0, -2, 1f));
         card.addView(matchRow, mrLp);
 
@@ -20913,15 +20960,12 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
     private String trackerHeaderSignature(LiveGame game) {
         if (game == null) return "null";
         LiveAtBat ab = currentTrackerAtBat(game);
-        int balls = 0, strikes = 0;
-        if (ab != null && ab.pitches != null && !ab.pitches.isEmpty()) {
-            LivePitch lp = ab.pitches.get(ab.pitches.size() - 1);
-            balls = lp.balls; strikes = lp.strikes;
-        }
-        return game.sitBatterId + "|" + game.sitPitcherId + "|" + balls + "-" + strikes + "|"
-                + game.sitOuts + "|" + game.awayScore + "-" + game.homeScore + "|"
-                + (game.onFirst ? 1 : 0) + (game.onSecond ? 1 : 0) + (game.onThird ? 1 : 0) + "|"
-                + game.sitInning + safe(game.sitInningState) + "|" + (ab == null ? -1 : ab.batterId);
+        // v450: the header signature now covers only the PORTRAIT identity (pitcher/batter) plus the
+        // pitcher's stat line, because the count/bases/outs moved into their own persistent host
+        // (activeTrackerCenterHost) updated separately. So a count tick no longer counts as a "header"
+        // change and won't block the slot-only / center-only in-place paths.
+        return game.sitBatterId + "|" + game.sitPitcherId + "|" + (ab == null ? -1 : ab.batterId)
+                + "|" + safe(pitcherPitchLine(game.liveFeed, game.sitPitcherId));
     }
     private String trackerZoneSignature(LiveGame game) {
         if (game == null) return "null";
