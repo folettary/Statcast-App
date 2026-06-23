@@ -870,7 +870,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v448", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v449", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -20204,6 +20204,20 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                         willRebuild = false;
                     }
 
+                    // v449: PHANTOM-ANIMATION GUARD. If a full rebuild was triggered but the header AND
+                    // zone are both unchanged AND there's no genuine event (no result, no real batter
+                    // change), there is nothing visible to animate — rebuilding+swapping would fire an
+                    // animation for no reason (the "animates but nothing changed" the user saw). In that
+                    // case just sync the signature and skip. Also, if the slot-only path above already
+                    // handled it, willRebuild is false and we skip here too.
+                    boolean realEvent = resultAppeared || resolvedNow || batterChanged;
+                    if (willRebuild && headerSame && zoneSame && !realEvent) {
+                        liveTrackerRenderSig = trackerSig;
+                        trackerHeaderSig = newHeaderSig;
+                        trackerZoneSig = newZoneSig;
+                        willRebuild = false;
+                    }
+
                     if (willRebuild) {
                         liveTrackerLastResultKey = resultKey;
                         liveTrackerLastBatterId = displayedBatter;
@@ -20252,6 +20266,9 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                                 + " fResN=" + (feedResultAb != null ? feedResultAb.abNumber : -1)
                                 + " rebuild=" + (willRebuild ? "Y" : "n")
                                 + " slotOnly=" + (slotOnly ? "Y" : "n")
+                                + " hSame=" + (headerSame ? "Y" : "n")
+                                + " zSame=" + (zoneSame ? "Y" : "n")
+                                + " bChg=" + (batterChanged ? "Y" : "n")
                                 + " res=" + (curRes.length() > 14 ? curRes.substring(0, 14) : curRes);
                         if (liveHudView != null) liveHudView.setText("HUD: " + liveHudState);
                     }
@@ -23608,24 +23625,35 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
             return;
         }
         final View oldPager = host.getChildAt(0);
-        // Fade the current pager out, then swap in the new one and fade+slide it in. Sequential (not
-        // overlapping) so the vertical host never stacks two pagers at once. Reads as a deliberate
-        // handoff to the next hitter rather than a hard rebuild flash.
-        if (oldPager != null) {
-            oldPager.animate().alpha(0f).setDuration(150)
-                    .setInterpolator(new android.view.animation.AccelerateInterpolator())
-                    .withEndAction(() -> {
-                        host.removeAllViews();
-                        host.addView(newPager, matchWrap());
-                        newPager.setAlpha(0f);
-                        newPager.setTranslationX(dp(16));
-                        newPager.animate().alpha(1f).translationX(0f).setDuration(260)
-                                .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
-                    }).start();
-        } else {
+        if (oldPager == null) {
             host.removeAllViews();
             host.addView(newPager, matchWrap());
+            return;
         }
+        // v449: TRUE CROSSFADE — the new pager fades in while the old is still visible, so the screen
+        // never goes blank between them (the old code faded the old fully OUT first, leaving a blank
+        // gap = the "everything disappears then re-renders" the user saw). We overlay both in a
+        // temporary FrameLayout: old underneath at full alpha fading out, new on top fading in. Once
+        // done, the new pager is reparented back into the host and the temp frame discarded.
+        int idx = host.indexOfChild(oldPager);
+        FrameLayout overlay = new FrameLayout(this);
+        host.removeView(oldPager);
+        overlay.addView(oldPager, new FrameLayout.LayoutParams(-1, -2));
+        newPager.setAlpha(0f);
+        overlay.addView(newPager, new FrameLayout.LayoutParams(-1, -2));
+        host.addView(overlay, idx, matchWrap());
+
+        oldPager.animate().alpha(0f).setDuration(220)
+                .setInterpolator(new android.view.animation.AccelerateInterpolator()).start();
+        newPager.animate().alpha(1f).setDuration(260).setStartDelay(60)
+                .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                .withEndAction(() -> {
+                    overlay.removeView(newPager);
+                    newPager.setAlpha(1f);
+                    int oi = host.indexOfChild(overlay);
+                    if (oi >= 0) { host.removeView(overlay); host.addView(newPager, oi, matchWrap()); }
+                    else host.addView(newPager, matchWrap());
+                }).start();
     }
 
     private void rerenderTracker(LiveGame game) {
