@@ -365,6 +365,13 @@ public class MainActivity extends Activity {
     private int awaitingAbNumber = -1;             // which AB we're waiting on
     private boolean liveAbPendingForBurst = false; // v442: current AB still pending → keep bursting
     private int lockedTrackerHostH = 0;             // v443: real measured tracker height (anti-reflow)
+    // v447: persistent sub-hosts inside the LIVE tracker card, so the poll can update one section in
+    // place without rebuilding (and fading) the whole card. headerHost = matchup row; zoneHost = pitch
+    // zone + legend; slotHost = result/event slot. Built once per live-card mount; reused on polls.
+    private FrameLayout activeTrackerHeaderHost = null;
+    private FrameLayout activeTrackerZoneHost = null;
+    private FrameLayout activeTrackerSlotHost = null;
+    private String trackerHeaderSig = "", trackerZoneSig = "", trackerSlotSig = "";
     private static final long BURST_POLL_MS = 700L;        // fast poll cadence while awaiting
     private static final long AWAIT_RESULT_TIMEOUT_MS = 5200L; // give up and show what we have
     private boolean liveFeedPlaysExpanded = false; // v275: play feed compact by default
@@ -863,7 +870,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v445", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v447", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -1299,6 +1306,8 @@ public class MainActivity extends Activity {
         activeLiveTrackerGame = null;
         activeLiveTrackerHost = null;
         lockedTrackerHostH = 0;
+        trackerHeaderSig = ""; trackerZoneSig = ""; trackerSlotSig = "";
+        lastSlotInPlaceKey = "";
         liveTrackerLastBatterId = 0;
         activeCarouselHost = null;
         activeCarouselTicker = null;
@@ -20119,15 +20128,25 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                     // real result lands, then show only that final card. A hard timeout prevents hanging
                     // if the feed is slow (reviews, scoring plays).
                     long now = System.currentTimeMillis();
-                    // v441: detect a PRELIMINARY result deterministically from the text. MLB's feed first
-                    // reports an AB-ending in-play ball as "In play, out(s)" / "In play, run(s)" /
-                    // "In play, no out", then refines it to the real result ("Single", "Groundout"…).
-                    // Those "In play…" strings are the intermediate we must never show.
-                    boolean prelimResult = curAb != null && isPreliminaryResult(curAb.result);
-                    // The CURRENT at-bat is pending a real result when: a terminal pitch landed with no
-                    // result yet, OR its result is still the "In play" placeholder.
-                    boolean curAbPending = curAb != null && (
-                            (terminalPitch && !curAb.complete) || prelimResult);
+                    // v446: detect the pending/intermediate state from EVERY place the "In play" text can
+                    // come from. The screenshots showed the "IN PLAY" card rendering while curAb.result
+                    // was still EMPTY — so the placeholder text comes from the PITCH's result string, not
+                    // the at-bat's. Earlier detection only checked curAb.result and the isInPlay flag,
+                    // both of which can be empty/false at the exact moment the pitch lands, so pend read
+                    // as n and the intermediate slipped through. Now we treat the AB as pending if EITHER
+                    // the at-bat result is the "In play" placeholder OR the latest pitch is in-play /
+                    // its result text says "in play" and the AB hasn't resolved to a real result yet.
+                    LivePitch lastPitch = (curAb != null && curAb.pitches != null && !curAb.pitches.isEmpty())
+                            ? curAb.pitches.get(curAb.pitches.size() - 1) : null;
+                    boolean pitchInPlay = lastPitch != null && (lastPitch.isInPlay
+                            || safe(lastPitch.result).toLowerCase(Locale.US).contains("in play"));
+                    boolean abResultPrelim = curAb != null && isPreliminaryResult(curAb.result);
+                    boolean abHasRealResult = curAb != null && curAb.complete
+                            && !safe(curAb.result).isEmpty() && !isPreliminaryResult(curAb.result);
+                    boolean prelimResult = abResultPrelim;
+                    // pending = the AB is ending on an in-play ball (from pitch or ab placeholder) and the
+                    // real detailed result hasn't arrived yet.
+                    boolean curAbPending = curAb != null && !abHasRealResult && (pitchInPlay || abResultPrelim);
                     int curAbNum = curAb != null ? curAb.abNumber : -1;
 
                     // v441: managed strictly per at-bat. Previous code could leave the await flag set with
@@ -20164,10 +20183,33 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                     if (resultAppeared || batterChanged) willRebuild = true;
                     if (suppressRenderThisPoll) willRebuild = false; // hold prior content until result lands
 
+                    // v447: SLOT-ONLY UPDATE. When the header (batter/count/score/outs) and the pitch
+                    // zone are unchanged and ONLY the result/event slot differs, update just that slot
+                    // in place instead of rebuilding+swapping the whole tracker card. This is the fix
+                    // for the janky "full re-render" on results: the scoreboard, matchup row, and pitch
+                    // zone stay perfectly still, and only the result card animates in. We detect this by
+                    // comparing the component signatures.
+                    String newHeaderSig = trackerHeaderSignature(g);
+                    String newZoneSig = trackerZoneSignature(g);
+                    boolean headerSame = newHeaderSig.equals(trackerHeaderSig) && !trackerHeaderSig.isEmpty();
+                    boolean zoneSame = newZoneSig.equals(trackerZoneSig) && !trackerZoneSig.isEmpty();
+                    boolean slotOnly = willRebuild && headerSame && zoneSame
+                            && host.getChildCount() > 0 && !batterChanged;
+                    if (slotOnly && updateEventSlotInPlace(g, resultAppeared || resolvedNow)) {
+                        // handled in place; keep the render signature in sync and skip the full rebuild
+                        liveTrackerRenderSig = trackerSig;
+                        liveTrackerLastResultKey = resultKey;
+                        trackerHeaderSig = newHeaderSig;
+                        trackerZoneSig = newZoneSig;
+                        willRebuild = false;
+                    }
+
                     if (willRebuild) {
                         liveTrackerLastResultKey = resultKey;
                         liveTrackerLastBatterId = displayedBatter;
                         liveTrackerRenderSig = trackerSig;
+                        trackerHeaderSig = newHeaderSig;
+                        trackerZoneSig = newZoneSig;
                         // tell the result-card builder to play the grand reveal this pass
                         forceResultReveal = resultAppeared || resolvedNow;
                         liveUpdateRebuild = true;
@@ -20198,6 +20240,7 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                         liveHudState = "#" + liveHudPollCount
                                 + (liveFocusMode ? " FOCUS" : " MENU")
                                 + " term=" + (terminalPitch ? "Y" : "n")
+                                + " pIP=" + (pitchInPlay ? "Y" : "n")
                                 + " cmpl=" + (curAb != null && curAb.complete ? "Y" : "n")
                                 + " pend=" + (curAbPending ? "Y" : "n")
                                 + " supp=" + (suppressRenderThisPoll ? "Y" : "n")
@@ -20208,6 +20251,7 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                                 + " abN=" + (curAb != null ? curAb.abNumber : -1)
                                 + " fResN=" + (feedResultAb != null ? feedResultAb.abNumber : -1)
                                 + " rebuild=" + (willRebuild ? "Y" : "n")
+                                + " slotOnly=" + (slotOnly ? "Y" : "n")
                                 + " res=" + (curRes.length() > 14 ? curRes.substring(0, 14) : curRes);
                         if (liveHudView != null) liveHudView.setText("HUD: " + liveHudState);
                     }
@@ -20352,6 +20396,88 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                 }
             });
         });
+    }
+
+    // v447: update ONLY the result/event slot of the live tracker card, in place, without rebuilding
+    // the rest of the card. Finds the tagged slot view, recomputes its content for the current live
+    // AB, and swaps just the inner card with the appropriate animation (grand reveal for a result,
+    // soft crossfade for a pitch). Returns false if it can't find the slot (caller falls back to a
+    // full rebuild).
+    private boolean updateEventSlotInPlace(LiveGame game, boolean isResult) {
+        if (activeLiveTrackerHost == null || activeLiveTrackerHost.getChildCount() == 0) return false;
+        View slot = activeLiveTrackerHost.findViewWithTag("tracker_event_slot");
+        if (!(slot instanceof FrameLayout)) return false;
+        FrameLayout slotFrame = (FrameLayout) slot;
+
+        EventSlotContent c = computeLiveEventSlot(game);
+        if (c == null || c.child == null) return false;       // nothing to show → leave prior content
+        if (c.key == lastSlotInPlaceKey) return true;          // same content → no-op (already shown)
+        lastSlotInPlaceKey = c.key;
+
+        final View incoming = c.child;
+        // swap inner content of the slot frame with an animation, leaving the slot (and everything
+        // around it) exactly where it is.
+        final View outgoing = slotFrame.getChildCount() > 0 ? slotFrame.getChildAt(0) : null;
+        incoming.setAlpha(0f);
+        slotFrame.addView(incoming, new FrameLayout.LayoutParams(-1, -1));
+        if (isResult || c.isResult) {
+            // grand reveal in place — scale-pop + rise, nothing else on screen moves
+            incoming.setScaleX(0.82f); incoming.setScaleY(0.82f); incoming.setTranslationY(dp(10));
+            incoming.animate().alpha(1f).scaleX(1f).scaleY(1f).translationY(0f)
+                    .setStartDelay(30).setDuration(360)
+                    .setInterpolator(new android.view.animation.OvershootInterpolator(2.0f)).start();
+        } else {
+            incoming.animate().alpha(1f).setStartDelay(20).setDuration(170)
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
+        }
+        if (outgoing != null) {
+            outgoing.animate().alpha(0f).setDuration(isResult || c.isResult ? 120 : 90)
+                    .withEndAction(() -> { if (outgoing.getParent() == slotFrame) slotFrame.removeView(outgoing); }).start();
+        }
+        return true;
+    }
+
+    private static class EventSlotContent { View child; int key; boolean isResult; }
+
+    private String lastSlotInPlaceKey = "";
+
+    // v447: compute the event/result slot content for the current LIVE at-bat, mirroring the logic in
+    // the card builder but standalone so the poll can refresh just the slot. Returns null if the slot
+    // should keep its prior content (e.g. a terminal pitch still awaiting its real result).
+    private EventSlotContent computeLiveEventSlot(LiveGame game) {
+        LiveFeed feed = game == null ? null : game.liveFeed;
+        if (feed == null || !feed.loaded || feed.atBats.isEmpty()) return null;
+        int idx = heldLiveResultIndex(game, feed);
+        if (idx < 0) idx = liveAtBatIndex(game, feed);
+        if (idx < 0 || idx >= feed.atBats.size()) return null;
+        LiveAtBat ab = feed.atBats.get(idx);
+        if (ab == null) return null;
+        boolean topHalf = ab.topHalf;
+        TeamPalette batPal = topHalf ? activeLiveTrackerAwayPal : activeLiveTrackerHomePal;
+        if (batPal == null) batPal = neutralPalette();
+        int batColor = ensureReadableColor(batPal.primary, 150);
+        int fidx = idx;
+
+        EventSlotContent c = new EventSlotContent();
+        if (ab.complete && !safe(ab.result).isEmpty() && !isPreliminaryResult(ab.result)) {
+            c.child = resultCard(ab, null, batColor);
+            c.key = ("res-" + fidx + "-pending").hashCode();
+            c.isResult = true;
+            return c;
+        }
+        if (!ab.pitches.isEmpty()) {
+            LivePitch latest = ab.pitches.get(ab.pitches.size() - 1);
+            String derived = deriveTerminalResult(ab, latest);
+            if (derived == null) {
+                c.child = resultCard(ab, latest, batColor);
+                c.key = (fidx * 1000) + latest.number;
+                c.isResult = false;
+                return c;
+            }
+            // terminal pitch but result not resolved → keep prior content (return null)
+            return null;
+        }
+        return null;
     }
 
     private View liveTrackerCard(LiveGame game, TeamPalette awayPalette, TeamPalette homePalette) {
@@ -20648,7 +20774,12 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
 
             LinearLayout.LayoutParams slotLp = new LinearLayout.LayoutParams(-1, resultEventSlotHeight());
             slotLp.setMargins(0, dp(6), 0, 0);
-            card.addView(resultEventSlot(eventChild, eventKey), slotLp);
+            View slot = resultEventSlot(eventChild, eventKey);
+            // v447: tag the slot so the poll can find and update it in place (without rebuilding the
+            // whole card) when only the result/event changed. This is what kills the full re-render on
+            // every result — the scoreboard, zone, and header stay put; only this slot animates.
+            slot.setTag("tracker_event_slot");
+            card.addView(slot, slotLp);
         }
 
         // ---- Game Context carousel now lives in its own persistent host (see mountCarouselTicker),
@@ -20755,6 +20886,31 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
             if (ab != null && ab.complete && !safe(ab.result).isEmpty() && !isPreliminaryResult(ab.result)) return ab;
         }
         return null;
+    }
+
+    // v447: component signatures so the poll can update ONLY the part of the tracker that changed,
+    // instead of rebuilding the whole card (which caused the janky full re-render on every result).
+    //  - headerSig: pitcher/batter identity + count + outs + score + bases (the top matchup row)
+    //  - zoneSig:   which AB + how many pitches are plotted (the pitch-zone canvas + legend)
+    //  - eventSig:  the result/event slot's content key (pitch card vs result card)
+    private String trackerHeaderSignature(LiveGame game) {
+        if (game == null) return "null";
+        LiveAtBat ab = currentTrackerAtBat(game);
+        int balls = 0, strikes = 0;
+        if (ab != null && ab.pitches != null && !ab.pitches.isEmpty()) {
+            LivePitch lp = ab.pitches.get(ab.pitches.size() - 1);
+            balls = lp.balls; strikes = lp.strikes;
+        }
+        return game.sitBatterId + "|" + game.sitPitcherId + "|" + balls + "-" + strikes + "|"
+                + game.sitOuts + "|" + game.awayScore + "-" + game.homeScore + "|"
+                + (game.onFirst ? 1 : 0) + (game.onSecond ? 1 : 0) + (game.onThird ? 1 : 0) + "|"
+                + game.sitInning + safe(game.sitInningState) + "|" + (ab == null ? -1 : ab.batterId);
+    }
+    private String trackerZoneSignature(LiveGame game) {
+        if (game == null) return "null";
+        LiveAtBat ab = currentTrackerAtBat(game);
+        return (ab == null ? -1 : ab.abNumber) + "|" + (ab == null || ab.pitches == null ? 0 : ab.pitches.size())
+                + "|" + game.viewAtBatIndex;
     }
 
     private String trackerStateSignature(LiveGame game) {
@@ -23270,8 +23426,10 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
             return r.contains("swinging") ? "Strikeout (swinging)" : (r.contains("called") ? "Strikeout (looking)" : "Strikeout");
         }
         if ((p.isBall || r.contains("ball")) && p.balls >= 4) return "Walk";
-        if (p.isInPlay) {
-            if (ab != null && ab.complete && !safe(ab.result).isEmpty()) return ab.result;
+        // v446: catch in-play via the result STRING too — the isInPlay flag isn't always set even when
+        // the pitch result reads "In play, …". This was the leak that let the intermediate render.
+        if (p.isInPlay || r.contains("in play")) {
+            if (ab != null && ab.complete && !safe(ab.result).isEmpty() && !isPreliminaryResult(ab.result)) return ab.result;
             return "In play";
         }
         return null; // ordinary ball/strike/foul — not AB-ending
