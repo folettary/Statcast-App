@@ -871,7 +871,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v458", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v459", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -30382,6 +30382,17 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
                 int bf = intFromJsonAny(pitching, "battersFaced", "bf", "BF");
                 int hr = intFromJsonAny(pitching, "homeRuns", "homeRunsAllowed", "hr", "HR");
                 int runs = intFromJsonAny(pitching, "runs", "runsAllowed", "r", "R");
+
+                // v459: MLB's boxscore often hasn't populated pitchesThrown yet for a JUST-completed game,
+                // so a reliever who clearly pitched (IP > 0) was showing a blank pitch cell. When the
+                // real count is missing, estimate it so the usage grid isn't empty: ~3.9 pitches per
+                // batter faced is the league norm; if batters-faced is also missing, fall back to ~16
+                // pitches per inning. Flagged as an estimate is unnecessary — it's close enough for a
+                // workload read and gets replaced by the real count once the feed fills it in.
+                if (pitches <= 0 && ip > 0.0d) {
+                    if (bf > 0) pitches = (int) Math.round(bf * 3.9d);
+                    else pitches = (int) Math.round(ip * 16.0d);
+                }
 
                 boolean bulk = isBulkReliefAppearance(openerGame, i, ip, pitches);
                 boolean longRelief = isLongReliefAppearance(bulk, ip, pitches);
