@@ -871,7 +871,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v456", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v457", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -29807,7 +29807,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         card.addView(header, matchWrap());
 
         card.addView(bullpenUsageHeaderRow(), matchWrap());
-        ArrayList<BullpenArmUsage> arms = bullpenTopArms(report, 7);
+        ArrayList<BullpenArmUsage> arms = bullpenTopArms(report, 14);
         if (arms.isEmpty()) {
             TextView empty = text("No recent bullpen usage found", 10, INK_DIM, false);
             empty.setGravity(Gravity.CENTER);
