@@ -871,7 +871,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v457", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v458", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -30211,11 +30211,20 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
     // parse with no relief work caches an empty list; a fetch/parse FAILURE is never cached.
     private ArrayList<BullpenAppearanceRecord> bullpenAppearancesForGame(Team team, int gamePk, String dateKey) {
         String cacheKey = "bpapp_" + gamePk + "_" + team.id;
-        ArrayList<BullpenAppearanceRecord> cached = loadCachedBullpenAppearances(cacheKey);
-        if (cached != null) return cached;
+        // v458: only trust the permanent cache for games that are at least 2 calendar days old. A game
+        // from today/yesterday may have been parsed and cached while it was still live or before the
+        // boxscore stats were final — which permanently dropped a reliever who pitched late (e.g. a
+        // pitcher's appearance written before his line settled). Recent games are always re-parsed so
+        // yesterday's relief appearances show up reliably; older games stay cached (immutable).
+        int daysOld = daysAgoFromDateKey(dateKey);
+        boolean cacheTrustworthy = daysOld >= 2;
+        if (cacheTrustworthy) {
+            ArrayList<BullpenAppearanceRecord> cached = loadCachedBullpenAppearances(cacheKey);
+            if (cached != null) return cached;
+        }
         ArrayList<BullpenAppearanceRecord> parsed = parseBullpenAppearancesFromBoxscore(team, gamePk, dateKey);
         if (parsed != null) {
-            saveCachedBullpenAppearances(cacheKey, parsed);
+            if (cacheTrustworthy) saveCachedBullpenAppearances(cacheKey, parsed); // only persist immutable games
             return parsed;
         }
         return new ArrayList<>();
@@ -30845,9 +30854,20 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         Stats awayStarterStats = pitcherStatsForLiveCard(pitcherEntries, awayStarter, season);
         Stats homeStarterStats = pitcherStatsForLiveCard(pitcherEntries, homeStarter, season);
 
-        if (awayOffense == null || homeOffense == null || awayStarterStats == null || homeStarterStats == null) {
-            throw new Exception("Missing team offense or starter data");
+        // v458: the offense side must exist (it always does — it's full team data). But a NAMED starter
+        // can have no qualifying season line yet (a rookie/call-up, an opener, or a feed that lists the
+        // probable with empty stats — e.g. today's Padres starter showing "0-0, -.-- ERA"). Previously
+        // ANY missing starter threw and dropped the ENTIRE card, so games with a perfectly valid starter
+        // showed nothing. Now we fall back to a league-average pitcher baseline for the thin side so the
+        // matchup still renders (that starter simply grades out neutral), and only fail if the OFFENSE
+        // data is genuinely missing.
+        if (awayOffense == null || homeOffense == null) {
+            throw new Exception("Missing team offense data");
         }
+        boolean awayStarterThin = (awayStarterStats == null || !awayStarterStats.anyValue());
+        boolean homeStarterThin = (homeStarterStats == null || !homeStarterStats.anyValue());
+        if (awayStarterThin) awayStarterStats = leaguePitcherBaselineStats();
+        if (homeStarterThin) homeStarterStats = leaguePitcherBaselineStats();
 
         Stats sideA = offenseVsStarterStats(awayOffense, homeStarterStats);
         Stats sideB = offenseVsStarterStats(homeOffense, awayStarterStats);
@@ -31036,6 +31056,25 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         out.put("ovsDiscipline", discipline);
         out.put("ovsStarterVuln", starterVuln);
         return out;
+    }
+
+    // v458: a league-average starter's stat line, used when a named starter has no qualifying season
+    // data yet (rookie/opener/feed gap) so the offense-vs-starter card can still render with that
+    // starter graded out at roughly league average rather than the whole card being dropped. Values
+    // are approximate MLB starter averages for each key the comparison reads.
+    private Stats leaguePitcherBaselineStats() {
+        Stats s = new Stats();
+        s.put("era", 4.10d);
+        s.put("whip", 1.27d);
+        s.put("pitchBBPct", 8.0d);
+        s.put("pitchKPct", 22.5d);
+        s.put("pWhiffPct", 25.0d);
+        s.put("pHardHitPct", 39.0d);
+        s.put("pBarrelPct", 7.5d);
+        s.put("pxBA", 0.245d);
+        s.put("pxSLG", 0.410d);
+        s.put("pxwOBA", 0.320d);
+        return s;
     }
 
     private Stats offenseVsStarterLeagueBaseline() {
