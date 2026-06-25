@@ -123,6 +123,11 @@ public class MainActivity extends Activity {
     // A cached pool grows on demand, so nested blocking fan-outs can't deadlock the way nested
     // submits into the bounded io pool could.
     private final ExecutorService fanout = Executors.newCachedThreadPool();
+    // v465: edge previews get their own small bounded pool. They were on the shared 8-thread io pool,
+    // where they queued behind each other and behind the day-slate fetch (edges never appeared; day
+    // changes hung). io is now free for other work, fanout runs the critical slate fetch, and this pool
+    // works through edge builds a few at a time — steady, no flooding, no contention.
+    private final ExecutorService edgePool = Executors.newFixedThreadPool(4);
     private final Handler main = new Handler(Looper.getMainLooper());
     // v201: was an unbounded HashMap. A session that touches several seasons accumulates tens
     // of MB of dead CSV/JSON strings (each Savant custom CSV is 1-3MB and is only read once,
@@ -871,7 +876,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v464", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v465", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -15975,8 +15980,11 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
     private String httpFetchNetwork(String urlString) throws Exception {
         HttpURLConnection conn = (HttpURLConnection) new URL(urlString).openConnection();
-        conn.setConnectTimeout(12000);
-        conn.setReadTimeout(25000);
+        conn.setConnectTimeout(8000);
+        // v465: was 25s — a slow MLB response left the slate stuck on "Loading…" for up to ~25-37s
+        // before erroring. 12s is still ample for the largest payloads but fails fast enough that the
+        // user isn't stranded; a failed slate fetch then shows the error/retry instead of hanging.
+        conn.setReadTimeout(12000);
         conn.setRequestMethod("GET");
         conn.setRequestProperty("User-Agent", "Mozilla/5.0 Statcast Compare Android");
         conn.setRequestProperty("Accept", "text/csv,text/plain,application/json,text/html,*/*");
@@ -26545,7 +26553,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         if (game == null || !game.isPregame()) return;
         LiveMatchupEdgePreview edge = liveGameEdgePreview(game);
         if (edge != null && edge.available) return;
-        final int delay = Math.min(9000, Math.max(0, slateIndex) * 450);
+        final int delay = Math.min(2500, Math.max(0, slateIndex) * 120);
         main.postDelayed(() -> {
             if (activePrimaryTab != TAB_MATCHUP || activeLiveGameMenu != null || matchupPathMode != MATCHUP_PATH_LIVE || matchupResultMode) return;
             startLiveMatchupEdgePreviewLoad(game);
@@ -26749,10 +26757,8 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         final int awayFallback = awayFallbackPal == null ? Color.rgb(99, 166, 255) : awayFallbackPal.primary;
         final int homeFallback = homeFallbackPal == null ? Color.rgb(255, 109, 131) : homeFallbackPal.primary;
 
-        // v464: wave-1 edge previews run on the unbounded fanout pool so the visible Game Edge appears
-        // promptly. On the fixed 8-thread io pool they queued behind each other (and behind other io
-        // work), which is why edges were slow/absent across a full slate.
-        fanout.execute(() -> {
+        // v465: edge previews run on the dedicated bounded edgePool (see field comment).
+        edgePool.execute(() -> {
             final ArrayList<LiveMatchupEdgeBuild> builds = new ArrayList<>();
             try {
                 Team awayTeam = teamForLiveGame(targetGame.awayTeamId, targetGame.awayName, targetGame.awayAbbr);
@@ -26787,11 +26793,10 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         final int season = currentSeason();
         final LiveGame targetGame = game;
 
-        io.execute(() -> {
-            // v431: REVERTED to the pre-v427 sequential form. The parallel version (15 games × 3
-            // concurrent fanout tasks = ~45 simultaneous fetches, each committing+rebuilding the slate
-            // separately) is what made this screen lag. Computing the three sections in sequence and
-            // committing ONCE per game restores the original smooth loading.
+        edgePool.execute(() -> {
+            // v465: on the dedicated bounded edgePool. Computing the three sections in sequence and
+            // committing ONCE per game (the v431 form) keeps each game's work cheap; the bounded pool
+            // limits how many games compute at once so the network isn't flooded.
             final ArrayList<LiveMatchupEdgeBuild> builds = new ArrayList<>();
             try {
                 Team awayTeam = teamForLiveGame(targetGame.awayTeamId, targetGame.awayName, targetGame.awayAbbr);
