@@ -871,7 +871,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v461", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v462", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -18725,10 +18725,27 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     }
 
     private boolean tileRefreshQueued = false;
+    private long lastTileRefreshRequestMs = 0;
     private void refreshVisibleGameTiles() {
+        // v462: edge-preview builds (4 per game, two waves, staggered over ~9s) and final-standout
+        // fetches each used to trigger a FULL slate re-render. With ~15 games their completions land in
+        // different coalescing windows, so the slate rebuilt every card many times over — the matchups
+        // lag. We now coalesce hard: at most one re-render per ~1.2s, and we trail the latest request
+        // (reset the timer each call) so a burst of completions collapses into a SINGLE rebuild after
+        // the burst settles, instead of one rebuild per completion.
+        long now = System.currentTimeMillis();
+        lastTileRefreshRequestMs = now;
         if (tileRefreshQueued) return;
         tileRefreshQueued = true;
+        scheduleTileRefreshCheck();
+    }
+
+    private void scheduleTileRefreshCheck() {
         main.postDelayed(() -> {
+            long sinceLastRequest = System.currentTimeMillis() - lastTileRefreshRequestMs;
+            // if more requests arrived while we waited, keep waiting until the burst settles (trailing
+            // debounce), so many completions become one rebuild.
+            if (sinceLastRequest < 1000L) { scheduleTileRefreshCheck(); return; }
             tileRefreshQueued = false;
             if (lastRenderedSlate == null) return;
             if (activePrimaryTab == TAB_HOME && homeLiveMatchupsBox != null) {
@@ -18737,7 +18754,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                     && standingsBox != null && standingsBox.getVisibility() == View.VISIBLE) {
                 renderLiveMatchupGames(lastRenderedSlate);
             }
-        }, 250);
+        }, 1200L);
     }
 
 private String liveStateSummary(LiveGame game) {
