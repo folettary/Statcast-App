@@ -871,7 +871,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v459", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v460", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -30366,7 +30366,14 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
 
             for (int i = 0; i < pitchers.length(); i++) {
                 int pid = pitchers.optInt(i, 0);
-                if (pid <= 0 || starterIds.contains(pid)) continue;
+                if (pid <= 0) continue;
+                // v460: normally skip the listed starter — but in an OPENER game the first pitcher is a
+                // reliever making a short scripted start (e.g. Wandy Peralta opening: 13 pitches, 3
+                // batters, 1 inning). That IS a bullpen appearance and belongs on the usage grid, so we
+                // only skip a starter when it is NOT the opener of an opener game. Genuine multi-inning
+                // starters are still excluded.
+                boolean isOpenerArm = openerGame && pid == firstPitcherId;
+                if (starterIds.contains(pid) && !isOpenerArm) continue;
                 JSONObject pObj = players.optJSONObject("ID" + pid);
                 JSONObject pitching = pitchingLineForPlayer(players, pid);
                 if (pitching == null) continue;
