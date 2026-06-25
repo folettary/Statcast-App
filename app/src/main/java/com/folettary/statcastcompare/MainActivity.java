@@ -871,7 +871,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v460", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v461", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -18520,6 +18520,44 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         });
     }
 
+    private long liveSlateBuildToken = 0;
+
+    // v461: mount one slate ROW (two game cards) per frame, then schedule the next, so the heavy card
+    // inflation is spread across frames instead of freezing the UI thread in a single pass. A build
+    // token cancels an in-progress fill if the user navigates away or the slate is re-rendered.
+    private void mountSlateRowsIncrementally(LinearLayout panel, ArrayList<LiveGame> games,
+                                             ArrayList<Integer> indexes, int i, long token) {
+        if (panel == null || games == null) return;
+        if (token != liveSlateBuildToken) return;            // a newer build superseded this one
+        if (activePrimaryTab != TAB_MATCHUP || matchupPathMode != MATCHUP_PATH_LIVE || matchupResultMode) return;
+        if (i >= games.size()) return;
+        if (panel.getParent() == null && i > 0) return;       // panel detached → stop
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams rowLp = matchWrap();
+        rowLp.setMargins(0, dp(6), 0, 0);
+        panel.addView(row, rowLp);
+
+        LinearLayout.LayoutParams leftLp = new LinearLayout.LayoutParams(0, dp(140), 1);
+        row.addView(liveGameCard(games.get(i), indexes.get(i)), leftLp);
+        if (i + 1 < games.size()) {
+            LinearLayout.LayoutParams rightLp = new LinearLayout.LayoutParams(0, dp(140), 1);
+            rightLp.setMargins(dp(7), 0, 0, 0);
+            row.addView(liveGameCard(games.get(i + 1), indexes.get(i + 1)), rightLp);
+        } else {
+            Space spacer = new Space(this);
+            LinearLayout.LayoutParams rightLp = new LinearLayout.LayoutParams(0, dp(140), 1);
+            rightLp.setMargins(dp(7), 0, 0, 0);
+            row.addView(spacer, rightLp);
+        }
+
+        final int next = i + 2;
+        if (next < games.size()) {
+            main.post(() -> mountSlateRowsIncrementally(panel, games, indexes, next, token));
+        }
+    }
+
     private void renderLiveMatchupGames(ArrayList<LiveGame> games) {
         if (standingsBox == null || activePrimaryTab != TAB_MATCHUP || matchupPathMode != MATCHUP_PATH_LIVE || matchupResultMode) return;
         lastRenderedSlate = games;
@@ -18606,29 +18644,16 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 }
             }
 
-            // remaining games in the normal two-up grid, preserving original slate indexes
-            int i = 0;
-            while (i < restGames.size()) {
-                LinearLayout row = new LinearLayout(this);
-                row.setOrientation(LinearLayout.HORIZONTAL);
-                LinearLayout.LayoutParams rowLp = matchWrap();
-                rowLp.setMargins(0, dp(6), 0, 0);
-                panel.addView(row, rowLp);
-
-                LinearLayout.LayoutParams leftLp = new LinearLayout.LayoutParams(0, dp(140), 1);
-                row.addView(liveGameCard(restGames.get(i), restIndexes.get(i)), leftLp);
-                if (i + 1 < restGames.size()) {
-                    LinearLayout.LayoutParams rightLp = new LinearLayout.LayoutParams(0, dp(140), 1);
-                    rightLp.setMargins(dp(7), 0, 0, 0);
-                    row.addView(liveGameCard(restGames.get(i + 1), restIndexes.get(i + 1)), rightLp);
-                } else {
-                    Space spacer = new Space(this);
-                    LinearLayout.LayoutParams rightLp = new LinearLayout.LayoutParams(0, dp(140), 1);
-                    rightLp.setMargins(dp(7), 0, 0, 0);
-                    row.addView(spacer, rightLp);
-                }
-                i += 2;
-            }
+            // remaining games in the normal two-up grid, preserving original slate indexes.
+            // v461: mount the rows INCREMENTALLY — one row per frame via main.post — instead of building
+            // every card synchronously in a single pass. Inflating ~8 rows of logo-duel cards (gradients,
+            // record/probable rows, edge blends) in one frame is what froze the Matchups tab. Spreading
+            // the work across frames lets the UI thread breathe so scrolling/taps stay responsive while
+            // the slate fills in; the async edge previews still stream into each card as before.
+            final ArrayList<LiveGame> restF = restGames;
+            final ArrayList<Integer> restIdxF = restIndexes;
+            final long slateToken = ++liveSlateBuildToken;
+            mountSlateRowsIncrementally(panel, restF, restIdxF, 0, slateToken);
         }
 
         standingsBox.addView(panel, panelLp);
