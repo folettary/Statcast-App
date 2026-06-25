@@ -618,6 +618,8 @@ public class MainActivity extends Activity {
         setPrimaryTab(TAB_HOME);
         loadTeamsAndPlayers();
         fetchTodayGames();
+        // v466: first-launch newcomer guide (once). Posted so it overlays after the first frame.
+        root.post(() -> { if (!hasSeenOnboarding()) showOnboardingGuide(true); });
     }
 
     @Override
@@ -876,7 +878,17 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v465", 9, Color.argb(150, 213, 238, 236), true);
+        // v466: help button — re-opens the newcomer guide any time.
+        TextView helpBtn = text("?", 12, Color.argb(220, 213, 238, 236), true);
+        helpBtn.setGravity(Gravity.CENTER);
+        int helpSz = dp(24);
+        helpBtn.setBackground(roundedGradientStroke(new int[] { Color.argb(70, 12, 24, 40), Color.argb(70, 16, 30, 50) }, 12, Color.argb(110, 104, 195, 228), 1));
+        LinearLayout.LayoutParams helpLp = new LinearLayout.LayoutParams(helpSz, helpSz);
+        helpLp.setMargins(0, 0, dp(8), 0);
+        helpBtn.setOnClickListener(v -> showOnboardingGuide(false));
+        appBar.addView(helpBtn, helpLp);
+
+        TextView versionBadge = text("v466", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -31546,6 +31558,163 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
 
     private static final int MAX_FAVORITES = 12;
     private static final String PREFS_FAVORITES = "statcast_favorites_v237";
+
+    // ===== v466: newcomer onboarding guide =====
+    private boolean hasSeenOnboarding() {
+        return getSharedPreferences(PREFS_FAVORITES, MODE_PRIVATE).getBoolean("seen_onboarding_v1", false);
+    }
+    private void markOnboardingSeen() {
+        getSharedPreferences(PREFS_FAVORITES, MODE_PRIVATE).edit().putBoolean("seen_onboarding_v1", true).apply();
+    }
+
+    private static class OnbCard {
+        final String tag, title, body; final int accent;
+        OnbCard(String tag, String title, String body, int accent) { this.tag = tag; this.title = title; this.body = body; this.accent = accent; }
+    }
+
+    private void showOnboardingGuide(boolean firstLaunch) {
+        final android.view.ViewGroup decor = (android.view.ViewGroup) getWindow().getDecorView();
+        if (decor == null) return;
+        if (decor.findViewWithTag("onboarding_overlay") != null) return; // already open
+
+        final ArrayList<OnbCard> cards = new ArrayList<>();
+        cards.add(new OnbCard("WELCOME", "Welcome to Statcast Compare",
+                "Your edge on every MLB matchup — pregame reads, live at-bat tracking, and deep stat profiles for every team and player. Swipe through to see how it works.",
+                Color.rgb(104, 195, 228)));
+        cards.add(new OnbCard("MATCHUPS", "Matchups & the Pregame Edge",
+                "The Matchup tab lists every game on the slate. Each card shows a Game Edge — a blended read of lineup fit, starting pitchers, team baseline, and bullpens — so you can see who's favored before first pitch. Tap any game to open the full breakdown. Use the day arrows to look ahead or back.",
+                Color.rgb(255, 155, 92)));
+        cards.add(new OnbCard("LIVE", "Live Feed & At-Bat Tracker",
+                "When a game is live, open it for a pitch-by-pitch tracker: the strike zone with every pitch plotted, count and base-out state, the current matchup, and the result of each at-bat as it happens — plus a win-probability chart you can scrub to any point in the game.",
+                Color.rgb(82, 226, 176)));
+        cards.add(new OnbCard("LENSES", "Lenses — change what the stats mean",
+                "Lenses let you reframe every comparison: switch between Standard, Expected (xStats), and other views to ask different questions of the same matchup. Look for the lens control on comparison screens and tap to switch — the whole read updates to match.",
+                Color.rgb(247, 197, 77)));
+        cards.add(new OnbCard("PROFILES", "Player & Team Profiles",
+                "Search any player or team for a full profile: season stats, rankings, splits, and form. Star your favorite teams to float their games to the top of the slate. It's the same data the matchup edges are built on — now at the player level.",
+                Color.rgb(180, 150, 255)));
+
+        FrameLayout overlay = new FrameLayout(this);
+        overlay.setTag("onboarding_overlay");
+        overlay.setBackgroundColor(Color.argb(247, 4, 8, 15));
+        overlay.setClickable(true);
+        decor.addView(overlay, new FrameLayout.LayoutParams(-1, -1));
+
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        FrameLayout.LayoutParams colLp = new FrameLayout.LayoutParams(-1, -1);
+        colLp.setMargins(dp(16), dp(40), dp(16), dp(20));
+        overlay.addView(col, colLp);
+
+        // top row: page label + Skip
+        LinearLayout topRow = new LinearLayout(this);
+        topRow.setOrientation(LinearLayout.HORIZONTAL);
+        topRow.setGravity(Gravity.CENTER_VERTICAL);
+        final TextView stepLabel = text("1 / " + cards.size(), 10, INK_DIM, true);
+        stepLabel.setLetterSpacing(0.1f);
+        topRow.addView(stepLabel, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView skip = text("Skip", 12, Color.argb(210, 213, 238, 236), true);
+        skip.setPadding(dp(10), dp(6), dp(10), dp(6));
+        topRow.addView(skip);
+        col.addView(topRow, matchWrap());
+
+        // swipeable pager
+        final ScrollView[] pages = new ScrollView[cards.size()];
+        final android.widget.HorizontalScrollView pager = new android.widget.HorizontalScrollView(this);
+        pager.setHorizontalScrollBarEnabled(false);
+        final LinearLayout track = new LinearLayout(this);
+        track.setOrientation(LinearLayout.HORIZONTAL);
+        pager.addView(track, new FrameLayout.LayoutParams(-1, -1));
+        LinearLayout.LayoutParams pagerLp = new LinearLayout.LayoutParams(-1, 0, 1f);
+        pagerLp.setMargins(0, dp(8), 0, dp(8));
+        col.addView(pager, pagerLp);
+
+        final int screenW = getResources().getDisplayMetrics().widthPixels - dp(32);
+        for (int i = 0; i < cards.size(); i++) {
+            OnbCard c = cards.get(i);
+            ScrollView pageScroll = new ScrollView(this);
+            pageScroll.setVerticalScrollBarEnabled(false);
+            LinearLayout cardCol = new LinearLayout(this);
+            cardCol.setOrientation(LinearLayout.VERTICAL);
+            cardCol.setGravity(Gravity.CENTER_VERTICAL);
+            cardCol.setPadding(dp(22), dp(28), dp(22), dp(28));
+            cardCol.setBackground(roundedGradientStroke(new int[] { Color.rgb(7, 13, 24), Color.rgb(10, 20, 38) }, 24,
+                    Color.argb(120, Color.red(c.accent), Color.green(c.accent), Color.blue(c.accent)), 1));
+            TextView tag = text(c.tag, 10, c.accent, true);
+            tag.setLetterSpacing(0.22f);
+            cardCol.addView(tag, matchWrap());
+            TextView title = text(c.title, 22, Color.WHITE, true);
+            LinearLayout.LayoutParams titleLp = matchWrap(); titleLp.setMargins(0, dp(12), 0, dp(12));
+            cardCol.addView(title, titleLp);
+            TextView body = text(c.body, 14, INK_SOFT, false);
+            body.setLineSpacing(dp(5), 1f);
+            cardCol.addView(body, matchWrap());
+            pageScroll.addView(cardCol, new ScrollView.LayoutParams(-1, -2));
+            LinearLayout.LayoutParams pLp = new LinearLayout.LayoutParams(screenW, -1);
+            if (i > 0) pLp.setMargins(dp(12), 0, 0, 0);
+            track.addView(pageScroll, pLp);
+            pages[i] = pageScroll;
+        }
+
+        // page dots
+        final LinearLayout dots = new LinearLayout(this);
+        dots.setOrientation(LinearLayout.HORIZONTAL);
+        dots.setGravity(Gravity.CENTER);
+        final View[] dotViews = new View[cards.size()];
+        for (int i = 0; i < cards.size(); i++) {
+            View dot = new View(this);
+            GradientDrawable gd = new GradientDrawable(); gd.setShape(GradientDrawable.OVAL);
+            gd.setColor(i == 0 ? Color.WHITE : Color.argb(70, 255, 255, 255));
+            dot.setBackground(gd);
+            LinearLayout.LayoutParams dLp = new LinearLayout.LayoutParams(dp(7), dp(7));
+            dLp.setMargins(dp(4), 0, dp(4), 0);
+            dots.addView(dot, dLp);
+            dotViews[i] = dot;
+        }
+        col.addView(dots, matchWrap());
+
+        // Next / Get Started button
+        final TextView nextBtn = text("Next", 14, Color.rgb(6, 12, 22), true);
+        nextBtn.setGravity(Gravity.CENTER);
+        nextBtn.setPadding(0, dp(14), 0, dp(14));
+        nextBtn.setBackground(roundedGradientStroke(new int[] { Color.rgb(196, 228, 255), Color.rgb(150, 205, 255) }, 16, Color.argb(0, 0, 0, 0), 0));
+        LinearLayout.LayoutParams nextLp = matchWrap(); nextLp.setMargins(0, dp(14), 0, 0);
+        col.addView(nextBtn, nextLp);
+
+        final int[] current = { 0 };
+        final int pageStride = screenW + dp(12);
+        final Runnable updateUi = () -> {
+            int idx = current[0];
+            stepLabel.setText((idx + 1) + " / " + cards.size());
+            for (int i = 0; i < dotViews.length; i++) {
+                GradientDrawable gd = new GradientDrawable(); gd.setShape(GradientDrawable.OVAL);
+                gd.setColor(i == idx ? Color.WHITE : Color.argb(70, 255, 255, 255));
+                dotViews[i].setBackground(gd);
+            }
+            nextBtn.setText(idx == cards.size() - 1 ? "Get started" : "Next");
+        };
+        // sync dots/label to manual swipes
+        pager.getViewTreeObserver().addOnScrollChangedListener(() -> {
+            int idx = Math.round(pager.getScrollX() / (float) pageStride);
+            if (idx < 0) idx = 0; if (idx >= cards.size()) idx = cards.size() - 1;
+            if (idx != current[0]) { current[0] = idx; updateUi.run(); }
+        });
+
+        final Runnable dismiss = () -> {
+            markOnboardingSeen();
+            overlay.animate().alpha(0f).setDuration(180).withEndAction(() -> {
+                if (overlay.getParent() == decor) decor.removeView(overlay);
+            }).start();
+        };
+        skip.setOnClickListener(v -> dismiss.run());
+        nextBtn.setOnClickListener(v -> {
+            if (current[0] >= cards.size() - 1) { dismiss.run(); return; }
+            current[0]++;
+            pager.smoothScrollTo(current[0] * pageStride, 0);
+            updateUi.run();
+        });
+        updateUi.run();
+    }
 
     private boolean isFavoritePlayer(int playerId) {
         SharedPreferences prefs = getSharedPreferences(PREFS_FAVORITES, MODE_PRIVATE);
