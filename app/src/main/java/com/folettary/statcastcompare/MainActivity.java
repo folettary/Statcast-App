@@ -871,7 +871,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v463", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v464", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -18516,7 +18516,11 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         // result if the user is still on the same day, and stamp lastRenderedSlateDay so the debounced
         // tile refresh can't repaint a stale day either.
         final int fetchForDay = liveDayOffset;
-        io.execute(() -> {
+        // v464: run the PRIMARY slate fetch on the unbounded fanout pool, not the fixed 8-thread io
+        // pool. Edge-preview builds (many per slate, each doing blocking stat fetches) can fill all 8
+        // io threads, and the day's game fetch was queuing behind them — so changing days got stuck on
+        // "Loading…" until the edge work drained. The slate is critical-path and must run immediately.
+        fanout.execute(() -> {
             try {
                 ArrayList<LiveGame> games = fetchTodayLiveGames();
                 main.post(() -> {
@@ -26745,7 +26749,10 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         final int awayFallback = awayFallbackPal == null ? Color.rgb(99, 166, 255) : awayFallbackPal.primary;
         final int homeFallback = homeFallbackPal == null ? Color.rgb(255, 109, 131) : homeFallbackPal.primary;
 
-        io.execute(() -> {
+        // v464: wave-1 edge previews run on the unbounded fanout pool so the visible Game Edge appears
+        // promptly. On the fixed 8-thread io pool they queued behind each other (and behind other io
+        // work), which is why edges were slow/absent across a full slate.
+        fanout.execute(() -> {
             final ArrayList<LiveMatchupEdgeBuild> builds = new ArrayList<>();
             try {
                 Team awayTeam = teamForLiveGame(targetGame.awayTeamId, targetGame.awayName, targetGame.awayAbbr);
