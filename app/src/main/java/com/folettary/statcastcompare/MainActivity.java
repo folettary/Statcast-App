@@ -871,7 +871,7 @@ public class MainActivity extends Activity {
         liveBadge.setLetterSpacing(0.08f);
         appBar.addView(liveBadge, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView versionBadge = text("v462", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v463", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -18510,12 +18510,23 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
         standingsBox.addView(panel, panelLp);
 
+        // v463: capture the day this fetch is FOR. When you flip days quickly, multiple fetches race;
+        // without this guard whichever lands last wins, so tomorrow's view could get overwritten by a
+        // late-arriving today fetch (the "shows today's games" / "doesn't load" bug). We only render a
+        // result if the user is still on the same day, and stamp lastRenderedSlateDay so the debounced
+        // tile refresh can't repaint a stale day either.
+        final int fetchForDay = liveDayOffset;
         io.execute(() -> {
             try {
                 ArrayList<LiveGame> games = fetchTodayLiveGames();
-                main.post(() -> renderLiveMatchupGames(games));
+                main.post(() -> {
+                    if (liveDayOffset != fetchForDay) return; // user moved to another day → discard
+                    lastRenderedSlateDay = fetchForDay;
+                    renderLiveMatchupGames(games);
+                });
             } catch (Exception e) {
-                main.post(() -> renderLiveMatchupError(e.getMessage()));
+                final String msg = e.getMessage();
+                main.post(() -> { if (liveDayOffset == fetchForDay) renderLiveMatchupError(msg); });
             }
         });
     }
@@ -18726,15 +18737,17 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
     private boolean tileRefreshQueued = false;
     private long lastTileRefreshRequestMs = 0;
+    private long firstPendingTileRefreshMs = 0; // v463: start of the current pending burst
+    private int lastRenderedSlateDay = Integer.MIN_VALUE; // v463: which day lastRenderedSlate is for
     private void refreshVisibleGameTiles() {
-        // v462: edge-preview builds (4 per game, two waves, staggered over ~9s) and final-standout
-        // fetches each used to trigger a FULL slate re-render. With ~15 games their completions land in
-        // different coalescing windows, so the slate rebuilt every card many times over — the matchups
-        // lag. We now coalesce hard: at most one re-render per ~1.2s, and we trail the latest request
-        // (reset the timer each call) so a burst of completions collapses into a SINGLE rebuild after
-        // the burst settles, instead of one rebuild per completion.
+        // v463: coalesce slate re-renders, but render PROGRESSIVELY during a burst rather than only
+        // after it fully settles. v462's pure trailing debounce reset the timer on every completion, and
+        // since edge loads are staggered over ~9s the re-render didn't fire until they were ALL done —
+        // so edges appeared to never load until very late. Now we still collapse rapid bursts, but force
+        // a refresh at least every ~1.6s while completions keep arriving, so edges stream in steadily.
         long now = System.currentTimeMillis();
         lastTileRefreshRequestMs = now;
+        if (firstPendingTileRefreshMs == 0) firstPendingTileRefreshMs = now;
         if (tileRefreshQueued) return;
         tileRefreshQueued = true;
         scheduleTileRefreshCheck();
@@ -18742,19 +18755,22 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
     private void scheduleTileRefreshCheck() {
         main.postDelayed(() -> {
-            long sinceLastRequest = System.currentTimeMillis() - lastTileRefreshRequestMs;
-            // if more requests arrived while we waited, keep waiting until the burst settles (trailing
-            // debounce), so many completions become one rebuild.
-            if (sinceLastRequest < 1000L) { scheduleTileRefreshCheck(); return; }
+            long nowMs = System.currentTimeMillis();
+            long sinceLastRequest = nowMs - lastTileRefreshRequestMs;
+            long sinceFirstPending = nowMs - firstPendingTileRefreshMs;
+            // fire when the burst settles (no new request for ~500ms) OR when we've already waited long
+            // enough (~1.6s) that we should show progress even though more completions keep arriving.
+            if (sinceLastRequest < 500L && sinceFirstPending < 1600L) { scheduleTileRefreshCheck(); return; }
             tileRefreshQueued = false;
+            firstPendingTileRefreshMs = 0;
             if (lastRenderedSlate == null) return;
             if (activePrimaryTab == TAB_HOME && homeLiveMatchupsBox != null) {
                 renderHomeLiveMatchupsGames(lastRenderedSlate);
             } else if (activePrimaryTab == TAB_MATCHUP && activeLiveGameMenu == null
                     && standingsBox != null && standingsBox.getVisibility() == View.VISIBLE) {
-                renderLiveMatchupGames(lastRenderedSlate);
+                if (lastRenderedSlateDay == liveDayOffset) renderLiveMatchupGames(lastRenderedSlate);
             }
-        }, 1200L);
+        }, 250L);
     }
 
 private String liveStateSummary(LiveGame game) {
