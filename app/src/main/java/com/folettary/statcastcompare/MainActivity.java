@@ -78,9 +78,9 @@ import java.util.concurrent.Future;
 public class MainActivity extends Activity {
     // ===== TEMP PREVIEW: treat completed games as live so the live tracker design can be
     // reviewed against real data. Set back to false to restore normal behavior. (v277) =====
-    static boolean DEBUG_FORCE_LIVE = true;
+    static boolean DEBUG_FORCE_LIVE = false;
     static boolean DEBUG_TRACKING_WINDOW = true; // v375: show full pitch-tracking window bounds
-    static boolean DEBUG_LIVE_HUD = true; // v439: on-screen live-state readout to diagnose animations
+    static boolean DEBUG_LIVE_HUD = false; // v439: on-screen live-state readout to diagnose animations
     private String liveHudState = "—";    // updated each poll; shown when DEBUG_LIVE_HUD is on
     private int liveHudPollCount = 0;
     private TextView liveHudView = null;
@@ -888,7 +888,7 @@ public class MainActivity extends Activity {
         helpBtn.setOnClickListener(v -> showOnboardingGuide(false));
         appBar.addView(helpBtn, helpLp);
 
-        TextView versionBadge = text("v466", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v467", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -5775,8 +5775,17 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
         searchInput.setOnFocusChangeListener((v, hasFocus) -> {
             setBottomDockVisible(true);
-            if (hasFocus && activePrimaryTab == TAB_PROFILE && mainScroll != null) mainScroll.scrollTo(0, 0);
+            // v467: ONLY jump to top when the user actually TAPPED the search field. Previously any
+            // focus gain on the profile tab scrolled to top — and async section loads re-render the
+            // profile, which can hand focus back to the search input incidentally, yanking the user
+            // back to the top mid-scroll (the "profile bounce"). The touch flag distinguishes a real
+            // tap from a focus change caused by a re-render.
+            if (hasFocus && userTappedSearch && activePrimaryTab == TAB_PROFILE && mainScroll != null) {
+                mainScroll.scrollTo(0, 0);
+            }
+            if (!hasFocus) userTappedSearch = false;
         });
+        searchInput.setOnTouchListener((v, ev) -> { userTappedSearch = true; return false; });
         compareSearchInput.setOnFocusChangeListener((v, hasFocus) -> {
             setBottomDockVisible(true);
         });
@@ -6098,7 +6107,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         }
         suggestionsAdapter.notifyDataSetChanged();
         suggestionsList.setVisibility(filteredPlayers.isEmpty() ? View.GONE : View.VISIBLE);
-        if (activePrimaryTab == TAB_PROFILE && searchInput != null && searchInput.hasFocus() && mainScroll != null) {
+        if (activePrimaryTab == TAB_PROFILE && userTappedSearch && searchInput != null && searchInput.hasFocus() && mainScroll != null) {
             mainScroll.scrollTo(0, 0);
         }
     }
@@ -15623,7 +15632,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
                 conn.setReadTimeout(6000);
                 conn.setUseCaches(true);
                 conn.setInstanceFollowRedirects(true);
-                conn.setRequestProperty("User-Agent", "Mozilla/5.0 Statcast Compare Android");
+                conn.setRequestProperty("User-Agent", "Mozilla/5.0 Diamond Lens Android");
                 byte[] data = readAllBytes(conn.getInputStream());
                 Bitmap b = decodeScaledBytes(data);
                 if (b != null) {
@@ -15998,7 +16007,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         // user isn't stranded; a failed slate fetch then shows the error/retry instead of hanging.
         conn.setReadTimeout(12000);
         conn.setRequestMethod("GET");
-        conn.setRequestProperty("User-Agent", "Mozilla/5.0 Statcast Compare Android");
+        conn.setRequestProperty("User-Agent", "Mozilla/5.0 Diamond Lens Android");
         conn.setRequestProperty("Accept", "text/csv,text/plain,application/json,text/html,*/*");
         int code = conn.getResponseCode();
         InputStream stream = code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream();
@@ -18760,6 +18769,7 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     }
 
     private boolean tileRefreshQueued = false;
+    private boolean userTappedSearch = false; // v467: true only after a real tap on the search field
     private long lastTileRefreshRequestMs = 0;
     private long firstPendingTileRefreshMs = 0; // v463: start of the current pending burst
     private int lastRenderedSlateDay = Integer.MIN_VALUE; // v463: which day lastRenderedSlate is for
@@ -31578,7 +31588,7 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         if (decor.findViewWithTag("onboarding_overlay") != null) return; // already open
 
         final ArrayList<OnbCard> cards = new ArrayList<>();
-        cards.add(new OnbCard("WELCOME", "Welcome to Statcast Compare",
+        cards.add(new OnbCard("WELCOME", "Welcome to Diamond Lens",
                 "Your edge on every MLB matchup — pregame reads, live at-bat tracking, and deep stat profiles for every team and player. Swipe through to see how it works.",
                 Color.rgb(104, 195, 228)));
         cards.add(new OnbCard("MATCHUPS", "Matchups & the Pregame Edge",
