@@ -908,7 +908,7 @@ public class MainActivity extends Activity {
         helpBtn.setOnClickListener(v -> showOnboardingGuide(false));
         appBar.addView(helpBtn, helpLp);
 
-        TextView versionBadge = text("v469", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v470", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -18477,6 +18477,19 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         return gd;
     }
     private int dp(int v) { return (int) (v * getResources().getDisplayMetrics().density + 0.5f); }
+
+    // v470: height of the system navigation bar (gesture pill / button bar) in px, so scrollable
+    // content can pad past it. Falls back to a sensible default if the resource isn't found.
+    private int navBarInsetPx() {
+        try {
+            int resId = getResources().getIdentifier("navigation_bar_height", "dimen", "android");
+            if (resId > 0) {
+                int h = getResources().getDimensionPixelSize(resId);
+                if (h > 0) return h;
+            }
+        } catch (Exception ignored) {}
+        return dp(24);
+    }
     private float dp(float v) { return v * getResources().getDisplayMetrics().density; }
 
     // ── Ripple helpers ──────────────────────────────────────────────────────────────────────────
@@ -18804,6 +18817,38 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
     private long lastTileRefreshRequestMs = 0;
     private long firstPendingTileRefreshMs = 0; // v463: start of the current pending burst
     private int lastRenderedSlateDay = Integer.MIN_VALUE; // v463: which day lastRenderedSlate is for
+    // v470: (re)fill a slate card's edge row from the current cached edge — used both when first
+    // building the card and when the edge load lands (in place, no slate rebuild).
+    private void populateSlateEdgeRow(LinearLayout eRow, LiveGame game) {
+        if (eRow == null) return;
+        eRow.removeAllViews();
+        LiveMatchupEdgePreview edge = liveGameEdgePreview(game);
+        TextView edgeLabel = text(edge != null && edge.available ? "Game edge" : "Pregame edge", 9,
+                edge != null && edge.available ? Color.argb(232, 247, 249, 252) : INK_DIM, true);
+        edgeLabel.setSingleLine(true);
+        edgeLabel.setEllipsize(TextUtils.TruncateAt.END);
+        eRow.addView(edgeLabel, new LinearLayout.LayoutParams(0, -2, 1));
+        if (edge != null && edge.available && !safe(edge.chip).isEmpty()) {
+            eRow.addView(gameEdgeChipView(edge.chip, edge.accent));
+        }
+    }
+
+    // v470: update ONLY the given game's edge row on the visible slate — find it by tag and refill it.
+    // This replaces the old full-slate teardown/rebuild on every edge completion, which was the root
+    // cause of the matchups screen being slow, flashing, and jumping while scrolling. Returns true if
+    // the row was found and updated.
+    private boolean updateSlateCardEdgeInPlace(LiveGame game) {
+        if (game == null || standingsBox == null) return false;
+        View row = standingsBox.findViewWithTag("slate_edge_row_" + liveEdgeBaseKey(game));
+        if (!(row instanceof LinearLayout)) return false;
+        final LinearLayout eRow = (LinearLayout) row;
+        // gentle fade so the chip appears rather than snapping
+        populateSlateEdgeRow(eRow, game);
+        eRow.setAlpha(0.35f);
+        eRow.animate().alpha(1f).setDuration(220).start();
+        return true;
+    }
+
     private void refreshVisibleGameTiles() {
         // v463: coalesce slate re-renders, but render PROGRESSIVELY during a burst rather than only
         // after it fully settles. v462's pure trailing debounce reset the timer on every completion, and
@@ -19046,19 +19091,12 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
 
     if (game.isPregame()) {
         scheduleSlateGameEdgePreviewLoad(game, slateIndex);
-        LiveMatchupEdgePreview edge = liveGameEdgePreview(game);
         LinearLayout eRow = new LinearLayout(this);
         eRow.setOrientation(LinearLayout.HORIZONTAL);
         eRow.setGravity(Gravity.CENTER_VERTICAL);
         eRow.setPadding(0, dp(8), 0, 0);
-        TextView edgeLabel = text(edge != null && edge.available ? "Game edge" : "Pregame edge", 9,
-                edge != null && edge.available ? Color.argb(232, 247, 249, 252) : INK_DIM, true);
-        edgeLabel.setSingleLine(true);
-        edgeLabel.setEllipsize(TextUtils.TruncateAt.END);
-        eRow.addView(edgeLabel, new LinearLayout.LayoutParams(0, -2, 1));
-        if (edge != null && edge.available && !safe(edge.chip).isEmpty()) {
-            eRow.addView(gameEdgeChipView(edge.chip, edge.accent));
-        }
+        eRow.setTag("slate_edge_row_" + liveEdgeBaseKey(game)); // v470: target for in-place edge update
+        populateSlateEdgeRow(eRow, game);
         content.addView(eRow, matchWrap());
     }
 
@@ -23948,12 +23986,19 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
 
         if (slide) {
             final int w = host.getWidth() > 0 ? host.getWidth() : getResources().getDisplayMetrics().widthPixels;
+            // Lock the host to the OLD height for the duration so a shorter/taller new card can't collapse
+            // the layout mid-slide (that vertical jump is what read as a "flash" instead of a slide).
+            final int lockedH = host.getHeight();
+            if (lockedH > 0) {
+                ViewGroup.LayoutParams hlp = host.getLayoutParams();
+                hlp.height = lockedH;
+                host.setLayoutParams(hlp);
+            }
             newPager.setTranslationX(w);   // start off-screen to the right
             newPager.setAlpha(1f);
             overlay.addView(newPager, new FrameLayout.LayoutParams(-1, -2));
             host.addView(overlay, idx, matchWrap());
             android.view.animation.DecelerateInterpolator di = new android.view.animation.DecelerateInterpolator(1.4f);
-            // old card slides left and fades slightly as it leaves
             oldPager.animate().translationX(-w * 0.32f).alpha(0f).setDuration(300).setInterpolator(di).start();
             newPager.animate().translationX(0f).setDuration(320).setInterpolator(di)
                     .withEndAction(() -> {
@@ -23962,6 +24007,10 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                         int oi = host.indexOfChild(overlay);
                         if (oi >= 0) { host.removeView(overlay); host.addView(newPager, oi, matchWrap()); }
                         else host.addView(newPager, matchWrap());
+                        // release the height lock back to wrap-content
+                        ViewGroup.LayoutParams hlp2 = host.getLayoutParams();
+                        hlp2.height = ViewGroup.LayoutParams.WRAP_CONTENT;
+                        host.setLayoutParams(hlp2);
                     }).start();
             return;
         }
@@ -26133,7 +26182,9 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
 
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(0, dp(2), 0, dp(12));
+        // v470: extra bottom padding so the last context cards (Run Value / Plate Discipline carousel)
+        // clear the Android gesture/navigation bar instead of being tucked under it.
+        panel.setPadding(0, dp(2), 0, dp(12) + navBarInsetPx());
         panel.setBackground(roundedGradientStroke(
                 guardedDuelGradient(awayPalette, homePalette, true),
                 22,
@@ -26979,9 +27030,11 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
             renderLiveGameMenu(targetGame);
             if (mainScroll != null) mainScroll.post(() -> mainScroll.scrollTo(0, keepY));
         }
-        // v346: slate cards can also show the pregame Game Edge, so refresh the visible slate
-        // after previews land. This is throttled and only runs when the slate is visible.
-        refreshVisibleGameTiles();
+        // v470: update ONLY this game's edge row in place — no full slate teardown. Falls back to the
+        // throttled full refresh only if the card isn't currently on screen (e.g. just mounted).
+        if (!updateSlateCardEdgeInPlace(targetGame)) {
+            refreshVisibleGameTiles();
+        }
     }
 
     private HeadToHeadComparison buildLiveTeamPreviewComparison(Team a, Team b, int season, String mode) throws Exception {
