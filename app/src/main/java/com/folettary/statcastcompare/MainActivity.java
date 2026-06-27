@@ -888,7 +888,7 @@ public class MainActivity extends Activity {
         helpBtn.setOnClickListener(v -> showOnboardingGuide(false));
         appBar.addView(helpBtn, helpLp);
 
-        TextView versionBadge = text("v467", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v468", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -30416,7 +30416,12 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
 
     private String bullpenSeasonEndDate(int season) {
         int current = Calendar.getInstance().get(Calendar.YEAR);
-        if (season >= current) return scheduleDate(addDays(new Date(), -1));
+        // v468: end the window at TODAY, not yesterday. Yesterday's games were missing entirely from
+        // the grid (whole 6/26 column blank for both teams) because the window ended at yesterday and a
+        // late west-coast game (Dodgers/Padres) can land on the date boundary and fall just outside it.
+        // The completed-game status filter still excludes anything unfinished, so including today is safe
+        // and guarantees yesterday is always inside the range.
+        if (season >= current) return scheduleDate(new Date());
         return "11/15/" + season;
     }
 
@@ -30599,8 +30604,8 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
         if (report == null || team == null || team.id <= 0) return;
         try {
             Date now = new Date();
-            String start = scheduleDate(addDays(now, -4));
-            String end = scheduleDate(addDays(now, -1));
+            String start = scheduleDate(addDays(now, -6));
+            String end = scheduleDate(now);
             String url = "https://statsapi.mlb.com/api/v1/schedule?sportId=1&teamId=" + team.id
                     + "&startDate=" + URLEncoder.encode(start, "UTF-8")
                     + "&endDate=" + URLEncoder.encode(end, "UTF-8");
@@ -30612,7 +30617,9 @@ private LinearLayout liveScoreColumn(String abbr, String pitcher, String score, 
                 if (dateObj == null) continue;
                 String dateKey = safe(dateObj.optString("date", ""));
                 int daysAgo = daysAgoFromDateKey(dateKey);
-                if (daysAgo < 1 || daysAgo > 3) continue;
+                // v468: cover the full 5-day grid (was 1-3, which silently dropped days 4-5) and don't
+                // exclude yesterday at the date boundary (end now runs through today).
+                if (daysAgo < 1 || daysAgo > 5) continue;
                 JSONArray games = dateObj.optJSONArray("games");
                 if (games == null) continue;
                 for (int i = 0; i < games.length(); i++) {
