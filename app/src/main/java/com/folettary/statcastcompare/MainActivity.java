@@ -618,14 +618,33 @@ public class MainActivity extends Activity {
         setPrimaryTab(TAB_HOME);
         loadTeamsAndPlayers();
         fetchTodayGames();
+        seedDefaultFavoriteOnce(); // v469: Padres as a default favorite (one-time, before onboarding)
         // v466: first-launch newcomer guide (once). Posted so it overlays after the first frame.
         root.post(() -> { if (!hasSeenOnboarding()) showOnboardingGuide(true); });
+    }
+
+    // v469: on the very first launch, seed the San Diego Padres (team 135) as a default favorite.
+    // Guarded by its own flag so it runs exactly once — if the user later removes the Padres, we don't
+    // keep re-adding them, and we never touch favorites they've already chosen.
+    private void seedDefaultFavoriteOnce() {
+        SharedPreferences prefs = getSharedPreferences(PREFS_FAVORITES, MODE_PRIVATE);
+        if (prefs.getBoolean("seeded_default_fav_v1", false)) return;
+        prefs.edit().putBoolean("seeded_default_fav_v1", true).apply();
+        if (isFavoriteTeam(135)) return;            // already a favorite somehow → leave as-is
+        // write into the first empty favorite slot
+        for (int i = 0; i < MAX_FAVORITES; i++) {
+            if (prefs.getString("ftid_" + i, null) == null) {
+                prefs.edit().putString("ftid_" + i, "135").putString("ftname_" + i, "Padres").apply();
+                break;
+            }
+        }
     }
 
     @Override
     protected void onPause() {
         super.onPause();
         stopLiveTrackerPolling(); // v273: don't poll the live feed while backgrounded
+        stopSlatePolling();       // v469: and stop the slate auto-refresh while backgrounded
     }
 
     @Override
@@ -652,6 +671,7 @@ public class MainActivity extends Activity {
         } else if (activePrimaryTab == TAB_MATCHUP && activeLiveGameMenu == null
                 && standingsBox != null && standingsBox.getVisibility() == View.VISIBLE) {
             renderLiveMatchupsPanel();
+            startSlatePolling(); // v469: resume slate auto-refresh
         }
     }
 
@@ -888,7 +908,7 @@ public class MainActivity extends Activity {
         helpBtn.setOnClickListener(v -> showOnboardingGuide(false));
         appBar.addView(helpBtn, helpLp);
 
-        TextView versionBadge = text("v468", 9, Color.argb(150, 213, 238, 236), true);
+        TextView versionBadge = text("v469", 9, Color.argb(150, 213, 238, 236), true);
         versionBadge.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         appBar.addView(versionBadge);
 
@@ -1354,6 +1374,7 @@ public class MainActivity extends Activity {
         if (standingsBox != null) standingsBox.removeAllViews();
         renderLiveMatchupsPanel();
         if (mainScroll != null) mainScroll.post(() -> mainScroll.scrollTo(0, 0));
+        startSlatePolling(); // v469: auto-refresh the slate to catch games starting/ending
     }
 
     private void openCreateMatchupPath() {
@@ -18604,6 +18625,13 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
 
     private void renderLiveMatchupGames(ArrayList<LiveGame> games) {
         if (standingsBox == null || activePrimaryTab != TAB_MATCHUP || matchupPathMode != MATCHUP_PATH_LIVE || matchupResultMode) return;
+        // v469: this method is called repeatedly as edge previews stream in (progressive refresh), and
+        // it tears down + rebuilds the whole slate each time. Without preserving scroll, every edge that
+        // landed yanked the user back to the top while they were scrolling — the "popping" bug. Capture
+        // the current scroll and restore it after the rebuild, unless this is the first paint of a new
+        // slate (then top is correct).
+        final boolean sameSlateRepaint = ((lastRenderedSlate == games) || slatePollSilentRepaint) && standingsBox.getChildCount() > 0;
+        final int keepScrollY = (mainScroll != null && sameSlateRepaint) ? mainScroll.getScrollY() : 0;
         lastRenderedSlate = games;
         standingsBox.removeAllViews();
 
@@ -18701,6 +18729,9 @@ private FrameLayout buildLiveLogoDuelShell(Team away, Team home, TeamPalette awa
         }
 
         standingsBox.addView(panel, panelLp);
+        if (keepScrollY > 0 && mainScroll != null) {
+            mainScroll.post(() -> mainScroll.scrollTo(0, keepScrollY));
+        }
     }
 
     private void renderLiveMatchupError(String message) {
@@ -20366,7 +20397,10 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
                         // pitch→result handoff is continuous, never an instant flash.
                         boolean premiumSwap = batterChanged || resultAppeared || resolvedNow || terminalPitch;
                         if (premiumSwap) {
-                            swapTrackerPager(host, newPager, true);
+                            // v469: a NEW at-bat (batter change) slides like a deck of cards — old card
+                            // out left, new in from the right — matching the swipe-back gesture. A result
+                            // or terminal pitch within the same AB keeps the soft crossfade handoff.
+                            swapTrackerPager(host, newPager, true, batterChanged);
                         } else {
                             // ordinary in-AB update (a normal ball/strike): a quick, soft crossfade so
                             // each pitch eases in rather than snapping — removes per-poll abruptness
@@ -20436,6 +20470,51 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
         awaitingAbResult = false;
         awaitingAbNumber = -1;
         main.removeCallbacks(liveTrackerPollRunnable);
+    }
+
+    // v469: while sitting on the live matchups LIST, re-fetch the slate every 45s so a game that
+    // starts (pregame → live) or ends (live → final) updates on its own — previously you had to leave
+    // and return (or restart) for the status to change. Only runs on the list view; stops when you
+    // open a game, switch tabs, or background the app.
+    private boolean slatePolling = false;
+    private boolean slatePollSilentRepaint = false; // v469: preserve scroll during background slate refresh
+    private final Runnable slatePollRunnable = new Runnable() {
+        @Override public void run() {
+            if (!slatePolling) return;
+            boolean onList = activePrimaryTab == TAB_MATCHUP && activeLiveGameMenu == null
+                    && matchupPathMode == MATCHUP_PATH_LIVE && !matchupResultMode
+                    && standingsBox != null && standingsBox.getVisibility() == View.VISIBLE;
+            if (!onList) { slatePolling = false; return; }
+            // SILENT refresh: re-fetch the day's games on the background pool and re-render in place
+            // (scroll preserved by renderLiveMatchupGames). No loading teardown, so the list doesn't
+            // flash every cycle — a game that flipped pregame→live just updates.
+            final int fetchForDay = liveDayOffset;
+            fanout.execute(() -> {
+                try {
+                    ArrayList<LiveGame> games = fetchTodayLiveGames();
+                    main.post(() -> {
+                        if (!slatePolling || liveDayOffset != fetchForDay) return;
+                        if (activePrimaryTab == TAB_MATCHUP && activeLiveGameMenu == null
+                                && standingsBox != null && standingsBox.getVisibility() == View.VISIBLE) {
+                            lastRenderedSlateDay = fetchForDay;
+                            slatePollSilentRepaint = true; // preserve scroll across this background refresh
+                            renderLiveMatchupGames(games);
+                            slatePollSilentRepaint = false;
+                        }
+                    });
+                } catch (Exception ignored) { }
+            });
+            main.postDelayed(this, 45000L);
+        }
+    };
+    private void startSlatePolling() {
+        slatePolling = true;
+        main.removeCallbacks(slatePollRunnable);
+        main.postDelayed(slatePollRunnable, 45000L);
+    }
+    private void stopSlatePolling() {
+        slatePolling = false;
+        main.removeCallbacks(slatePollRunnable);
     }
 
     // v444: a polished loading placeholder shown the instant you enter the live feed, so there's never
@@ -23843,6 +23922,13 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
     }
 
     private void swapTrackerPager(LinearLayout host, View newPager, boolean animate) {
+        swapTrackerPager(host, newPager, animate, false);
+    }
+
+    // v469: slide==true gives the "deck of cards" AB transition — the current card slides out to the
+    // left while the new at-bat slides in from the right, matching the direction of the swipe-back
+    // gesture used to revisit previous at-bats. slide==false keeps the soft crossfade for in-AB updates.
+    private void swapTrackerPager(LinearLayout host, View newPager, boolean animate, boolean slide) {
         if (host == null || newPager == null) return;
         if (!animate || host.getChildCount() == 0) {
             host.removeAllViews();
@@ -23855,15 +23941,32 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
             host.addView(newPager, matchWrap());
             return;
         }
-        // v449: TRUE CROSSFADE — the new pager fades in while the old is still visible, so the screen
-        // never goes blank between them (the old code faded the old fully OUT first, leaving a blank
-        // gap = the "everything disappears then re-renders" the user saw). We overlay both in a
-        // temporary FrameLayout: old underneath at full alpha fading out, new on top fading in. Once
-        // done, the new pager is reparented back into the host and the temp frame discarded.
         int idx = host.indexOfChild(oldPager);
-        FrameLayout overlay = new FrameLayout(this);
+        final FrameLayout overlay = new FrameLayout(this);
         host.removeView(oldPager);
         overlay.addView(oldPager, new FrameLayout.LayoutParams(-1, -2));
+
+        if (slide) {
+            final int w = host.getWidth() > 0 ? host.getWidth() : getResources().getDisplayMetrics().widthPixels;
+            newPager.setTranslationX(w);   // start off-screen to the right
+            newPager.setAlpha(1f);
+            overlay.addView(newPager, new FrameLayout.LayoutParams(-1, -2));
+            host.addView(overlay, idx, matchWrap());
+            android.view.animation.DecelerateInterpolator di = new android.view.animation.DecelerateInterpolator(1.4f);
+            // old card slides left and fades slightly as it leaves
+            oldPager.animate().translationX(-w * 0.32f).alpha(0f).setDuration(300).setInterpolator(di).start();
+            newPager.animate().translationX(0f).setDuration(320).setInterpolator(di)
+                    .withEndAction(() -> {
+                        overlay.removeView(newPager);
+                        newPager.setTranslationX(0f); newPager.setAlpha(1f);
+                        int oi = host.indexOfChild(overlay);
+                        if (oi >= 0) { host.removeView(overlay); host.addView(newPager, oi, matchWrap()); }
+                        else host.addView(newPager, matchWrap());
+                    }).start();
+            return;
+        }
+
+        // v449: TRUE CROSSFADE for ordinary in-AB updates — new fades in over old, no blank gap.
         newPager.setAlpha(0f);
         overlay.addView(newPager, new FrameLayout.LayoutParams(-1, -2));
         host.addView(overlay, idx, matchWrap());
@@ -24339,7 +24442,7 @@ private View liveGameCard(LiveGame game, int slateIndex, boolean favorite) {
         nameT.setGravity(Gravity.CENTER); nameT.setSingleLine(true);
         col.addView(nameT, matchWrap());
         if (!safe(subtitle).isEmpty()) {
-            TextView sub = text(subtitle, 7, INK_DIM, true);
+            TextView sub = text(subtitle, 10, INK_DIM, true); // v469: larger pitch count / B-S split
             sub.setGravity(Gravity.CENTER); sub.setSingleLine(true);
             sub.setTag("portrait_subtitle"); // v455: refreshable in place (pitch count updates each pitch)
             col.addView(sub, matchWrap());
